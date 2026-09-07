@@ -215,8 +215,7 @@ class MainActivity : AppCompatActivity() {
             if (!root.exists()) root.mkdirs()
             File(root, "vitastation-session-diagnostics.log").appendText(
                 "short-session titleId=$titleId elapsedMs=$elapsedMs " +
-                    "device=${Build.MANUFACTURER}/${Build.MODEL} sdk=${Build.VERSION.SDK_INT}
-"
+                    "device=${Build.MANUFACTURER}/${Build.MODEL} sdk=${Build.VERSION.SDK_INT}\n"
             )
         }
     }

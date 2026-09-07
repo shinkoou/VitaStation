@@ -1756,13 +1756,10 @@ private fun FrameGenerationFoundationBlock(
     ) {
         FilledTonalButton(
             onClick = {
-                dllPicker.launch(
-                    arrayOf(
-                        "application/octet-stream",
-                        "application/x-msdownload",
-                        "application/vnd.microsoft.portable-executable"
-                    )
-                )
+                // Android document providers do not agree on a MIME type for
+                // Windows DLL files. Accept the document here and validate the
+                // PE "MZ" header in FrameGenerationManager after selection.
+                dllPicker.launch(arrayOf("*/*"))
             },
             enabled = !importing
         ) {

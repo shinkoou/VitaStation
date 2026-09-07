@@ -70,6 +70,7 @@ public class Emulator extends SDLActivity
 {
     private static final String TAG = "Vita3K";
     private static final long IME_RESTORE_DELAY_MS = 250L;
+    private static final long NATIVE_QUIT_FALLBACK_MS = 4000L;
     public static final String EXTRA_TITLE_ID = "title_id";
     public static final String EXTRA_GAME_TITLE = "game_title";
     private static final String APP_RESTART_PARAMETERS = "AppStartParameters";
@@ -104,6 +105,7 @@ public class Emulator extends SDLActivity
     private int lastTextInputType;
     private boolean hasLastTextInputState;
     private ImagePathResultCallback pendingImagePathCallback;
+    private boolean nativeQuitRequested;
 
     public static Intent createLaunchIntent(Context context, String titleId, String gameTitle) {
         Intent intent = new Intent(context, Emulator.class);
@@ -476,13 +478,39 @@ public class Emulator extends SDLActivity
 
     public void requestNativeQuit() {
         runOnUiThread(() -> {
+            if (nativeQuitRequested || isFinishing() || isDestroyed()) {
+                return;
+            }
+
+            nativeQuitRequested = true;
+            releaseControllerOverlayInputs();
+
+            boolean queued = false;
             try {
-                NativeLib.INSTANCE.requestAppQuit();
-            } catch (Throwable ignored) {
+                queued = NativeLib.INSTANCE.requestAppQuit();
+            } catch (Throwable t) {
+                Log.w(TAG, "Unable to queue native app quit", t);
             }
-            if (!isFinishing()) {
-                finish();
+
+            if (!queued) {
+                nativeQuitRequested = false;
+                if (!isFinishing()) {
+                    finish();
+                }
+                return;
             }
+
+            // Do not finish immediately. SDLThread must consume SDL_EVENT_QUIT,
+            // clean the native emulator session, leave SDL_main and finish the
+            // Activity itself. Immediate Java teardown races native renderer
+            // cleanup on some devices, including the S24 Ultra.
+            final View decorView = getWindow().getDecorView();
+            decorView.postDelayed(() -> {
+                if (!isFinishing() && !isDestroyed()) {
+                    Log.w(TAG, "Native quit timeout; using Activity fallback.");
+                    finish();
+                }
+            }, NATIVE_QUIT_FALLBACK_MS);
         });
     }
 

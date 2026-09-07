@@ -33,7 +33,7 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Keep Phase01 viewMode fix
+      - name: Verify Phase01 viewMode fix
         shell: bash
         run: |
           set -euo pipefail
@@ -47,60 +47,17 @@ jobs:
           )
           text = path.read_text(encoding="utf-8")
 
-          already_fixed = (
-              "private var _viewMode by mutableStateOf(loadViewMode())" in text
-              and "val viewMode: ViewMode" in text
-              and "fun setViewMode(mode: ViewMode)" in text
-          )
+          if "private var _viewMode by mutableStateOf(loadViewMode())" not in text:
+              raise SystemExit("Phase01 backing _viewMode state is missing.")
+          if "val viewMode: ViewMode" not in text:
+              raise SystemExit("Phase01 public viewMode getter is missing.")
+          if "fun setViewMode(mode: ViewMode)" not in text:
+              raise SystemExit("Phase01 setViewMode API is missing.")
 
-          if already_fixed:
-              print("Phase01 viewMode fix already present.")
-          else:
-              old_property = """    var viewMode by mutableStateOf(loadViewMode())
-                  private set
-          """
-              new_property = """    private var _viewMode by mutableStateOf(loadViewMode())
-              val viewMode: ViewMode
-                  get() = _viewMode
-          """
-
-              if text.count(old_property) != 1:
-                  raise SystemExit(
-                      "Could not find the expected old viewMode property."
-                  )
-              text = text.replace(old_property, new_property, 1)
-
-              replacements = [
-                  (
-                      "        if (viewMode == mode) return\n",
-                      "        if (_viewMode == mode) return\n",
-                  ),
-                  (
-                      "        viewMode = mode\n",
-                      "        _viewMode = mode\n",
-                  ),
-                  (
-                      "        setViewMode(if (viewMode == ViewMode.LIST) ViewMode.GRID else ViewMode.LIST)\n",
-                      "        setViewMode(if (_viewMode == ViewMode.LIST) ViewMode.GRID else ViewMode.LIST)\n",
-                  ),
-              ]
-
-              for old, new in replacements:
-                  if text.count(old) != 1:
-                      raise SystemExit(f"Expected one occurrence of: {old.strip()}")
-                  text = text.replace(old, new, 1)
-
-              path.write_text(text, encoding="utf-8")
-              print("Repaired Phase01 viewMode setter clash.")
-
-          final = path.read_text(encoding="utf-8")
-          if "    var viewMode by mutableStateOf(loadViewMode())" in final:
-              raise SystemExit("Old mutable viewMode property still exists.")
-          if "private var _viewMode by mutableStateOf(loadViewMode())" not in final:
-              raise SystemExit("Backing _viewMode state is missing.")
+          print("Phase01 viewMode fix is present.")
           PY
 
-      - name: Disable Vita3K official updater in VitaStation
+      - name: Finalize VitaStation updater hotfix
         shell: bash
         run: |
           set -euo pipefail
@@ -109,153 +66,112 @@ jobs:
           from pathlib import Path
           import re
 
-          vm = Path(
-              "android/app/src/main/java/org/vita3k/emulator/ui/viewmodel/"
-              "AppsListViewModel.kt"
-          )
-          screen = Path(
-              "android/app/src/main/java/org/vita3k/emulator/ui/screens/"
-              "AppsListScreen.kt"
-          )
+          root = Path("android/app/src/main/java/org/vita3k/emulator")
+
+          screen = root / "ui/screens/AppsListScreen.kt"
+          nav = root / "ui/navigation/AppNavigation.kt"
+          vm = root / "ui/viewmodel/AppsListViewModel.kt"
 
           # --------------------------------------------------------------
-          # 1) Disable startup/manual upstream update checks in ViewModel.
-          # --------------------------------------------------------------
-          text = vm.read_text(encoding="utf-8")
-
-          text = text.replace(
-              "    private var startupUpdateCheckStarted = false\n",
-              "",
-          )
-
-          text = text.replace(
-              "                startUpdateCheckIfEnabled()\n",
-              "",
-          )
-
-          # Replace the full upstream checkForUpdates implementation with
-          # a harmless VitaStation no-op. This prevents any path from
-          # opening Vita3K's official-build update dialog.
-          pattern = re.compile(
-              r"    fun checkForUpdates\(manual: Boolean = true\) \{\n"
-              r".*?"
-              r"(?=    private fun runActionWithProgress)",
-              re.S,
-          )
-          matches = list(pattern.finditer(text))
-          if len(matches) == 1:
-              replacement = (
-                  "    fun checkForUpdates(manual: Boolean = true) {\n"
-                  "        // VitaStation intentionally does not use Vita3K's official updater.\n"
-                  "        // A VitaStation updater will be wired only after its own release channel exists.\n"
-                  "        updateCheckInProgress = false\n"
-                  "        updateCheckResult = null\n"
-                  "    }\n\n"
-              )
-              text = text[:matches[0].start()] + replacement + text[matches[0].end():]
-          elif "VitaStation intentionally does not use Vita3K's official updater." not in text:
-              raise SystemExit(
-                  f"Expected exactly one checkForUpdates implementation, found {len(matches)}."
-              )
-
-          # Remove the startup helper if still present.
-          startup_pattern = re.compile(
-              r"    private fun startUpdateCheckIfEnabled\(\) \{\n"
-              r".*?"
-              r"    \}\n\n"
-              r"(?=    private suspend fun syncCompatibilityDatabase)",
-              re.S,
-          )
-          startup_matches = list(startup_pattern.finditer(text))
-          if len(startup_matches) == 1:
-              text = (
-                  text[:startup_matches[0].start()]
-                  + text[startup_matches[0].end():]
-              )
-          elif len(startup_matches) > 1:
-              raise SystemExit("Found multiple startup update helper blocks.")
-
-          # These imports are no longer needed after disabling the updater.
-          text = text.replace("import org.vita3k.emulator.NativeLib\n", "")
-          text = text.replace(
-              "import org.vita3k.emulator.data.UpdateCheckStatus\n",
-              "",
-          )
-
-          vm.write_text(text, encoding="utf-8")
-
-          # --------------------------------------------------------------
-          # 2) Remove "Check for Updates" from the library overflow menu.
+          # AppsListScreen.kt
           # --------------------------------------------------------------
           text = screen.read_text(encoding="utf-8")
 
+          # Remove any leftover updater icon import.
           text = text.replace(
               "import androidx.compose.material.icons.filled.SystemUpdate\n",
               "",
           )
 
-          call_block = """                                onCheckForUpdates = {
-                                      showOverflowMenu = false
-                                      onCheckForUpdates()
-                                  },
-          """
-          if call_block in text:
-              text = text.replace(call_block, "", 1)
-
+          # Remove BOTH possible function parameters named onCheckForUpdates:
+          # AppsListScreen(...) and AppsListOverflowMenu(...).
           text = text.replace(
               "    onCheckForUpdates: () -> Unit,\n",
               "",
-              1,
           )
 
-          menu_pattern = re.compile(
-              r"            DropdownMenuItem\(\n"
-              r"                text = \{ Text\(stringResource\(R\.string\.apps_list_menu_check_updates\)\) \},\n"
-              r"                leadingIcon = \{\n"
-              r"                    Icon\(\n"
-              r"                        imageVector = Icons\.Default\.SystemUpdate,\n"
-              r"                        contentDescription = null\n"
-              r"                    \)\n"
-              r"                \},\n"
-              r"                onClick = onCheckForUpdates\n"
-              r"            \)\n"
+          # Remove the leftover AppsListOverflowMenu call argument.
+          # Flexible indentation avoids the whitespace bug from FIX1.
+          call_pattern = re.compile(
+              r"(?m)^[ \t]*onCheckForUpdates = \{\n"
+              r"^[ \t]*showOverflowMenu = false\n"
+              r"^[ \t]*onCheckForUpdates\(\)\n"
+              r"^[ \t]*\},\n"
           )
-          menu_matches = list(menu_pattern.finditer(text))
-          if len(menu_matches) == 1:
-              m = menu_matches[0]
-              text = text[:m.start()] + text[m.end():]
-          elif len(menu_matches) > 1:
-              raise SystemExit("Found multiple upstream update menu items.")
-          elif "apps_list_menu_check_updates" in text and "SystemUpdate" in text:
-              raise SystemExit("Updater menu still appears to be present.")
+          text, call_count = call_pattern.subn("", text)
+
+          # Remove the actual "Check for Updates" DropdownMenuItem if it is
+          # still present. It may already be gone from the previous hotfix.
+          menu_pattern = re.compile(
+              r"(?ms)^[ \t]*DropdownMenuItem\(\n"
+              r"[ \t]*text = \{ Text\(stringResource\(R\.string\.apps_list_menu_check_updates\)\) \},\n"
+              r".*?"
+              r"[ \t]*onClick = onCheckForUpdates\n"
+              r"[ \t]*\)\n"
+          )
+          text, menu_count = menu_pattern.subn("", text)
 
           screen.write_text(text, encoding="utf-8")
 
           # --------------------------------------------------------------
-          # Validation
+          # AppNavigation.kt
+          # --------------------------------------------------------------
+          nav_text = nav.read_text(encoding="utf-8")
+
+          nav_line = (
+              "                onCheckForUpdates = "
+              "{ appsListViewModel.checkForUpdates() },\n"
+          )
+          nav_text = nav_text.replace(nav_line, "")
+          nav.write_text(nav_text, encoding="utf-8")
+
+          # --------------------------------------------------------------
+          # Validate ViewModel updater is already neutralized.
           # --------------------------------------------------------------
           vm_text = vm.read_text(encoding="utf-8")
-          screen_text = screen.read_text(encoding="utf-8")
 
           if "startUpdateCheckIfEnabled()" in vm_text:
-              raise SystemExit("Automatic startup updater call still exists.")
+              raise SystemExit(
+                  "Automatic startup updater call still exists in AppsListViewModel."
+              )
           if "private fun startUpdateCheckIfEnabled()" in vm_text:
-              raise SystemExit("Automatic startup updater helper still exists.")
+              raise SystemExit(
+                  "Automatic startup updater helper still exists in AppsListViewModel."
+              )
           if "AppRepository.checkForUpdates(" in vm_text:
-              raise SystemExit("Upstream AppRepository updater call still exists.")
-          if "VitaStation intentionally does not use Vita3K's official updater." not in vm_text:
-              raise SystemExit("VitaStation updater guard is missing.")
-          if "imageVector = Icons.Default.SystemUpdate" in screen_text:
-              raise SystemExit("Official updater menu icon still exists.")
-          if "onClick = onCheckForUpdates" in screen_text:
-              raise SystemExit("Official updater menu action still exists.")
+              raise SystemExit(
+                  "Upstream Vita3K update request still exists in AppsListViewModel."
+              )
 
-          print("Vita3K official updater disabled for VitaStation.")
+          # --------------------------------------------------------------
+          # Final compile-safety validation.
+          # --------------------------------------------------------------
+          final_screen = screen.read_text(encoding="utf-8")
+          final_nav = nav.read_text(encoding="utf-8")
+
+          if "onCheckForUpdates" in final_screen:
+              raise SystemExit(
+                  "AppsListScreen still contains an onCheckForUpdates reference."
+              )
+          if "onCheckForUpdates =" in final_nav:
+              raise SystemExit(
+                  "AppNavigation still passes onCheckForUpdates."
+              )
+          if "Icons.Default.SystemUpdate" in final_screen:
+              raise SystemExit("Updater icon reference still exists.")
+          if "apps_list_menu_check_updates" in final_screen:
+              raise SystemExit("Updater menu item still exists.")
+
+          print(
+              "Updater wiring finalized. "
+              f"Removed call blocks: {call_count}; menu blocks: {menu_count}."
+          )
+          print("Compile-safety validation passed.")
           PY
 
           git diff --check
 
-      - name: Persist VitaStation updater hotfix
+      - name: Persist updater compile fix
         shell: bash
         run: |
           set -euo pipefail
@@ -264,13 +180,13 @@ jobs:
           git config user.email "actions@users.noreply.github.com"
 
           git add \
-            android/app/src/main/java/org/vita3k/emulator/ui/viewmodel/AppsListViewModel.kt \
-            android/app/src/main/java/org/vita3k/emulator/ui/screens/AppsListScreen.kt
+            android/app/src/main/java/org/vita3k/emulator/ui/screens/AppsListScreen.kt \
+            android/app/src/main/java/org/vita3k/emulator/ui/navigation/AppNavigation.kt
 
           if git diff --cached --quiet; then
-            echo "Updater hotfix already committed."
+            echo "Updater compile fix already committed."
           else
-            git commit -m "VitaStation: disable upstream official updater"
+            git commit -m "VitaStation: finish updater removal wiring"
             git push origin HEAD:main
           fi
 
@@ -315,12 +231,12 @@ jobs:
           set -euo pipefail
           test -f artifacts/vitastation-android/app.apk
           mv artifacts/vitastation-android/app.apk \
-            artifacts/vitastation-android/VitaStation-v0.1.0-Phase01-Hotfix1.apk
+            artifacts/vitastation-android/VitaStation-v0.1.0-Phase01-Hotfix1-FIX2.apk
           ls -lh artifacts/vitastation-android/
 
       - name: Upload VitaStation APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.1.0-Phase01-Hotfix1-Android
-          path: artifacts/vitastation-android/VitaStation-v0.1.0-Phase01-Hotfix1.apk
+          name: VitaStation-v0.1.0-Phase01-Hotfix1-FIX2-Android
+          path: artifacts/vitastation-android/VitaStation-v0.1.0-Phase01-Hotfix1-FIX2.apk
           if-no-files-found: error

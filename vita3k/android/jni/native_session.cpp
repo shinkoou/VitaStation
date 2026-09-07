@@ -147,6 +147,16 @@ Java_org_vita3k_emulator_NativeLib_getRunningAppTitle(JNIEnv *env, jclass) {
     return env->NewStringUTF(emuenv->current_app_title.c_str());
 }
 
+JNIEXPORT jint JNICALL
+Java_org_vita3k_emulator_NativeLib_getCurrentFps(JNIEnv *, jclass) {
+    auto *emuenv = get_emuenv();
+    auto *controller = get_app_session_controller();
+    if (!emuenv || !controller || !controller->is_running())
+        return 0;
+
+    return static_cast<jint>(emuenv->fps);
+}
+
 JNIEXPORT jboolean JNICALL
 Java_org_vita3k_emulator_NativeLib_isImeActive(JNIEnv *, jclass) {
     auto *emuenv = get_emuenv();

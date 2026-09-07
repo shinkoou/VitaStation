@@ -22,12 +22,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -36,6 +38,7 @@ import org.vita3k.emulator.ConnectedGamepad
 import org.vita3k.emulator.data.CustomDriverLoadStatus
 import org.vita3k.emulator.data.EmulatorConfig
 import org.vita3k.emulator.data.FirmwareLinks
+import org.vita3k.emulator.data.PerformanceHudPrefs
 import org.vita3k.emulator.data.UiLanguages
 import org.vita3k.emulator.overlay.OverlayConfig
 import kotlin.math.roundToInt
@@ -1474,16 +1477,22 @@ private fun InterfaceSettingsSection(
         onShowHelp = onShowHelp
     ) {
         SettingsSubsectionTitle(title = stringResource(R.string.settings_interface_ui_options))
+        val context = LocalContext.current
         val uiLanguageTitle = stringResource(R.string.settings_emulator_ui_language)
         val uiLanguageOptions = UiLanguages.options
-        val uiLanguageIndex = uiLanguageOptions.indexOfFirst { it.tag == cfg.userLang }.let { index ->
+        var uiLanguageTag by remember { mutableStateOf(UiLanguages.currentTag(context)) }
+        val uiLanguageIndex = uiLanguageOptions.indexOfFirst { it.tag == uiLanguageTag }.let { index ->
             if (index >= 0) index else 0
         }
         SettingsScrollableChoiceField(
             title = uiLanguageTitle,
             options = uiLanguageOptions.map { it.label },
             selectedIndex = uiLanguageIndex,
-            onSelect = { index -> onUpdate { userLang = uiLanguageOptions[index].tag } },
+            onSelect = { index ->
+                val tag = uiLanguageOptions[index].tag
+                uiLanguageTag = tag
+                UiLanguages.applyAndPersist(context, tag)
+            },
             help = SettingsHelpEntry(
                 title = uiLanguageTitle,
                 body = stringResource(R.string.settings_emulator_ui_language_desc),
@@ -1739,6 +1748,69 @@ private fun EmulatorSettingsSection(
                     onShowHelp = onShowHelp
                 )
             }
+        }
+    }
+
+
+    if (!isPerApp) {
+        val hudContext = LocalContext.current
+        var hudFps by remember { mutableStateOf(PerformanceHudPrefs.get(hudContext, PerformanceHudPrefs.KEY_FPS)) }
+        var hudRam by remember { mutableStateOf(PerformanceHudPrefs.get(hudContext, PerformanceHudPrefs.KEY_RAM)) }
+        var hudCpu by remember { mutableStateOf(PerformanceHudPrefs.get(hudContext, PerformanceHudPrefs.KEY_CPU)) }
+        var hudGpu by remember { mutableStateOf(PerformanceHudPrefs.get(hudContext, PerformanceHudPrefs.KEY_GPU)) }
+        var hudBattery by remember { mutableStateOf(PerformanceHudPrefs.get(hudContext, PerformanceHudPrefs.KEY_BATTERY)) }
+
+        SettingsSectionCard(
+            title = stringResource(R.string.vitastation_hud_metrics),
+            summary = stringResource(R.string.vitastation_hud_metrics_desc),
+            help = null,
+            onShowHelp = onShowHelp
+        ) {
+            SettingsToggleRow(
+                title = stringResource(R.string.vitastation_hud_fps),
+                checked = hudFps,
+                onCheckedChange = {
+                    hudFps = it
+                    PerformanceHudPrefs.set(hudContext, PerformanceHudPrefs.KEY_FPS, it)
+                },
+                onShowHelp = onShowHelp
+            )
+            SettingsToggleRow(
+                title = stringResource(R.string.vitastation_hud_ram),
+                checked = hudRam,
+                onCheckedChange = {
+                    hudRam = it
+                    PerformanceHudPrefs.set(hudContext, PerformanceHudPrefs.KEY_RAM, it)
+                },
+                onShowHelp = onShowHelp
+            )
+            SettingsToggleRow(
+                title = stringResource(R.string.vitastation_hud_cpu),
+                checked = hudCpu,
+                onCheckedChange = {
+                    hudCpu = it
+                    PerformanceHudPrefs.set(hudContext, PerformanceHudPrefs.KEY_CPU, it)
+                },
+                onShowHelp = onShowHelp
+            )
+            SettingsToggleRow(
+                title = stringResource(R.string.vitastation_hud_gpu),
+                checked = hudGpu,
+                onCheckedChange = {
+                    hudGpu = it
+                    PerformanceHudPrefs.set(hudContext, PerformanceHudPrefs.KEY_GPU, it)
+                },
+                onShowHelp = onShowHelp
+            )
+            SettingsToggleRow(
+                title = stringResource(R.string.vitastation_hud_battery),
+                checked = hudBattery,
+                onCheckedChange = {
+                    hudBattery = it
+                    PerformanceHudPrefs.set(hudContext, PerformanceHudPrefs.KEY_BATTERY, it)
+                },
+                onShowHelp = onShowHelp
+            )
         }
     }
 }

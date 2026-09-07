@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VitaStation</string>
+    <string name="apps_list_app_title">VitaStation</string>
+    <string name="apps_list_cd_search">Pesquisar</string>
+    <string name="apps_list_cd_install">Instalar conteúdo</string>
+    <string name="apps_list_cd_refresh">Atualizar biblioteca</string>
+    <string name="filter_view_list">Lista</string>
+    <string name="filter_view_grid">Grid</string>
+    <string name="filter_cd_open">Filtros</string>
+    <string name="settings_cd_open">Configurações</string>
+
+    <string name="vitastation_nav_library">Biblioteca</string>
+    <string name="vitastation_nav_settings">Configurações</string>
+
+    <string name="initial_setup_welcome_title">Bem-vindo ao VitaStation</string>
+    <string name="initial_setup_welcome_body">O VitaStation é um emulador de PlayStation Vita focado em Android, baseado no Vita3K-Plus e Vita3K, com foco em interface moderna, desempenho e compatibilidade.</string>
+    <string name="initial_setup_back">Voltar</string>
+    <string name="initial_setup_next">Próximo</string>
+    <string name="initial_setup_open_library">Abrir Biblioteca</string>
+    <string name="initial_setup_firmware_title">Instalar firmware</string>
+    <string name="initial_setup_firmware_body">Para começar, instale os arquivos de firmware do PS Vita abaixo.</string>
+    <string name="initial_setup_preinstall_title">Pacote de pré-instalação</string>
+    <string name="initial_setup_main_title">Firmware principal</string>
+    <string name="initial_setup_font_title">Pacote de fontes</string>
+    <string name="initial_setup_download">Baixar</string>
+    <string name="initial_setup_install_pup">Instalar</string>
+    <string name="initial_setup_select_firmware_language">Selecionar idioma do firmware</string>
+    <string name="initial_setup_status_optional">Opcional</string>
+    <string name="initial_setup_status_missing">Ausente</string>
+    <string name="initial_setup_status_installed">Instalado</string>
+    <string name="initial_setup_piracy_notice">O VitaStation não apoia pirataria. Use dumps dos seus próprios jogos.</string>
+
+    <string name="settings_tab_core">Núcleo</string>
+    <string name="settings_tab_cpu">CPU</string>
+    <string name="settings_tab_gpu">Gráficos</string>
+    <string name="settings_tab_audio">Áudio</string>
+    <string name="settings_tab_camera">Câmera</string>
+    <string name="settings_tab_system">Sistema</string>
+    <string name="settings_tab_controls">Controles</string>
+    <string name="settings_tab_interface">Interface</string>
+    <string name="settings_tab_emulator">Emulador</string>
+    <string name="settings_tab_network">Rede</string>
+    <string name="settings_tab_debug">Avançado</string>
+    <string name="settings_scope_global">Global</string>
+    <string name="settings_scope_per_app">Por jogo</string>
+
+    <string name="settings_interface_ui_options">Interface do VitaStation</string>
+    <string name="settings_emulator_ui_language">Idioma da interface</string>
+    <string name="settings_emulator_ui_language_desc">Escolha o idioma das configurações e da interface do emulador.</string>
+    <string name="settings_emulator_perf_overlay">HUD de desempenho</string>
+    <string name="settings_emulator_perf_overlay_desc">Mostra o HUD de desempenho do VitaStation durante a emulação.</string>
+    <string name="settings_emulator_perf_overlay_detail">Detalhes do HUD</string>
+    <string name="settings_emulator_perf_overlay_detail_desc">Ajusta o nível de detalhes exibido no HUD.</string>
+    <string name="settings_emulator_perf_overlay_position">Posição do HUD</string>
+    <string name="settings_emulator_perf_overlay_position_desc">Escolha a posição do HUD na tela.</string>
+    <string name="settings_emulator_display_overlay">Tela e sobreposição</string>
+    <string name="settings_emulator_behavior">Comportamento</string>
+    <string name="settings_emulator_texture_cache">Cache de texturas</string>
+    <string name="settings_emulator_show_compile_shaders">Mostrar compilação de shaders</string>
+    <string name="settings_emulator_check_updates">Verificar atualizações</string>
+    <string name="settings_emulator_check_updates_check">Verificar</string>
+    <string name="settings_emulator_check_updates_dont_check">Não verificar</string>
+    <string name="settings_emulator_archive_log">Arquivar log</string>
+    <string name="settings_emulator_log_level">Nível do log</string>
+    <string name="settings_emulator_screenshot_format">Formato da captura de tela</string>
+    <string name="settings_emulator_stretch_display">Esticar imagem</string>
+    <string name="settings_emulator_pixel_perfect">Pixel perfeito</string>
+
+    <string name="settings_opt_minimum">Mínimo</string>
+    <string name="settings_opt_low">Baixo</string>
+    <string name="settings_opt_medium">Médio</string>
+    <string name="settings_opt_maximum">Máximo</string>
+    <string name="settings_opt_top_left">Superior esquerdo</string>
+    <string name="settings_opt_top_center">Superior central</string>
+    <string name="settings_opt_top_right">Superior direito</string>
+    <string name="settings_opt_bottom_left">Inferior esquerdo</string>
+    <string name="settings_opt_bottom_center">Inferior central</string>
+    <string name="settings_opt_bottom_right">Inferior direito</string>
+
+    <string name="vitastation_hud_metrics">Métricas do HUD VitaStation</string>
+    <string name="vitastation_hud_metrics_desc">Escolha quais informações aparecem durante a emulação.</string>
+    <string name="vitastation_hud_fps">FPS</string>
+    <string name="vitastation_hud_ram">RAM (consumo)</string>
+    <string name="vitastation_hud_cpu">CPU (uso)</string>
+    <string name="vitastation_hud_gpu">GPU (uso)</string>
+    <string name="vitastation_hud_battery">T. BATT (°C)</string>
+
+    <string name="action_reset">Redefinir</string>
+    <string name="action_cancel">Cancelar</string>
+    <string name="action_confirm">Confirmar</string>
+    <string name="action_close">Fechar</string>
+</resources>

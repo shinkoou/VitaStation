@@ -70,9 +70,9 @@ import org.vita3k.emulator.ui.components.HtmlText
 private const val INITIAL_SETUP_INFO_HTML =
     """<div align="center">To get started, please install all PS Vita firmware files.<br><br>A comprehensive guide is available on the <a href="https://vita3k.org/quickstart.html">Quickstart</a> page.<br>Check the <a href="https://vita3k.org/compatibility.html">commercial</a> and <a href="https://vita3k.org/compatibility-homebrew.html">homebrew</a> compatibility lists to see what currently runs.<br><br>Contributions are welcome on <a href="https://github.com/Vita3K/Vita3K">GitHub</a>, and additional help is available on <a href="https://discord.gg/6aGwQzh">Discord</a>.</div>"""
 
-private val setupPanelColor = Color(0xFF1F1D1C)
-private val setupCardColor = Color(0xFF2B2B2B)
-private val setupTextColor = Color(0xFFF7F3EC)
+private val setupPanelColor = Color(0xE60B1020)
+private val setupCardColor = Color(0xFF11182A)
+private val setupTextColor = Color(0xFFF7FAFF)
 
 @Composable
 fun InitialSetupScreen(
@@ -237,11 +237,12 @@ private fun WelcomePage() {
             verticalArrangement = Arrangement.Center
         ) {
             Image(
-                painter = painterResource(id = R.mipmap.ic_launcher),
+                painter = painterResource(id = R.drawable.vitastation_icon),
                 contentDescription = stringResource(R.string.apps_list_app_title),
                 modifier = Modifier
-                    .size(112.dp)
-                    .alpha(0.96f)
+                    .size(148.dp)
+                    .clip(RoundedCornerShape(34.dp))
+                    .alpha(1f)
             )
 
             Spacer(modifier = Modifier.height(20.dp))

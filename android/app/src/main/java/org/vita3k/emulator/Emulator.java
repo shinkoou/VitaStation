@@ -59,6 +59,7 @@ import org.vita3k.emulator.overlay.InputOverlay;
 import org.vita3k.emulator.overlay.OverlayLayout;
 import org.vita3k.emulator.overlay.OverlayStore;
 import org.vita3k.emulator.ui.screens.emulation.NativeImeOverlayHost;
+import org.vita3k.emulator.ui.screens.emulation.PerformanceHudView;
 import org.vita3k.emulator.ui.screens.emulation.EmulationPauseMenuHost;
 import org.vita3k.emulator.ui.viewmodel.EmulationSessionViewModel;
 import org.vita3k.emulator.ui.viewmodel.SettingsViewModel;
@@ -86,6 +87,7 @@ public class Emulator extends SDLActivity
     private EmuSurface mSurface;
     private ComposeView imeOverlayView;
     private ComposeView pauseMenuView;
+    private PerformanceHudView performanceHudView;
     private EmulationSessionViewModel sessionViewModel;
     private SettingsViewModel pauseSettingsViewModel;
     private SettingsViewModel pauseGlobalSettingsViewModel;
@@ -225,8 +227,25 @@ public class Emulator extends SDLActivity
         syncOverlayFromSession();
         installImeOverlay();
         installPauseMenu();
+        installPerformanceHud();
         installKeyboardVisibilityListener();
         refreshUiState(false);
+    }
+
+    private void installPerformanceHud() {
+        try {
+            performanceHudView = new PerformanceHudView(this);
+            android.widget.FrameLayout.LayoutParams params =
+                    new android.widget.FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            android.view.Gravity.TOP);
+            ViewGroup decor = (ViewGroup) getWindow().getDecorView();
+            decor.addView(performanceHudView, params);
+            performanceHudView.bringToFront();
+        } catch (Throwable t) {
+            Log.w(TAG, "Unable to install VitaStation performance HUD", t);
+        }
     }
 
     @Override

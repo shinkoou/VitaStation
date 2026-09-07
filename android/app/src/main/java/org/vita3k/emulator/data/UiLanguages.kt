@@ -10,12 +10,13 @@ data class UiLanguageOption(
 )
 
 object UiLanguages {
-    private const val PREFS_NAME = "vita3k_frontend"
+    private const val PREFS_NAME = "vitastation_frontend"
     private const val PREF_UI_LANGUAGE = "ui_language"
 
     val options: List<UiLanguageOption> = listOf(
-        UiLanguageOption("", "System Default"),
-        UiLanguageOption("en", "English")
+        UiLanguageOption("", "Padrão do sistema"),
+        UiLanguageOption("en", "English"),
+        UiLanguageOption("pt-BR", "Português (Brasil)")
     )
 
     fun currentTag(context: Context): String =

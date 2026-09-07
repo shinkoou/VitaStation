@@ -72,7 +72,12 @@ void State::update_overlays() {
         }
     }
 
-    if (perf_overlay.enabled && perf_overlay.fps > 0) {
+#ifdef __ANDROID__
+    const bool use_legacy_perf_overlay = false;
+#else
+    const bool use_legacy_perf_overlay = true;
+#endif
+    if (use_legacy_perf_overlay && perf_overlay.enabled && perf_overlay.fps > 0) {
         auto perf = overlay_manager->get<overlay::perf_overlay>();
         if (!perf)
             perf = overlay_manager->create<overlay::perf_overlay>();

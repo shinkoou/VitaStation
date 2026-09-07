@@ -137,41 +137,146 @@ fun AppsListScreen(
                         onSearchChanged("")
                     }
                 )
-            } else {
+            } else if (selectionMode) {
                 TopAppBar(
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        titleContentColor = MaterialTheme.colorScheme.onSurface,
-                        actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        navigationIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    ),
                     title = {
-                        if (selectionMode) {
-                            Text(pluralStringResource(R.plurals.apps_list_n_selected, selectedAppIds.size, selectedAppIds.size))
-                        } else {
-                            AppsListTitle(appVersion = appVersion)
-                        }
+                        Text(
+                            pluralStringResource(
+                                R.plurals.apps_list_n_selected,
+                                selectedAppIds.size,
+                                selectedAppIds.size
+                            )
+                        )
                     },
                     navigationIcon = {
-                        if (selectionMode) {
-                            IconButton(onClick = { onSetSelectionMode(false) }) {
-                                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.apps_list_cd_exit_selection))
-                            }
+                        IconButton(onClick = { onSetSelectionMode(false) }) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = stringResource(R.string.apps_list_cd_exit_selection)
+                            )
                         }
                     },
                     actions = {
-                        if (selectionMode) {
-                            IconButton(onClick = onSelectAllVisible) {
-                                Icon(Icons.Default.Check, contentDescription = stringResource(R.string.apps_list_cd_select_all))
-                            }
-                            IconButton(
-                                enabled = selectedAppIds.isNotEmpty(),
-                                onClick = { showBatchDeleteConfirm = true }
+                        IconButton(onClick = onSelectAllVisible) {
+                            Icon(
+                                Icons.Default.Check,
+                                contentDescription = stringResource(R.string.apps_list_cd_select_all)
+                            )
+                        }
+                        IconButton(
+                            enabled = selectedAppIds.isNotEmpty(),
+                            onClick = { showBatchDeleteConfirm = true }
+                        ) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = stringResource(R.string.apps_list_cd_delete_selected)
+                            )
+                        }
+                    }
+                )
+            } else {
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 4.dp
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            Image(
+                                painter = painterResource(R.drawable.vitastation_icon),
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .align(Alignment.CenterStart)
+                                    .size(46.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                            )
+
+                            Column(
+                                modifier = Modifier.align(Alignment.Center),
+                                horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.apps_list_cd_delete_selected))
+                                Text(
+                                    text = "VitaStation",
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "PLAY BEYOND LIMITS",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = appVersion,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
-                        } else {
-                            IconButton(onClick = { onViewModeChanged(ViewMode.LIST) }) {
+
+                            Box(modifier = Modifier.align(Alignment.CenterEnd)) {
+                                AppsListOverflowMenu(
+                                    expanded = showOverflowMenu,
+                                    onExpandedChange = { showOverflowMenu = it },
+                                    onRefresh = {
+                                        showOverflowMenu = false
+                                        onRefresh()
+                                    },
+                                    onTrophyManager = {
+                                        showOverflowMenu = false
+                                        onOpenTrophyManager()
+                                    },
+                                    onUserManagement = {
+                                        showOverflowMenu = false
+                                        onOpenUserManagement()
+                                    },
+                                    onWelcomeScreen = {
+                                        showOverflowMenu = false
+                                        onOpenWelcomeScreen()
+                                    },
+                                    onAbout = {
+                                        showOverflowMenu = false
+                                        showAboutSheet = true
+                                    }
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            FilledTonalButton(
+                                onClick = {},
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.GridView, contentDescription = null)
+                                Spacer(Modifier.width(6.dp))
+                                Text(stringResource(R.string.vitastation_nav_library))
+                            }
+                            OutlinedButton(
+                                onClick = onOpenSettings,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Settings, contentDescription = null)
+                                Spacer(Modifier.width(6.dp))
+                                Text(stringResource(R.string.vitastation_nav_settings))
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedButton(
+                                onClick = { onViewModeChanged(ViewMode.LIST) },
+                                modifier = Modifier.weight(1f)
+                            ) {
                                 Icon(
                                     Icons.AutoMirrored.Filled.List,
                                     contentDescription = stringResource(R.string.filter_view_list),
@@ -180,8 +285,13 @@ fun AppsListScreen(
                                     else
                                         MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                                Spacer(Modifier.width(4.dp))
+                                Text(stringResource(R.string.filter_view_list))
                             }
-                            IconButton(onClick = { onViewModeChanged(ViewMode.GRID) }) {
+                            OutlinedButton(
+                                onClick = { onViewModeChanged(ViewMode.GRID) },
+                                modifier = Modifier.weight(1f)
+                            ) {
                                 Icon(
                                     Icons.Default.GridView,
                                     contentDescription = stringResource(R.string.filter_view_grid),
@@ -190,43 +300,24 @@ fun AppsListScreen(
                                     else
                                         MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                                Spacer(Modifier.width(4.dp))
+                                Text(stringResource(R.string.filter_view_grid))
                             }
                             IconButton(onClick = { showSearchBar = true }) {
-                                Icon(Icons.Default.Search, contentDescription = stringResource(R.string.apps_list_cd_search))
-                            }
-                            IconButton(onClick = onOpenSettings) {
-                                Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.settings_cd_open))
+                                Icon(
+                                    Icons.Default.Search,
+                                    contentDescription = stringResource(R.string.apps_list_cd_search)
+                                )
                             }
                             IconButton(onClick = { showFilterSheet = true }) {
-                                Icon(Icons.Default.FilterList, contentDescription = stringResource(R.string.filter_cd_open))
+                                Icon(
+                                    Icons.Default.FilterList,
+                                    contentDescription = stringResource(R.string.filter_cd_open)
+                                )
                             }
-                            AppsListOverflowMenu(
-                                expanded = showOverflowMenu,
-                                onExpandedChange = { showOverflowMenu = it },
-                                onRefresh = {
-                                    showOverflowMenu = false
-                                    onRefresh()
-                                },
-                                onTrophyManager = {
-                                    showOverflowMenu = false
-                                    onOpenTrophyManager()
-                                },
-                                onUserManagement = {
-                                    showOverflowMenu = false
-                                    onOpenUserManagement()
-                                },
-                                onWelcomeScreen = {
-                                    showOverflowMenu = false
-                                    onOpenWelcomeScreen()
-                                },
-                                onAbout = {
-                                    showOverflowMenu = false
-                                    showAboutSheet = true
-                                }
-                            )
                         }
                     }
-                )
+                }
             }
         }
     ) { padding ->

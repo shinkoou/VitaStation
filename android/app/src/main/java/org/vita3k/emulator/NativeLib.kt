@@ -142,6 +142,8 @@ object NativeLib {
     external fun isAppPaused(): Boolean
     /** Returns the title of the currently running app session, or an empty string when unavailable. */
     external fun getRunningAppTitle(): String
+    /** Returns the emulator current measured FPS. */
+    external fun getCurrentFps(): Int
     /** Returns true while either SceIme or CommonDialog IME is active. */
     external fun isImeActive(): Boolean
     /** Submits the currently active IME session as if the user pressed Enter/OK. */

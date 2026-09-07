@@ -273,4 +273,18 @@
     <string name="settings_lang_portuguese_br">Português (Brasil)</string>
     <string name="settings_lang_english_gb">Inglês (Reino Unido)</string>
     <string name="settings_lang_turkish">Turco</string>
+    <string name="settings_gpu_framegen">Frame Generation (LSFG)</string>
+    <string name="settings_gpu_framegen_desc">Geração de quadros experimental do VitaStation baseada no backend Android lsfg-vk de licença MIT. A Phase03A prepara o backend nativo e os shaders fornecidos pelo próprio usuário; a interpolação só será ativada depois de validarmos a integração com o renderer.</string>
+    <string name="settings_gpu_framegen_foundation_ready">Shaders LSFG prontos • integração com o renderer pendente</string>
+    <string name="settings_gpu_framegen_foundation_not_ready">Importe sua própria Lossless.dll para preparar os shaders LSFG</string>
+    <string name="settings_gpu_framegen_import_dll">Importar Lossless.dll</string>
+    <string name="settings_gpu_framegen_reimport_dll">Substituir Lossless.dll</string>
+    <string name="settings_gpu_framegen_importing">Preparando shaders LSFG…</string>
+    <string name="settings_gpu_framegen_import_success">Preparação dos shaders concluída com sucesso.</string>
+    <string name="settings_gpu_framegen_import_bad_dll">O arquivo selecionado não é uma Lossless.dll válida ou legível.</string>
+    <string name="settings_gpu_framegen_import_missing">Esta DLL não contém todos os shaders LSFG necessários.</string>
+    <string name="settings_gpu_framegen_import_translation_error">Não foi possível traduzir um shader para Vulkan.</string>
+    <string name="settings_gpu_framegen_import_error">Não foi possível preparar o cache de shaders LSFG.</string>
+    <string name="settings_gpu_framegen_cache_ready">O cache privado de shaders está pronto. A DLL não fica armazenada.</string>
+    <string name="settings_gpu_framegen_import_hint">Use uma Lossless.dll obtida legitimamente. O VitaStation não distribui a DLL.</string>
 </resources>

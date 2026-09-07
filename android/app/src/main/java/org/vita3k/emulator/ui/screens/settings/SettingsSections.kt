@@ -1,6 +1,8 @@
 package org.vita3k.emulator.ui.screens.settings
 
 import androidx.annotation.StringRes
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -34,6 +37,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.vita3k.emulator.R
+import org.vita3k.emulator.data.FrameGenerationManager
 import org.vita3k.emulator.ConnectedGamepad
 import org.vita3k.emulator.data.CustomDriverLoadStatus
 import org.vita3k.emulator.data.EmulatorConfig
@@ -42,6 +46,7 @@ import org.vita3k.emulator.data.PerformanceHudPrefs
 import org.vita3k.emulator.data.UiLanguages
 import org.vita3k.emulator.overlay.OverlayConfig
 import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 
 private data class ImeLangEntry(val nameResId: Int, val flag: Long)
 
@@ -796,6 +801,9 @@ private fun GpuSettingsSection(
                     ),
                     onShowHelp = onShowHelp
                 )
+            }
+            if (!isPerApp && isVulkan) {
+                FrameGenerationFoundationBlock(onShowHelp = onShowHelp)
             }
         }
     }
@@ -1698,6 +1706,99 @@ private fun EmulatorSettingsSection(
 
 }
 
+
+
+@Composable
+private fun FrameGenerationFoundationBlock(
+    onShowHelp: (SettingsHelpEntry) -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var ready by remember { mutableStateOf(FrameGenerationManager.isReady(context)) }
+    var importing by remember { mutableStateOf(false) }
+    var importResult by remember { mutableStateOf<Int?>(null) }
+
+    val dllPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+
+        scope.launch {
+            importing = true
+            importResult = FrameGenerationManager.importLosslessDll(context, uri)
+            ready = FrameGenerationManager.isReady(context)
+            importing = false
+        }
+    }
+
+    SettingsToggleRow(
+        title = stringResource(R.string.settings_gpu_framegen),
+        checked = false,
+        onCheckedChange = {},
+        enabled = false,
+        summary = if (ready) {
+            stringResource(R.string.settings_gpu_framegen_foundation_ready)
+        } else {
+            stringResource(R.string.settings_gpu_framegen_foundation_not_ready)
+        },
+        help = SettingsHelpEntry(
+            title = stringResource(R.string.settings_gpu_framegen),
+            body = stringResource(R.string.settings_gpu_framegen_desc),
+            scope = SettingsScope.Global
+        ),
+        onShowHelp = onShowHelp
+    )
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        FilledTonalButton(
+            onClick = {
+                dllPicker.launch(
+                    arrayOf(
+                        "application/octet-stream",
+                        "application/x-msdownload",
+                        "application/vnd.microsoft.portable-executable"
+                    )
+                )
+            },
+            enabled = !importing
+        ) {
+            Text(
+                if (ready) {
+                    stringResource(R.string.settings_gpu_framegen_reimport_dll)
+                } else {
+                    stringResource(R.string.settings_gpu_framegen_import_dll)
+                }
+            )
+        }
+
+        if (importing) {
+            CircularProgressIndicator(modifier = Modifier.size(22.dp))
+        }
+    }
+
+    val statusText = when {
+        importing -> stringResource(R.string.settings_gpu_framegen_importing)
+        importResult == FrameGenerationManager.RESULT_OK ->
+            stringResource(R.string.settings_gpu_framegen_import_success)
+        importResult == FrameGenerationManager.RESULT_DLL_UNREADABLE ->
+            stringResource(R.string.settings_gpu_framegen_import_bad_dll)
+        importResult == FrameGenerationManager.RESULT_MISSING_SHADERS ->
+            stringResource(R.string.settings_gpu_framegen_import_missing)
+        importResult == FrameGenerationManager.RESULT_TRANSLATION_FAILED ->
+            stringResource(R.string.settings_gpu_framegen_import_translation_error)
+        importResult != null ->
+            stringResource(R.string.settings_gpu_framegen_import_error)
+        ready -> stringResource(R.string.settings_gpu_framegen_cache_ready)
+        else -> stringResource(R.string.settings_gpu_framegen_import_hint)
+    }
+
+    SettingsNote(text = statusText)
+    SettingsNote(text = FrameGenerationManager.backendInfo())
+}
 
 @Composable
 private fun PerformanceSettingsSection(

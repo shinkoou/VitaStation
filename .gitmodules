@@ -84,3 +84,7 @@
 [submodule "external/substitute"]
 	path = external/substitute
 	url = https://github.com/Vita3K/substitute.git
+[submodule "external/lsfg-vk-android"]
+	path = external/lsfg-vk-android
+	url = https://github.com/FrankBarretta/lsfg-vk-android.git
+	branch = release

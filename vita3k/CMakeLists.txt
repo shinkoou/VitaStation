@@ -152,6 +152,64 @@ add_subdirectory(packages)
 add_subdirectory(vkutil)
 
 if(ANDROID)
+    set(VITASTATION_LSFG_ROOT "${CMAKE_SOURCE_DIR}/external/lsfg-vk-android")
+    if(NOT EXISTS "${VITASTATION_LSFG_ROOT}/framegen/CMakeLists.txt")
+        message(FATAL_ERROR "VitaStation LSFG submodule is missing. Run git submodule update --init --recursive.")
+    endif()
+
+    if(NOT TARGET volk)
+        add_library(volk STATIC "${VITASTATION_LSFG_ROOT}/thirdparty/volk/volk.c")
+        target_include_directories(volk PUBLIC "${VITASTATION_LSFG_ROOT}/thirdparty/volk")
+        target_compile_definitions(volk PUBLIC VK_USE_PLATFORM_ANDROID_KHR=1)
+        set_target_properties(volk PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    endif()
+
+    set(VITASTATION_LSFG_PEPARSE "${VITASTATION_LSFG_ROOT}/thirdparty/pe-parse/pe-parser-library")
+    add_library(vitastation-lsfg-peparse STATIC
+        "${VITASTATION_LSFG_PEPARSE}/src/buffer.cpp"
+        "${VITASTATION_LSFG_PEPARSE}/src/parse.cpp"
+        android/lsfg/unicode_minimal.cpp
+    )
+    target_include_directories(vitastation-lsfg-peparse PUBLIC
+        "${VITASTATION_LSFG_PEPARSE}/include"
+    )
+    set_target_properties(vitastation-lsfg-peparse PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+    if(NOT TARGET dxbc)
+        add_subdirectory(
+            "${VITASTATION_LSFG_ROOT}/thirdparty/dxbc"
+            "${CMAKE_BINARY_DIR}/vitastation-lsfg-dxbc"
+            EXCLUDE_FROM_ALL
+        )
+    endif()
+
+    if(NOT TARGET lsfg-vk-framegen)
+        add_subdirectory(
+            "${VITASTATION_LSFG_ROOT}/framegen"
+            "${CMAKE_BINARY_DIR}/vitastation-lsfg-framegen"
+            EXCLUDE_FROM_ALL
+        )
+    endif()
+    set_target_properties(lsfg-vk-framegen PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+    add_library(vitastation-lsfg-support STATIC
+        android/lsfg/shader_store.cpp
+        "${VITASTATION_LSFG_ROOT}/src/extract/trans.cpp"
+    )
+    target_include_directories(vitastation-lsfg-support PUBLIC
+        android/lsfg
+        "${VITASTATION_LSFG_ROOT}/include"
+    )
+    target_link_libraries(vitastation-lsfg-support PRIVATE
+        vitastation-lsfg-peparse
+        dxbc
+        lsfg-vk-framegen
+        volk
+    )
+    set_target_properties(vitastation-lsfg-support PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()
+
+if(ANDROID)
 	add_library(vita3k SHARED
 		android/jni/android_state.cpp
 		android/jni/filesystem_android.cpp
@@ -164,6 +222,7 @@ if(ANDROID)
 		android/jni/native_trophies.cpp
 		android/jni/native_install.cpp
 		android/jni/native_session.cpp
+		android/jni/native_framegen.cpp
 		android/jni/input_overlay.cpp
 		android/jni/ime.cpp
 		interface.cpp
@@ -171,6 +230,13 @@ if(ANDROID)
 	)
 	target_include_directories(vita3k PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 	target_link_libraries(vita3k PRIVATE SDL3::SDL3 pugixml::pugixml android)
+	target_link_libraries(vita3k PRIVATE
+		vitastation-lsfg-support
+		lsfg-vk-framegen
+		dxbc
+		vitastation-lsfg-peparse
+		volk
+	)
 
 	if(CMAKE_BUILD_TYPE STREQUAL "Release")
 		# we need to exclude all symbols except SDL

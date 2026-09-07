@@ -112,6 +112,11 @@ object NativeLib {
     /** Removes an installed custom GPU driver by name. */
     external fun removeCustomDriver(driverName: String): Boolean
 
+    // --- VitaStation LSFG frame-generation foundation ---
+    external fun prepareLsfgShaders(dllPath: String, cacheDir: String): Int
+    external fun areLsfgShadersReady(cacheDir: String): Boolean
+    external fun getLsfgBackendInfo(): String
+
     // --- Users ---
     /** Returns all frontend-visible Vita users with their active state. */
     external fun getUsers(): Array<NativeUser>

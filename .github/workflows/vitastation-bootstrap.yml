@@ -20,11 +20,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git remote add upstream https://github.com/nckstwrt/Vita3K-Plus.git || true
+          git remote add upstream https://github.com/nckstwrt/Vita3K-Plus.git 2>/dev/null || true
           git fetch upstream master
           git checkout upstream/master -- .
 
-      - name: Keep VitaStation bootstrap workflow
+      - name: Preserve only VitaStation workflow
         shell: bash
         run: |
           set -euo pipefail
@@ -33,209 +33,206 @@ jobs:
           mkdir -p .github/workflows
           cp /tmp/vitastation-bootstrap.yml .github/workflows/vitastation-bootstrap.yml
 
-      - name: Apply VitaStation Phase 01 selectable Grid
+      - name: Apply VitaStation Phase 01
         shell: bash
         run: |
           set -euo pipefail
 
           python3 <<'PY'
           from pathlib import Path
+          import re
 
           ROOT = Path("android/app/src/main/java/org/vita3k/emulator")
 
-          def replace_once(path: Path, old: str, new: str, label: str):
+          def literal_once(path: Path, old: str, new: str, label: str):
               text = path.read_text(encoding="utf-8")
               count = text.count(old)
               if count != 1:
-                  raise SystemExit(
-                      f"{label}: expected exactly 1 match in {path}, found {count}"
-                  )
+                  print(f"\nERROR [{label}] expected 1 literal match, found {count}")
+                  raise SystemExit(1)
               path.write_text(text.replace(old, new, 1), encoding="utf-8")
               print(f"OK: {label}")
 
-          # ---------------------------------------------------------------
-          # AppsListViewModel.kt
-          # Persist selected Library mode and expose explicit setter.
-          # ---------------------------------------------------------------
+          def regex_once(path: Path, pattern: str, replacer, label: str, flags=0):
+              text = path.read_text(encoding="utf-8")
+              matches = list(re.finditer(pattern, text, flags))
+              if len(matches) != 1:
+                  print(f"\nERROR [{label}] expected 1 regex match, found {len(matches)}")
+                  print(f"Pattern: {pattern}")
+                  raise SystemExit(1)
+              match = matches[0]
+              replacement = replacer(match) if callable(replacer) else replacer
+              out = text[:match.start()] + replacement + text[match.end():]
+              path.write_text(out, encoding="utf-8")
+              print(f"OK: {label}")
+
+          # ==============================================================
+          # 1. AppsListViewModel
+          # ==============================================================
+
           vm = ROOT / "ui/viewmodel/AppsListViewModel.kt"
 
-          replace_once(
+          literal_once(
               vm,
               "import android.app.Application\n",
               "import android.app.Application\nimport android.content.Context\n",
-              "AppsListViewModel import Context",
+              "ViewModel Context import",
           )
 
-          replace_once(
+          literal_once(
               vm,
-              "import org.vita3k.emulator.data.ViewMode\n\nclass AppsListViewModel",
-              """import org.vita3k.emulator.data.ViewMode
-
-          private const val UI_PREFS_NAME = "vitastation_ui"
-          private const val KEY_LIBRARY_VIEW_MODE = "library_view_mode"
-
-          class AppsListViewModel""",
-              "AppsListViewModel preference constants",
+              "import org.vita3k.emulator.data.ViewMode\n\n"
+              "class AppsListViewModel(application: Application) : AndroidViewModel(application) {\n",
+              "import org.vita3k.emulator.data.ViewMode\n\n"
+              'private const val UI_PREFS_NAME = "vitastation_ui"\n'
+              'private const val KEY_LIBRARY_VIEW_MODE = "library_view_mode"\n\n'
+              "class AppsListViewModel(application: Application) : AndroidViewModel(application) {\n"
+              "\n"
+              "    private val uiPreferences =\n"
+              "        application.getSharedPreferences(UI_PREFS_NAME, Context.MODE_PRIVATE)\n",
+              "ViewModel preference storage",
           )
 
-          replace_once(
-              vm,
-              """    private fun qty(@PluralsRes id: Int, quantity: Int, vararg args: Any): String =
-                  getApplication<Application>().resources.getQuantityString(id, quantity, *args)
-
-          """,
-              """    private fun qty(@PluralsRes id: Int, quantity: Int, vararg args: Any): String =
-                  getApplication<Application>().resources.getQuantityString(id, quantity, *args)
-
-              private val uiPreferences =
-                  application.getSharedPreferences(UI_PREFS_NAME, Context.MODE_PRIVATE)
-
-          """,
-              "AppsListViewModel SharedPreferences",
-          )
-
-          replace_once(
+          literal_once(
               vm,
               "    var viewMode by mutableStateOf(ViewMode.LIST)\n",
               "    var viewMode by mutableStateOf(loadViewMode())\n",
-              "AppsListViewModel restore view mode",
+              "ViewModel restore last view mode",
           )
 
-          replace_once(
+          literal_once(
               vm,
-              """    fun toggleViewMode() {
-                  viewMode = if (viewMode == ViewMode.LIST) ViewMode.GRID else ViewMode.LIST
-              }
-          """,
-              """    fun setViewMode(mode: ViewMode) {
-                  if (viewMode == mode) return
-
-                  viewMode = mode
-                  uiPreferences.edit()
-                      .putString(KEY_LIBRARY_VIEW_MODE, mode.name)
-                      .apply()
-              }
-
-              fun toggleViewMode() {
-                  setViewMode(if (viewMode == ViewMode.LIST) ViewMode.GRID else ViewMode.LIST)
-              }
-
-              private fun loadViewMode(): ViewMode {
-                  val storedMode = uiPreferences.getString(
-                      KEY_LIBRARY_VIEW_MODE,
-                      ViewMode.LIST.name
-                  )
-
-                  return runCatching {
-                      ViewMode.valueOf(storedMode ?: ViewMode.LIST.name)
-                  }.getOrDefault(ViewMode.LIST)
-              }
-          """,
-              "AppsListViewModel explicit/persistent view mode",
+              "    fun toggleViewMode() {\n"
+              "        viewMode = if (viewMode == ViewMode.LIST) ViewMode.GRID else ViewMode.LIST\n"
+              "    }\n",
+              "    fun setViewMode(mode: ViewMode) {\n"
+              "        if (viewMode == mode) return\n"
+              "\n"
+              "        viewMode = mode\n"
+              "        uiPreferences.edit()\n"
+              "            .putString(KEY_LIBRARY_VIEW_MODE, mode.name)\n"
+              "            .apply()\n"
+              "    }\n"
+              "\n"
+              "    fun toggleViewMode() {\n"
+              "        setViewMode(if (viewMode == ViewMode.LIST) ViewMode.GRID else ViewMode.LIST)\n"
+              "    }\n"
+              "\n"
+              "    private fun loadViewMode(): ViewMode {\n"
+              "        val storedMode = uiPreferences.getString(\n"
+              "            KEY_LIBRARY_VIEW_MODE,\n"
+              "            ViewMode.LIST.name\n"
+              "        )\n"
+              "\n"
+              "        return runCatching {\n"
+              "            ViewMode.valueOf(storedMode ?: ViewMode.LIST.name)\n"
+              "        }.getOrDefault(ViewMode.LIST)\n"
+              "    }\n",
+              "ViewModel explicit selectable mode + persistence",
           )
 
-          # ---------------------------------------------------------------
-          # FilterSheet.kt
-          # Explicit List/Grid choices.
-          # ---------------------------------------------------------------
+          # ==============================================================
+          # 2. FilterSheet
+          # ==============================================================
+
           filter_sheet = ROOT / "ui/screens/FilterSheet.kt"
 
-          replace_once(
+          literal_once(
               filter_sheet,
               "    onViewModeToggle: () -> Unit,\n",
               "    onViewModeChanged: (ViewMode) -> Unit,\n",
               "FilterSheet callback",
           )
 
-          replace_once(
+          literal_once(
               filter_sheet,
               "                    onClick = { if (viewMode != ViewMode.LIST) onViewModeToggle() },\n",
               "                    onClick = { onViewModeChanged(ViewMode.LIST) },\n",
-              "FilterSheet LIST selection",
+              "FilterSheet LIST button",
           )
 
-          replace_once(
+          literal_once(
               filter_sheet,
               "                    onClick = { if (viewMode != ViewMode.GRID) onViewModeToggle() },\n",
               "                    onClick = { onViewModeChanged(ViewMode.GRID) },\n",
-              "FilterSheet GRID selection",
+              "FilterSheet GRID button",
           )
 
-          # ---------------------------------------------------------------
-          # AppsListScreen.kt
-          # Explicit callback + visible buttons in Library toolbar.
-          # FIX2: insertion anchors only to the unique Search action line,
-          # avoiding brittle whitespace matching from FIX1.
-          # ---------------------------------------------------------------
+          # ==============================================================
+          # 3. AppsListScreen
+          # ==============================================================
+
           screen = ROOT / "ui/screens/AppsListScreen.kt"
 
-          replace_once(
+          literal_once(
               screen,
               "    onViewModeToggle: () -> Unit,\n",
               "    onViewModeChanged: (ViewMode) -> Unit,\n",
               "AppsListScreen callback",
           )
 
-          search_action = """                            IconButton(onClick = { showSearchBar = true }) {
-                                  Icon(Icons.Default.Search, contentDescription = stringResource(R.string.apps_list_cd_search))
-                              }
-          """
+          # Do not depend on a multi-line whitespace block.
+          # Match only the unique Search IconButton line and reuse its indentation.
+          def add_view_buttons(match):
+              i = match.group("indent")
+              anchor = match.group(0)
+              return (
+                  f"{i}IconButton(onClick = {{ onViewModeChanged(ViewMode.LIST) }}) {{\n"
+                  f"{i}    Icon(\n"
+                  f"{i}        Icons.AutoMirrored.Filled.List,\n"
+                  f"{i}        contentDescription = stringResource(R.string.filter_view_list),\n"
+                  f"{i}        tint = if (viewMode == ViewMode.LIST)\n"
+                  f"{i}            MaterialTheme.colorScheme.primary\n"
+                  f"{i}        else\n"
+                  f"{i}            MaterialTheme.colorScheme.onSurfaceVariant\n"
+                  f"{i}    )\n"
+                  f"{i}}}\n"
+                  f"{i}IconButton(onClick = {{ onViewModeChanged(ViewMode.GRID) }}) {{\n"
+                  f"{i}    Icon(\n"
+                  f"{i}        Icons.Default.GridView,\n"
+                  f"{i}        contentDescription = stringResource(R.string.filter_view_grid),\n"
+                  f"{i}        tint = if (viewMode == ViewMode.GRID)\n"
+                  f"{i}            MaterialTheme.colorScheme.primary\n"
+                  f"{i}        else\n"
+                  f"{i}            MaterialTheme.colorScheme.onSurfaceVariant\n"
+                  f"{i}    )\n"
+                  f"{i}}}\n"
+                  f"{anchor}"
+              )
 
-          view_buttons = """                            IconButton(onClick = { onViewModeChanged(ViewMode.LIST) }) {
-                                  Icon(
-                                      Icons.AutoMirrored.Filled.List,
-                                      contentDescription = stringResource(R.string.filter_view_list),
-                                      tint = if (viewMode == ViewMode.LIST)
-                                          MaterialTheme.colorScheme.primary
-                                      else
-                                          MaterialTheme.colorScheme.onSurfaceVariant
-                                  )
-                              }
-                              IconButton(onClick = { onViewModeChanged(ViewMode.GRID) }) {
-                                  Icon(
-                                      Icons.Default.GridView,
-                                      contentDescription = stringResource(R.string.filter_view_grid),
-                                      tint = if (viewMode == ViewMode.GRID)
-                                          MaterialTheme.colorScheme.primary
-                                      else
-                                          MaterialTheme.colorScheme.onSurfaceVariant
-                                  )
-                              }
-          """ + search_action
-
-          replace_once(
+          regex_once(
               screen,
-              search_action,
-              view_buttons,
-              "AppsListScreen visible List/Grid selector",
+              r"(?m)^(?P<indent>[ \t]*)IconButton\(onClick = \{ showSearchBar = true \}\) \{$",
+              add_view_buttons,
+              "AppsListScreen visible LIST/GRID controls",
           )
 
-          replace_once(
+          literal_once(
               screen,
               "            onViewModeToggle = onViewModeToggle,\n",
               "            onViewModeChanged = onViewModeChanged,\n",
               "AppsListScreen FilterSheet wiring",
           )
 
-          # ---------------------------------------------------------------
-          # AppNavigation.kt
-          # Wire explicit selection to ViewModel.
-          # ---------------------------------------------------------------
+          # ==============================================================
+          # 4. AppNavigation
+          # ==============================================================
+
           nav = ROOT / "ui/navigation/AppNavigation.kt"
 
-          replace_once(
+          literal_once(
               nav,
               "                onViewModeToggle = { appsListViewModel.toggleViewMode() },\n",
               "                onViewModeChanged = { mode -> appsListViewModel.setViewMode(mode) },\n",
               "AppNavigation view mode wiring",
           )
 
-          print("VitaStation Phase 01 source changes applied successfully.")
+          print("\nPhase 01 transformations completed.")
           PY
 
           rm -f VitaStation-v0.1.0-Phase01-Selectable-Grid.patch
 
-      - name: Validate source changes
+      - name: Validate Phase 01
         shell: bash
         run: |
           set -euo pipefail
@@ -245,22 +242,32 @@ jobs:
           FILTER="android/app/src/main/java/org/vita3k/emulator/ui/screens/FilterSheet.kt"
           NAV="android/app/src/main/java/org/vita3k/emulator/ui/navigation/AppNavigation.kt"
 
-          grep -q 'onViewModeChanged(ViewMode.LIST)' "$SCREEN"
-          grep -q 'onViewModeChanged(ViewMode.GRID)' "$SCREEN"
+          test "$(grep -c 'onViewModeChanged(ViewMode.LIST)' "$SCREEN")" -ge 1
+          test "$(grep -c 'onViewModeChanged(ViewMode.GRID)' "$SCREEN")" -ge 1
           grep -q 'KEY_LIBRARY_VIEW_MODE' "$VM"
           grep -q 'fun setViewMode(mode: ViewMode)' "$VM"
+          grep -q 'onViewModeChanged(ViewMode.LIST)' "$FILTER"
           grep -q 'onViewModeChanged(ViewMode.GRID)' "$FILTER"
           grep -q 'appsListViewModel.setViewMode(mode)' "$NAV"
 
+          if grep -R "onViewModeToggle =" \
+            "$SCREEN" "$FILTER" "$NAV"; then
+            echo "ERROR: old callback wiring still exists."
+            exit 1
+          fi
+
           git diff --check
+          echo "Phase 01 validation passed."
           git status --short
 
       - name: Commit VitaStation foundation
         shell: bash
         run: |
           set -euo pipefail
+
           git config user.name "VitaStation Bot"
           git config user.email "actions@users.noreply.github.com"
+
           git add -A
 
           if git diff --cached --quiet; then

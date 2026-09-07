@@ -1,6 +1,6 @@
 <resources>
     <!-- App name -->
-    <string name="app_name">Vita3K</string>
+    <string name="app_name">VitaStation</string>
 
     <!-- Common actions -->
     <string name="action_ok">OK</string>
@@ -38,7 +38,7 @@
     <string name="app_action_reset_last_played">Reset Last Played</string>
 
     <!-- Apps list screen -->
-    <string name="apps_list_app_title">Vita3K</string>
+    <string name="apps_list_app_title">VitaStation</string>
     <plurals name="apps_list_n_selected">
         <item quantity="one">%1$d selected</item>
         <item quantity="other">%1$d selected</item>
@@ -157,7 +157,7 @@
     <!-- About sheet -->
     <string name="about_build">Build: %1$s</string>
     <string name="about_revision">Revision: %1$s</string>
-    <string name="about_legal_notice">Vita3K does not condone piracy. You must dump your own games.</string>
+    <string name="about_legal_notice">VitaStation does not condone piracy. You must dump your own games.</string>
 
     <!-- Updates -->
     <string name="updates_check_title">Check for Updates</string>
@@ -173,9 +173,9 @@
     <string name="updates_summary_custom_build_with_date">You are currently running a non-official or PR build.\n\nIf you update, you will switch to the latest official build and will no longer be on this custom or PR build.\n\nLatest official build: %1$s\nPublished: %2$s</string>
 
     <!-- Initial setup -->
-    <string name="initial_setup_welcome_title">Welcome to Vita3K</string>
-    <string name="initial_setup_welcome_body">Vita3K is an open-source PlayStation Vita emulator written in C++ for Windows, Linux, macOS, and Android. The emulator is still under active development, so feedback and testing are greatly appreciated.</string>
-    <string name="initial_setup_piracy_notice">Vita3K does not condone piracy. You must dump your own games.</string>
+    <string name="initial_setup_welcome_title">Welcome to VitaStation</string>
+    <string name="initial_setup_welcome_body">VitaStation is an Android-focused PlayStation Vita emulator project based on Vita3K-Plus and Vita3K. It focuses on a modern Android interface, performance, compatibility, and upstream-friendly development.</string>
+    <string name="initial_setup_piracy_notice">VitaStation does not condone piracy. You must dump your own games.</string>
     <string name="initial_setup_firmware_title">Install Firmware</string>
     <string name="initial_setup_firmware_body">To get started, install the PS Vita firmware files below.</string>
     <string name="initial_setup_preinstall_title">Pre-Install Package</string>
@@ -231,7 +231,7 @@
     <string name="settings_restart_app">Restart App</string>
     <string name="settings_restart_later">Restart Later</string>
     <string name="settings_restart_in_progress_title">Restarting App</string>
-    <string name="settings_restart_in_progress_message">Please wait while Vita3K restarts the game.</string>
+    <string name="settings_restart_in_progress_message">Please wait while VitaStation restarts the game.</string>
     <string name="settings_restart_game">Restart Game</string>
     <string name="settings_continue_playing">Continue Playing</string>
     <string name="emulation_ime_placeholder">Start typing…</string>

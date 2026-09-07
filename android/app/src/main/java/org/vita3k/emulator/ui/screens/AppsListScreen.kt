@@ -492,13 +492,13 @@ private data class ParsedAppVersion(
 )
 
 private const val ABOUT_DESCRIPTION_HTML =
-    """Vita3K is the world's first functional PS Vita and PS TV emulator, open source and written in C++ for Windows, Linux, macOS, and Android. Visit <a href="https://vita3k.org/quickstart.html">vita3k.org</a> for more info, browse the project on <a href="https://github.com/Vita3K/Vita3K">GitHub</a> if you want to contribute, or support us on <a href="https://ko-fi.com/vita3k">Ko-fi</a>."""
+    """VitaStation is an Android-focused emulator project based on Vita3K-Plus and Vita3K. It focuses on a modern Android experience, performance, compatibility, and responsible upstream attribution."""
 
 private const val ABOUT_CREDIT_HTML =
-    """Icon by <a href="https://gordonmackayillustration.blogspot.com">Gordon Mackay</a>."""
+    """Based on <a href="https://github.com/nckstwrt/Vita3K-Plus">Vita3K-Plus</a> and <a href="https://github.com/Vita3K/Vita3K">Vita3K</a>. VitaStation remains GPL-licensed and preserves upstream credits."""
 
 private const val ABOUT_FOOTER_HTML =
-    """<a href="https://vita3k.org">Website</a> | <a href="https://github.com/Vita3K/Vita3K">GitHub</a> | <a href="https://ko-fi.com/vita3k">Ko-fi</a> | <a href="https://discord.com/invite/6aGwQzh">Discord</a>"""
+    """<a href="https://github.com/shinkoou/VitaStation">VitaStation GitHub</a> | <a href="https://github.com/nckstwrt/Vita3K-Plus">Vita3K-Plus</a> | <a href="https://github.com/Vita3K/Vita3K">Vita3K</a>"""
 
 @Composable
 private fun AppsEmptyState(
@@ -961,10 +961,10 @@ private fun AppsGridView(
     modifier: Modifier = Modifier
 ) {
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = 120.dp),
-        contentPadding = PaddingValues(8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        columns = GridCells.Adaptive(minSize = 148.dp),
+        contentPadding = PaddingValues(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
         modifier = modifier.fillMaxSize()
     ) {
         items(apps, key = { it.titleId }) { app ->
@@ -1003,14 +1003,18 @@ private fun AppGridItem(
                     onLongClick()
                 }
             ),
-        shape = RoundedCornerShape(8.dp)
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        )
     ) {
         Column {
-            AppIcon(app, size = 120, modifier = Modifier.fillMaxWidth())
-            Column(modifier = Modifier.padding(8.dp)) {
+            AppIcon(app, size = 132, modifier = Modifier.fillMaxWidth())
+            Column(modifier = Modifier.padding(12.dp)) {
                 Text(
                     app.title,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )

@@ -15,6 +15,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import org.vita3k.emulator.R
+import org.vita3k.emulator.BuildConfig
 import org.vita3k.emulator.data.FirmwareInstallState
 import org.vita3k.emulator.data.AppInfo
 import org.vita3k.emulator.data.AppRepository
@@ -84,7 +85,7 @@ class AppsListViewModel(application: Application) : AndroidViewModel(application
 
         loading = true
         viewModelScope.launch {
-            appVersion = AppRepository.getAppVersion()
+            appVersion = "${BuildConfig.VERSION_NAME}-${BuildConfig.VERSION_CODE}"
             val success = AppRepository.initialize(storagePath)
             initialized = success
             if (success) {

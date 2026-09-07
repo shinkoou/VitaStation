@@ -733,7 +733,7 @@ private fun VitaStationSettingsHome(
             text = stringResource(R.string.settings_home_subtitle),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 4.dp, bottom = 4.dp)
+            modifier = Modifier.padding(start = 4.dp, end = 4.dp, bottom = 4.dp)
         )
 
         categories.forEach { category ->

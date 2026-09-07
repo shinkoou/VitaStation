@@ -18,7 +18,7 @@ env:
 
 jobs:
   android-build:
-    name: Build VitaStation Phase02C FIX1
+    name: Build VitaStation Phase02C FIX2
     runs-on: ubuntu-latest
 
     steps:
@@ -62,7 +62,7 @@ jobs:
 
           git diff --check
 
-      - name: Persist Phase02C FIX1
+      - name: Persist Phase02C FIX2
         shell: bash
         run: |
           set -euo pipefail
@@ -73,9 +73,9 @@ jobs:
           git add android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsRoute.kt
 
           if git diff --cached --quiet; then
-            echo "Phase02C FIX1 is already applied."
+            echo "Phase02C FIX2 source fix is already applied."
           else
-            git commit -m "VitaStation v0.2.2 Phase02C FIX1: fix SettingsRoute padding"
+            git commit -m "VitaStation v0.2.2 Phase02C FIX2: fix SettingsRoute padding and Gradle preflight"
             git push origin HEAD:main
           fi
 
@@ -119,12 +119,12 @@ jobs:
         run: |
           set -euo pipefail
           cd android
-          ./gradlew :app:compileReldebugKotlin --stacktrace
+          bash ./gradlew :app:compileReldebugKotlin --stacktrace
 
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2.23
 
-      - name: Build VitaStation Phase02C FIX1 APK
+      - name: Build VitaStation Phase02C FIX2 APK
         run: bash ./.ci/build-android.sh artifacts/vitastation-android
 
       - name: Rename APK
@@ -132,12 +132,12 @@ jobs:
         run: |
           set -euo pipefail
           test -f artifacts/vitastation-android/app.apk
-          mv artifacts/vitastation-android/app.apk             artifacts/vitastation-android/VitaStation-v0.2.2-Phase02C-FIX1.apk
+          mv artifacts/vitastation-android/app.apk             artifacts/vitastation-android/VitaStation-v0.2.2-Phase02C-FIX2.apk
           ls -lh artifacts/vitastation-android/
 
-      - name: Upload VitaStation Phase02C FIX1 APK
+      - name: Upload VitaStation Phase02C FIX2 APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.2.2-Phase02C-FIX1-Android
-          path: artifacts/vitastation-android/VitaStation-v0.2.2-Phase02C-FIX1.apk
+          name: VitaStation-v0.2.2-Phase02C-FIX2-Android
+          path: artifacts/vitastation-android/VitaStation-v0.2.2-Phase02C-FIX2.apk
           if-no-files-found: error

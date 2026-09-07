@@ -1,4 +1,4 @@
-name: VitaStation Bootstrap
+name: VitaStation Bootstrap FIX4
 
 on:
   workflow_dispatch:
@@ -105,7 +105,7 @@ jobs:
               "    fun toggleViewMode() {\n"
               "        viewMode = if (viewMode == ViewMode.LIST) ViewMode.GRID else ViewMode.LIST\n"
               "    }\n",
-              "    fun setViewMode(mode: ViewMode) {\n"
+              "    fun selectViewMode(mode: ViewMode) {\n"
               "        if (viewMode == mode) return\n"
               "\n"
               "        viewMode = mode\n"
@@ -115,7 +115,7 @@ jobs:
               "    }\n"
               "\n"
               "    fun toggleViewMode() {\n"
-              "        setViewMode(if (viewMode == ViewMode.LIST) ViewMode.GRID else ViewMode.LIST)\n"
+              "        selectViewMode(if (viewMode == ViewMode.LIST) ViewMode.GRID else ViewMode.LIST)\n"
               "    }\n"
               "\n"
               "    private fun loadViewMode(): ViewMode {\n"
@@ -223,7 +223,7 @@ jobs:
           literal_once(
               nav,
               "                onViewModeToggle = { appsListViewModel.toggleViewMode() },\n",
-              "                onViewModeChanged = { mode -> appsListViewModel.setViewMode(mode) },\n",
+              "                onViewModeChanged = { mode -> appsListViewModel.selectViewMode(mode) },\n",
               "AppNavigation view mode wiring",
           )
 
@@ -245,10 +245,10 @@ jobs:
           test "$(grep -c 'onViewModeChanged(ViewMode.LIST)' "$SCREEN")" -ge 1
           test "$(grep -c 'onViewModeChanged(ViewMode.GRID)' "$SCREEN")" -ge 1
           grep -q 'KEY_LIBRARY_VIEW_MODE' "$VM"
-          grep -q 'fun setViewMode(mode: ViewMode)' "$VM"
+          grep -q 'fun selectViewMode(mode: ViewMode)' "$VM"
           grep -q 'onViewModeChanged(ViewMode.LIST)' "$FILTER"
           grep -q 'onViewModeChanged(ViewMode.GRID)' "$FILTER"
-          grep -q 'appsListViewModel.setViewMode(mode)' "$NAV"
+          grep -q 'appsListViewModel.selectViewMode(mode)' "$NAV"
 
           if grep -R "onViewModeToggle =" \
             "$SCREEN" "$FILTER" "$NAV"; then

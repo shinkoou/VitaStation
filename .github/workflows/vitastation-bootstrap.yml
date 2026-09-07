@@ -24,7 +24,7 @@ jobs:
           git fetch upstream master
           git checkout upstream/master -- .
 
-      - name: Keep only VitaStation bootstrap workflow for now
+      - name: Keep VitaStation bootstrap workflow
         shell: bash
         run: |
           set -euo pipefail
@@ -37,9 +37,215 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git apply --check VitaStation-v0.1.0-Phase01-Selectable-Grid.patch
-          git apply VitaStation-v0.1.0-Phase01-Selectable-Grid.patch
-          git rm VitaStation-v0.1.0-Phase01-Selectable-Grid.patch
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          ROOT = Path("android/app/src/main/java/org/vita3k/emulator")
+
+          def replace_once(path: Path, old: str, new: str, label: str):
+              text = path.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(
+                      f"{label}: expected exactly 1 match in {path}, found {count}"
+                  )
+              path.write_text(text.replace(old, new, 1), encoding="utf-8")
+              print(f"OK: {label}")
+
+          # ------------------------------------------------------------------
+          # AppsListViewModel.kt
+          # Persist the selected Library view mode and expose explicit setter.
+          # ------------------------------------------------------------------
+          vm = ROOT / "ui/viewmodel/AppsListViewModel.kt"
+
+          replace_once(
+              vm,
+              "import android.app.Application\n",
+              "import android.app.Application\nimport android.content.Context\n",
+              "AppsListViewModel import Context",
+          )
+
+          replace_once(
+              vm,
+              "import org.vita3k.emulator.data.ViewMode\n\nclass AppsListViewModel",
+              """import org.vita3k.emulator.data.ViewMode
+
+          private const val UI_PREFS_NAME = "vitastation_ui"
+          private const val KEY_LIBRARY_VIEW_MODE = "library_view_mode"
+
+          class AppsListViewModel""",
+              "AppsListViewModel preference constants",
+          )
+
+          replace_once(
+              vm,
+              """    private fun qty(@PluralsRes id: Int, quantity: Int, vararg args: Any): String =
+                  getApplication<Application>().resources.getQuantityString(id, quantity, *args)
+
+          """,
+              """    private fun qty(@PluralsRes id: Int, quantity: Int, vararg args: Any): String =
+                  getApplication<Application>().resources.getQuantityString(id, quantity, *args)
+
+              private val uiPreferences =
+                  application.getSharedPreferences(UI_PREFS_NAME, Context.MODE_PRIVATE)
+
+          """,
+              "AppsListViewModel SharedPreferences",
+          )
+
+          replace_once(
+              vm,
+              "    var viewMode by mutableStateOf(ViewMode.LIST)\n",
+              "    var viewMode by mutableStateOf(loadViewMode())\n",
+              "AppsListViewModel restore view mode",
+          )
+
+          replace_once(
+              vm,
+              """    fun toggleViewMode() {
+                  viewMode = if (viewMode == ViewMode.LIST) ViewMode.GRID else ViewMode.LIST
+              }
+          """,
+              """    fun setViewMode(mode: ViewMode) {
+                  if (viewMode == mode) return
+
+                  viewMode = mode
+                  uiPreferences.edit()
+                      .putString(KEY_LIBRARY_VIEW_MODE, mode.name)
+                      .apply()
+              }
+
+              fun toggleViewMode() {
+                  setViewMode(if (viewMode == ViewMode.LIST) ViewMode.GRID else ViewMode.LIST)
+              }
+
+              private fun loadViewMode(): ViewMode {
+                  val storedMode = uiPreferences.getString(
+                      KEY_LIBRARY_VIEW_MODE,
+                      ViewMode.LIST.name
+                  )
+
+                  return runCatching {
+                      ViewMode.valueOf(storedMode ?: ViewMode.LIST.name)
+                  }.getOrDefault(ViewMode.LIST)
+              }
+          """,
+              "AppsListViewModel explicit/persistent view mode",
+          )
+
+          # ------------------------------------------------------------------
+          # FilterSheet.kt
+          # List and Grid become explicit selectable options, not a blind toggle.
+          # ------------------------------------------------------------------
+          filter_sheet = ROOT / "ui/screens/FilterSheet.kt"
+
+          replace_once(
+              filter_sheet,
+              "    onViewModeToggle: () -> Unit,\n",
+              "    onViewModeChanged: (ViewMode) -> Unit,\n",
+              "FilterSheet callback",
+          )
+
+          replace_once(
+              filter_sheet,
+              "                    onClick = { if (viewMode != ViewMode.LIST) onViewModeToggle() },\n",
+              "                    onClick = { onViewModeChanged(ViewMode.LIST) },\n",
+              "FilterSheet LIST selection",
+          )
+
+          replace_once(
+              filter_sheet,
+              "                    onClick = { if (viewMode != ViewMode.GRID) onViewModeToggle() },\n",
+              "                    onClick = { onViewModeChanged(ViewMode.GRID) },\n",
+              "FilterSheet GRID selection",
+          )
+
+          # ------------------------------------------------------------------
+          # AppsListScreen.kt
+          # Show List/Grid controls directly in the Library top bar.
+          # ------------------------------------------------------------------
+          screen = ROOT / "ui/screens/AppsListScreen.kt"
+
+          replace_once(
+              screen,
+              "    onViewModeToggle: () -> Unit,\n",
+              "    onViewModeChanged: (ViewMode) -> Unit,\n",
+              "AppsListScreen callback",
+          )
+
+          replace_once(
+              screen,
+              """                        } else {
+                              IconButton(onClick = { showSearchBar = true }) {
+          """,
+              """                        } else {
+                              IconButton(onClick = { onViewModeChanged(ViewMode.LIST) }) {
+                                  Icon(
+                                      Icons.AutoMirrored.Filled.List,
+                                      contentDescription = stringResource(R.string.filter_view_list),
+                                      tint = if (viewMode == ViewMode.LIST)
+                                          MaterialTheme.colorScheme.primary
+                                      else
+                                          MaterialTheme.colorScheme.onSurfaceVariant
+                                  )
+                              }
+                              IconButton(onClick = { onViewModeChanged(ViewMode.GRID) }) {
+                                  Icon(
+                                      Icons.Default.GridView,
+                                      contentDescription = stringResource(R.string.filter_view_grid),
+                                      tint = if (viewMode == ViewMode.GRID)
+                                          MaterialTheme.colorScheme.primary
+                                      else
+                                          MaterialTheme.colorScheme.onSurfaceVariant
+                                  )
+                              }
+                              IconButton(onClick = { showSearchBar = true }) {
+          """,
+              "AppsListScreen visible List/Grid selector",
+          )
+
+          replace_once(
+              screen,
+              "            onViewModeToggle = onViewModeToggle,\n",
+              "            onViewModeChanged = onViewModeChanged,\n",
+              "AppsListScreen FilterSheet wiring",
+          )
+
+          # ------------------------------------------------------------------
+          # AppNavigation.kt
+          # Wire explicit selection into the ViewModel.
+          # ------------------------------------------------------------------
+          nav = ROOT / "ui/navigation/AppNavigation.kt"
+
+          replace_once(
+              nav,
+              "                onViewModeToggle = { appsListViewModel.toggleViewMode() },\n",
+              "                onViewModeChanged = { mode -> appsListViewModel.setViewMode(mode) },\n",
+              "AppNavigation view mode wiring",
+          )
+
+          print("VitaStation Phase 01 source changes applied successfully.")
+          PY
+
+          rm -f VitaStation-v0.1.0-Phase01-Selectable-Grid.patch
+
+      - name: Validate changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f android/app/src/main/java/org/vita3k/emulator/ui/screens/AppsListScreen.kt
+          test -f android/app/src/main/java/org/vita3k/emulator/ui/viewmodel/AppsListViewModel.kt
+
+          grep -q 'onViewModeChanged(ViewMode.GRID)' \
+            android/app/src/main/java/org/vita3k/emulator/ui/screens/AppsListScreen.kt
+
+          grep -q 'KEY_LIBRARY_VIEW_MODE' \
+            android/app/src/main/java/org/vita3k/emulator/ui/viewmodel/AppsListViewModel.kt
+
+          git diff --check
+          git status --short
 
       - name: Commit VitaStation foundation
         shell: bash
@@ -48,5 +254,11 @@ jobs:
           git config user.name "VitaStation Bot"
           git config user.email "actions@users.noreply.github.com"
           git add -A
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
           git commit -m "VitaStation v0.1.0 Phase 01: import base and selectable Grid"
           git push origin HEAD:main

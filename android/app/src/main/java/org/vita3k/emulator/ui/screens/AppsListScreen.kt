@@ -219,10 +219,6 @@ fun AppsListScreen(
                                     showOverflowMenu = false
                                     onOpenWelcomeScreen()
                                 },
-                                onCheckForUpdates = {
-                                    showOverflowMenu = false
-                                    onCheckForUpdates()
-                                },
                                 onAbout = {
                                     showOverflowMenu = false
                                     showAboutSheet = true
@@ -677,7 +673,6 @@ private fun AppsListOverflowMenu(
     onTrophyManager: () -> Unit,
     onUserManagement: () -> Unit,
     onWelcomeScreen: () -> Unit,
-    onCheckForUpdates: () -> Unit,
     onAbout: () -> Unit
 ) {
     Box {

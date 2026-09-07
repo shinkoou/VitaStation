@@ -285,7 +285,6 @@ fun AppNavigation(
                 onSearchChanged = { appsListViewModel.setSearch(it) },
                 onSortChanged = { appsListViewModel.setSort(it) },
                 onViewModeChanged = { mode -> appsListViewModel.setViewMode(mode) },
-                onCheckForUpdates = { appsListViewModel.checkForUpdates() },
                 onDismissUpdateCheckResult = { appsListViewModel.dismissUpdateCheckResult() },
                 onRefresh = { appsListViewModel.refreshAppsList(syncCompatibility = true) },
                 onInstallClick = { installViewModel.showSheet() },

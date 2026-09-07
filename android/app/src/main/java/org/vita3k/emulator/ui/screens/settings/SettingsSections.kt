@@ -260,6 +260,11 @@ internal fun SettingsCategoryBody(
             onShowHelp = onShowHelp
         )
 
+        SettingsCategory.Performance -> PerformanceSettingsSection(
+            cfg = cfg,
+            onUpdate = onUpdate,
+            onShowHelp = onShowHelp
+        )
         SettingsCategory.Audio -> AudioSettingsSection(cfg = cfg, onUpdate = onUpdate, onShowHelp = onShowHelp)
         SettingsCategory.Camera -> CameraSettingsSection(
             cfg = cfg,
@@ -1691,81 +1696,48 @@ private fun EmulatorSettingsSection(
         )
     }
 
-    if (!isPerApp) {
-        SettingsSectionCard(title = stringResource(R.string.settings_emulator_perf_overlay), summary = null, help = null, onShowHelp = onShowHelp) {
-            SettingsToggleRow(
+}
+
+
+@Composable
+private fun PerformanceSettingsSection(
+    cfg: EmulatorConfig,
+    onUpdate: (EmulatorConfig.() -> Unit) -> Unit,
+    onShowHelp: (SettingsHelpEntry) -> Unit
+) {
+    val hudContext = LocalContext.current
+    var hudFps by remember { mutableStateOf(PerformanceHudPrefs.get(hudContext, PerformanceHudPrefs.KEY_FPS)) }
+    var hudRam by remember { mutableStateOf(PerformanceHudPrefs.get(hudContext, PerformanceHudPrefs.KEY_RAM)) }
+    var hudCpu by remember { mutableStateOf(PerformanceHudPrefs.get(hudContext, PerformanceHudPrefs.KEY_CPU)) }
+    var hudGpu by remember { mutableStateOf(PerformanceHudPrefs.get(hudContext, PerformanceHudPrefs.KEY_GPU)) }
+    var hudBattery by remember { mutableStateOf(PerformanceHudPrefs.get(hudContext, PerformanceHudPrefs.KEY_BATTERY)) }
+
+    SettingsSectionCard(
+        title = stringResource(R.string.settings_emulator_perf_overlay),
+        summary = stringResource(R.string.vitastation_hud_compact_desc),
+        help = null,
+        onShowHelp = onShowHelp
+    ) {
+        SettingsToggleRow(
+            title = stringResource(R.string.settings_emulator_perf_overlay),
+            checked = cfg.performanceOverlay,
+            onCheckedChange = { enabled ->
+                onUpdate { performanceOverlay = enabled }
+            },
+            summary = stringResource(R.string.vitastation_hud_compact_summary),
+            help = SettingsHelpEntry(
                 title = stringResource(R.string.settings_emulator_perf_overlay),
-                checked = cfg.performanceOverlay,
-                onCheckedChange = { onUpdate { performanceOverlay = it } },
-                help = SettingsHelpEntry(
-                    title = stringResource(R.string.settings_emulator_perf_overlay),
-                    body = stringResource(R.string.settings_emulator_perf_overlay_desc),
-                    scope = SettingsScope.Global
-                ),
-                onShowHelp = onShowHelp
-            )
-            if (cfg.performanceOverlay) {
-                val detailOptions = listOf(
-                    stringResource(R.string.settings_opt_minimum),
-                    stringResource(R.string.settings_opt_low),
-                    stringResource(R.string.settings_opt_medium),
-                    stringResource(R.string.settings_opt_maximum)
-                )
-                val perfOverlayDetailTitle = stringResource(R.string.settings_emulator_perf_overlay_detail)
-                val perfOverlayDetailHelp = helpEntry(
-                    perfOverlayDetailTitle,
-                    stringResource(R.string.settings_emulator_perf_overlay_detail_desc),
-                    SettingsScope.Global
-                )
-                SettingsChoiceField(
-                    title = perfOverlayDetailTitle,
-                    options = detailOptions,
-                    selectedIndex = cfg.performanceOverlayDetail.coerceIn(0, detailOptions.lastIndex),
-                    onSelect = { index -> onUpdate { performanceOverlayDetail = index } },
-                    help = perfOverlayDetailHelp,
-                    onShowHelp = onShowHelp
-                )
-                val positionOptions = listOf(
-                    stringResource(R.string.settings_opt_top_left),
-                    stringResource(R.string.settings_opt_top_center),
-                    stringResource(R.string.settings_opt_top_right),
-                    stringResource(R.string.settings_opt_bottom_left),
-                    stringResource(R.string.settings_opt_bottom_center),
-                    stringResource(R.string.settings_opt_bottom_right)
-                )
-                val perfOverlayPositionTitle = stringResource(R.string.settings_emulator_perf_overlay_position)
-                val perfOverlayPositionHelp = helpEntry(
-                    perfOverlayPositionTitle,
-                    stringResource(R.string.settings_emulator_perf_overlay_position_desc),
-                    SettingsScope.Global
-                )
-                SettingsChoiceField(
-                    title = perfOverlayPositionTitle,
-                    options = positionOptions,
-                    selectedIndex = cfg.performanceOverlayPosition.coerceIn(0, positionOptions.lastIndex),
-                    onSelect = { index -> onUpdate { performanceOverlayPosition = index } },
-                    help = perfOverlayPositionHelp,
-                    onShowHelp = onShowHelp
-                )
-            }
-        }
-    }
-
-
-    if (!isPerApp) {
-        val hudContext = LocalContext.current
-        var hudFps by remember { mutableStateOf(PerformanceHudPrefs.get(hudContext, PerformanceHudPrefs.KEY_FPS)) }
-        var hudRam by remember { mutableStateOf(PerformanceHudPrefs.get(hudContext, PerformanceHudPrefs.KEY_RAM)) }
-        var hudCpu by remember { mutableStateOf(PerformanceHudPrefs.get(hudContext, PerformanceHudPrefs.KEY_CPU)) }
-        var hudGpu by remember { mutableStateOf(PerformanceHudPrefs.get(hudContext, PerformanceHudPrefs.KEY_GPU)) }
-        var hudBattery by remember { mutableStateOf(PerformanceHudPrefs.get(hudContext, PerformanceHudPrefs.KEY_BATTERY)) }
-
-        SettingsSectionCard(
-            title = stringResource(R.string.vitastation_hud_metrics),
-            summary = stringResource(R.string.vitastation_hud_metrics_desc),
-            help = null,
+                body = stringResource(R.string.settings_emulator_perf_overlay_desc),
+                scope = SettingsScope.Global
+            ),
             onShowHelp = onShowHelp
-        ) {
+        )
+
+        if (cfg.performanceOverlay) {
+            SettingsSubsectionTitle(
+                title = stringResource(R.string.vitastation_hud_metrics),
+                summary = stringResource(R.string.vitastation_hud_metrics_desc)
+            )
             SettingsToggleRow(
                 title = stringResource(R.string.vitastation_hud_fps),
                 checked = hudFps,

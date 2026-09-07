@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SettingsSuggest
+import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Tune
@@ -32,6 +33,7 @@ internal enum class SettingsCategory(
     Core(R.string.settings_tab_core, Icons.Default.Tune),
     Cpu(R.string.settings_tab_cpu, Icons.Default.Speed),
     Gpu(R.string.settings_tab_gpu, Icons.Default.GraphicEq),
+    Performance(R.string.settings_tab_performance, Icons.Default.ShowChart),
     Audio(R.string.settings_tab_audio, Icons.AutoMirrored.Filled.VolumeUp),
     Camera(R.string.settings_tab_camera, Icons.Default.PhotoCamera),
     System(R.string.settings_tab_system, Icons.Default.Language),
@@ -43,10 +45,28 @@ internal enum class SettingsCategory(
 }
 
 internal fun settingsCategories(isPerApp: Boolean): List<SettingsCategory> {
+    val ordered = listOf(
+        SettingsCategory.System,
+        SettingsCategory.Gpu,
+        SettingsCategory.Performance,
+        SettingsCategory.Controls,
+        SettingsCategory.Audio,
+        SettingsCategory.Interface,
+        SettingsCategory.Cpu,
+        SettingsCategory.Core,
+        SettingsCategory.Camera,
+        SettingsCategory.Network,
+        SettingsCategory.Emulator,
+        SettingsCategory.Debug
+    )
     return if (isPerApp) {
-        SettingsCategory.entries.filter { it != SettingsCategory.Camera && it != SettingsCategory.Interface }
+        ordered.filter {
+            it != SettingsCategory.Camera &&
+                it != SettingsCategory.Interface &&
+                it != SettingsCategory.Performance
+        }
     } else {
-        SettingsCategory.entries.toList()
+        ordered
     }
 }
 

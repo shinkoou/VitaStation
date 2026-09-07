@@ -20,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
@@ -104,7 +105,8 @@ fun SettingsRoute(
     val overlayDirty = overlayState != originalOverlayState
     val hasPendingChanges = viewModel.isDirty || overlayDirty
 
-    var selectedCategory by rememberSaveable(titleId) { mutableStateOf(SettingsCategory.Core) }
+    var selectedCategory by rememberSaveable(titleId) { mutableStateOf(SettingsCategory.System) }
+    var showCategoryHome by rememberSaveable(titleId) { mutableStateOf(!isPerApp) }
     var searchQuery by rememberSaveable(titleId) { mutableStateOf("") }
     var showDiscardDialog by remember { mutableStateOf(false) }
     var showResetDefaultsDialog by remember { mutableStateOf(false) }
@@ -236,16 +238,25 @@ fun SettingsRoute(
                             )
                         } else {
                             Text(
-                                if (isPerApp && appName != null) {
-                                    stringResource(R.string.settings_custom_config_label, appName)
-                                } else {
-                                    stringResource(R.string.settings_title)
+                                when {
+                                    isPerApp && appName != null ->
+                                        stringResource(R.string.settings_custom_config_label, appName)
+                                    !isPerApp && !showCategoryHome ->
+                                        selectedCategory.label()
+                                    else ->
+                                        stringResource(R.string.settings_title)
                                 }
                             )
                         }
                     },
                     navigationIcon = {
-                        IconButton(onClick = { tryBack() }) {
+                        IconButton(onClick = {
+                            if (!isPerApp && !showCategoryHome && !searchActive) {
+                                showCategoryHome = true
+                            } else {
+                                tryBack()
+                            }
+                        }) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = stringResource(R.string.action_back)
@@ -343,6 +354,13 @@ fun SettingsRoute(
                     hasOverlayChanges = overlayDirty,
                     connectedGamepads = connectedGamepads,
                     categories = categories,
+                    showCategoryHome = showCategoryHome,
+                    onOpenCategory = { category ->
+                        selectedCategory = category
+                        showCategoryHome = false
+                        searchQuery = ""
+                        searchActive = false
+                    },
                     onChangeStorageFolder = ::requestStorageFolderChange,
                     onResetStorageFolder = { viewModel.resetStorageFolder(onStorageChanged) },
                     onInstallCustomDriver = ::requestCustomDriverInstall,
@@ -600,6 +618,8 @@ private fun SettingsContentPane(
     hasOverlayChanges: Boolean,
     connectedGamepads: List<org.vita3k.emulator.ConnectedGamepad>,
     categories: List<SettingsCategory>,
+    showCategoryHome: Boolean,
+    onOpenCategory: (SettingsCategory) -> Unit,
     onChangeStorageFolder: () -> Unit,
     onResetStorageFolder: () -> Unit,
     onInstallCustomDriver: () -> Unit,
@@ -633,13 +653,19 @@ private fun SettingsContentPane(
             }
         }
 
-        SettingsCategoryStrip(
-            categories = categories,
-            selectedCategory = selectedCategory,
-            onCategorySelected = onSelectedCategoryChange
-        )
-
-        if (searchQuery.isBlank()) {
+        if (!isPerApp && showCategoryHome && searchQuery.isBlank()) {
+            VitaStationSettingsHome(
+                categories = categories,
+                onOpenCategory = onOpenCategory
+            )
+        } else if (searchQuery.isBlank()) {
+            if (isPerApp) {
+                SettingsCategoryStrip(
+                    categories = categories,
+                    selectedCategory = selectedCategory,
+                    onCategorySelected = onSelectedCategoryChange
+                )
+            }
             SettingsCategoryBody(
                 category = selectedCategory,
                 cfg = viewModel.config,
@@ -691,6 +717,92 @@ private fun SettingsContentPane(
             Spacer(modifier = Modifier.width(1.dp))
         }
     }
+}
+
+
+@Composable
+private fun VitaStationSettingsHome(
+    categories: List<SettingsCategory>,
+    onOpenCategory: (SettingsCategory) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = stringResource(R.string.settings_home_subtitle),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 4.dp, bottom = 4.dp)
+        )
+
+        categories.forEach { category ->
+            Surface(
+                onClick = { onOpenCategory(category) },
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.62f),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                        contentColor = MaterialTheme.colorScheme.primary,
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier.padding(11.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = category.icon,
+                                contentDescription = null
+                            )
+                        }
+                    }
+
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Text(
+                            text = category.label(),
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            text = stringResource(settingsCategoryDescription(category)),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Icon(
+                        imageVector = Icons.Default.ChevronRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun settingsCategoryDescription(category: SettingsCategory): Int = when (category) {
+    SettingsCategory.System -> R.string.settings_category_system_desc
+    SettingsCategory.Gpu -> R.string.settings_category_gpu_desc
+    SettingsCategory.Performance -> R.string.settings_category_performance_desc
+    SettingsCategory.Controls -> R.string.settings_category_controls_desc
+    SettingsCategory.Audio -> R.string.settings_category_audio_desc
+    SettingsCategory.Interface -> R.string.settings_category_interface_desc
+    SettingsCategory.Cpu -> R.string.settings_category_cpu_desc
+    SettingsCategory.Core -> R.string.settings_category_core_desc
+    SettingsCategory.Camera -> R.string.settings_category_camera_desc
+    SettingsCategory.Network -> R.string.settings_category_network_desc
+    SettingsCategory.Emulator -> R.string.settings_category_emulator_desc
+    SettingsCategory.Debug -> R.string.settings_category_debug_desc
 }
 
 @Composable

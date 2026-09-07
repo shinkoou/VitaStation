@@ -67,9 +67,6 @@ import org.vita3k.emulator.data.FirmwareInstallState
 import org.vita3k.emulator.data.FirmwareLinks
 import org.vita3k.emulator.ui.components.HtmlText
 
-private const val INITIAL_SETUP_INFO_HTML =
-    """<div align="center">To get started, please install all PS Vita firmware files.<br><br>A comprehensive guide is available on the <a href="https://vita3k.org/quickstart.html">Quickstart</a> page.<br>Check the <a href="https://vita3k.org/compatibility.html">commercial</a> and <a href="https://vita3k.org/compatibility-homebrew.html">homebrew</a> compatibility lists to see what currently runs.<br><br>Contributions are welcome on <a href="https://github.com/Vita3K/Vita3K">GitHub</a>, and additional help is available on <a href="https://discord.gg/6aGwQzh">Discord</a>.</div>"""
-
 private val setupPanelColor = Color(0xE60B1020)
 private val setupCardColor = Color(0xFF11182A)
 private val setupTextColor = Color(0xFFF7FAFF)
@@ -267,7 +264,7 @@ private fun WelcomePage() {
             Spacer(modifier = Modifier.height(18.dp))
 
             HtmlText(
-                html = INITIAL_SETUP_INFO_HTML,
+                html = stringResource(R.string.initial_setup_info_html),
                 modifier = Modifier.fillMaxWidth(),
                 textStyle = MaterialTheme.typography.bodyLarge,
                 textColor = setupTextColor,

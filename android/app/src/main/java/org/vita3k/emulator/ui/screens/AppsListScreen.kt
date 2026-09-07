@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.view.Gravity
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -111,8 +112,6 @@ fun AppsListScreen(
     onOpenWelcomeScreen: () -> Unit = {},
     onOpenCustomConfig: (AppInfo) -> Unit = {}
 ) {
-    var showSearchBar by remember { mutableStateOf(false) }
-    var showFilterSheet by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showAboutSheet by remember { mutableStateOf(false) }
     var selectedAppForActions by remember { mutableStateOf<AppInfo?>(null) }
@@ -128,16 +127,7 @@ fun AppsListScreen(
             }
         },
         topBar = {
-            if (showSearchBar) {
-                SearchBar(
-                    query = searchQuery,
-                    onQueryChange = onSearchChanged,
-                    onClose = {
-                        showSearchBar = false
-                        onSearchChanged("")
-                    }
-                )
-            } else if (selectionMode) {
+            if (selectionMode) {
                 TopAppBar(
                     title = {
                         Text(
@@ -177,15 +167,20 @@ fun AppsListScreen(
             } else {
                 Surface(
                     color = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 4.dp
+                    tonalElevation = 3.dp
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                            .windowInsetsPadding(WindowInsets.statusBars)
+                            .padding(start = 16.dp, end = 12.dp, top = 8.dp, bottom = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Box(modifier = Modifier.fillMaxWidth()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(58.dp)
+                        ) {
                             Image(
                                 painter = painterResource(R.drawable.vitastation_icon),
                                 contentDescription = null,
@@ -197,23 +192,27 @@ fun AppsListScreen(
 
                             Column(
                                 modifier = Modifier.align(Alignment.Center),
-                                horizontalAlignment = Alignment.CenterHorizontally
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(1.dp)
                             ) {
                                 Text(
                                     text = "VitaStation",
                                     style = MaterialTheme.typography.headlineSmall,
                                     fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1
                                 )
                                 Text(
                                     text = "PLAY BEYOND LIMITS",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary
+                                    color = MaterialTheme.colorScheme.primary,
+                                    maxLines = 1
                                 )
                                 Text(
                                     text = appVersion,
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1
                                 )
                             }
 
@@ -245,82 +244,47 @@ fun AppsListScreen(
                             }
                         }
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            FilledTonalButton(
-                                onClick = {},
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(Icons.Default.GridView, contentDescription = null)
-                                Spacer(Modifier.width(6.dp))
-                                Text(stringResource(R.string.vitastation_nav_library))
-                            }
-                            OutlinedButton(
-                                onClick = onOpenSettings,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(Icons.Default.Settings, contentDescription = null)
-                                Spacer(Modifier.width(6.dp))
-                                Text(stringResource(R.string.vitastation_nav_settings))
-                            }
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            OutlinedButton(
-                                onClick = { onViewModeChanged(ViewMode.LIST) },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(
-                                    Icons.AutoMirrored.Filled.List,
-                                    contentDescription = stringResource(R.string.filter_view_list),
-                                    tint = if (viewMode == ViewMode.LIST)
-                                        MaterialTheme.colorScheme.primary
-                                    else
-                                        MaterialTheme.colorScheme.onSurfaceVariant
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = onSearchChanged,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 52.dp),
+                            singleLine = true,
+                            shape = RoundedCornerShape(24.dp),
+                            placeholder = {
+                                Text(
+                                    stringResource(R.string.apps_list_search_placeholder),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                Spacer(Modifier.width(4.dp))
-                                Text(stringResource(R.string.filter_view_list))
-                            }
-                            OutlinedButton(
-                                onClick = { onViewModeChanged(ViewMode.GRID) },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(
-                                    Icons.Default.GridView,
-                                    contentDescription = stringResource(R.string.filter_view_grid),
-                                    tint = if (viewMode == ViewMode.GRID)
-                                        MaterialTheme.colorScheme.primary
-                                    else
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(Modifier.width(4.dp))
-                                Text(stringResource(R.string.filter_view_grid))
-                            }
-                            IconButton(onClick = { showSearchBar = true }) {
+                            },
+                            leadingIcon = {
                                 Icon(
                                     Icons.Default.Search,
-                                    contentDescription = stringResource(R.string.apps_list_cd_search)
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
                                 )
-                            }
-                            IconButton(onClick = { showFilterSheet = true }) {
-                                Icon(
-                                    Icons.Default.FilterList,
-                                    contentDescription = stringResource(R.string.filter_cd_open)
-                                )
-                            }
-                        }
+                            },
+                            trailingIcon = {
+                                IconButton(onClick = onOpenSettings) {
+                                    Icon(
+                                        Icons.Default.Settings,
+                                        contentDescription = stringResource(R.string.settings_cd_open),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.78f),
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.62f),
+                                focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.78f),
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
+                            )
+                        )
                     }
                 }
             }
-        }
-    ) { padding ->
+        }    ) { padding ->
         when {
             loading && apps.isEmpty() -> {
                 Box(
@@ -372,45 +336,22 @@ fun AppsListScreen(
                 }
             }
             else -> {
-                when (viewMode) {
-                    ViewMode.LIST -> AppsListView(
-                        apps = apps,
-                        onAppSelected = onAppSelected,
-                        selectedAppIds = selectedAppIds,
-                        selectionMode = selectionMode,
-                        onSelectionClick = { onToggleAppSelection(it) },
-                        onActionLongPress = {
-                            selectedAppForActions = it
-                            onPrepareAppActions(it)
-                        },
-                        modifier = Modifier.padding(padding)
-                    )
-                    ViewMode.GRID -> AppsGridView(
-                        apps = apps,
-                        onAppSelected = onAppSelected,
-                        selectedAppIds = selectedAppIds,
-                        selectionMode = selectionMode,
-                        onSelectionClick = { onToggleAppSelection(it) },
-                        onActionLongPress = {
-                            selectedAppForActions = it
-                            onPrepareAppActions(it)
-                        },
-                        modifier = Modifier.padding(padding)
-                    )
-                }
+                AppsGridView(
+                    apps = apps,
+                    onAppSelected = onAppSelected,
+                    selectedAppIds = selectedAppIds,
+                    selectionMode = selectionMode,
+                    onSelectionClick = { onToggleAppSelection(it) },
+                    onActionLongPress = {
+                        selectedAppForActions = it
+                        onPrepareAppActions(it)
+                    },
+                    modifier = Modifier.padding(padding)
+                )
             }
         }
     }
 
-    if (showFilterSheet) {
-        FilterSheet(
-            sortOption = sortOption,
-            viewMode = viewMode,
-            onSortChanged = onSortChanged,
-            onViewModeChanged = onViewModeChanged,
-            onDismiss = { showFilterSheet = false }
-        )
-    }
 
     if (showAboutSheet) {
         AboutSheet(
@@ -566,7 +507,7 @@ fun AppsListScreen(
             title = { Text(stringResource(R.string.updates_check_title)) },
             text = {
                 ApplyDialogDim()
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Text(stringResource(R.string.updates_check_progress))
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 }
@@ -1052,9 +993,9 @@ private fun AppsGridView(
     modifier: Modifier = Modifier
 ) {
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = 148.dp),
-        contentPadding = PaddingValues(12.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        columns = GridCells.Adaptive(minSize = 158.dp),
+        contentPadding = PaddingValues(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         modifier = modifier.fillMaxSize()
     ) {
@@ -1094,20 +1035,33 @@ private fun AppGridItem(
                     onLongClick()
                 }
             ),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-        )
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.96f)
+        ),
+        border = BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
     ) {
         Column {
-            AppIcon(app, size = 132, modifier = Modifier.fillMaxWidth())
-            Column(modifier = Modifier.padding(12.dp)) {
+            AppIcon(app, size = 156, modifier = Modifier.fillMaxWidth())
+            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
                 Text(
                     app.title,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = app.titleId,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 3.dp)
                 )
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -1429,13 +1383,13 @@ internal fun AppIcon(app: AppInfo, size: Int, modifier: Modifier = Modifier) {
             contentScale = ContentScale.Crop,
             modifier = modifier
                 .size(size.dp)
-                .clip(RoundedCornerShape(4.dp))
+                .clip(RoundedCornerShape(14.dp))
         )
     } else {
         Box(
             modifier = modifier
                 .size(size.dp)
-                .clip(RoundedCornerShape(4.dp))
+                .clip(RoundedCornerShape(14.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center
         ) {

@@ -47,16 +47,23 @@ void State::update_overlays() {
             shaders_count_compiled = 0;
             m_shaders_compiled_time = now;
 
+#ifndef __ANDROID__
             auto notice = overlay_manager->get<overlay::shader_compile_notice>();
             if (!notice)
                 notice = overlay_manager->create<overlay::shader_compile_notice>();
             notice->update_count(m_shaders_compiled_count, current_backend == Backend::Vulkan);
+#endif
         } else if (m_shaders_compiled_count > 0) {
+#ifdef __ANDROID__
+            if (now - m_shaders_compiled_time > std::chrono::milliseconds(1800))
+                m_shaders_compiled_count = 0;
+#else
             auto notice = overlay_manager->get<overlay::shader_compile_notice>();
             if (notice && notice->should_hide()) {
                 overlay_manager->remove<overlay::shader_compile_notice>();
                 m_shaders_compiled_count = 0;
             }
+#endif
         }
     }
 

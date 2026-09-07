@@ -23,13 +23,16 @@ import java.util.List;
 import java.util.Locale;
 
 public final class PerformanceHudView extends View {
-    private final Paint backgroundPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint panelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint labelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint valuePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint shaderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint shaderTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     private final float density;
     private int fps;
+    private int shaderCount;
     private float ramMb;
     private float cpuPercent;
     private Float gpuPercent;
@@ -38,11 +41,10 @@ public final class PerformanceHudView extends View {
     private long previousWallMs;
 
     private final Runnable updater = new Runnable() {
-        @Override
-        public void run() {
+        @Override public void run() {
             updateMetrics();
             invalidate();
-            postDelayed(this, 1000L);
+            postDelayed(this, 500L);
         }
     };
 
@@ -53,10 +55,10 @@ public final class PerformanceHudView extends View {
         setClickable(false);
         setFocusable(false);
 
-        backgroundPaint.setColor(Color.argb(224, 8, 13, 30));
-        borderPaint.setColor(Color.rgb(89, 216, 255));
+        panelPaint.setColor(Color.argb(205, 7, 12, 27));
+        borderPaint.setColor(Color.argb(205, 89, 216, 255));
         borderPaint.setStyle(Paint.Style.STROKE);
-        borderPaint.setStrokeWidth(dp(1.2f));
+        borderPaint.setStrokeWidth(dp(0.8f));
 
         labelPaint.setColor(Color.rgb(149, 163, 188));
         labelPaint.setTypeface(android.graphics.Typeface.create(
@@ -65,19 +67,22 @@ public final class PerformanceHudView extends View {
         valuePaint.setTypeface(android.graphics.Typeface.create(
                 "sans-serif", android.graphics.Typeface.BOLD));
 
+        shaderPaint.setColor(Color.argb(210, 35, 23, 73));
+        shaderTextPaint.setColor(Color.rgb(190, 166, 255));
+        shaderTextPaint.setTypeface(android.graphics.Typeface.create(
+                "sans-serif-medium", android.graphics.Typeface.NORMAL));
+
         previousCpuMs = Process.getElapsedCpuTime();
         previousWallMs = android.os.SystemClock.elapsedRealtime();
     }
 
-    @Override
-    protected void onAttachedToWindow() {
+    @Override protected void onAttachedToWindow() {
         super.onAttachedToWindow();
         removeCallbacks(updater);
         post(updater);
     }
 
-    @Override
-    protected void onDetachedFromWindow() {
+    @Override protected void onDetachedFromWindow() {
         removeCallbacks(updater);
         super.onDetachedFromWindow();
     }
@@ -89,8 +94,10 @@ public final class PerformanceHudView extends View {
 
         try {
             fps = NativeLib.INSTANCE.getCurrentFps();
+            shaderCount = NativeLib.INSTANCE.getRecentShaderCompileCount();
         } catch (Throwable ignored) {
             fps = 0;
+            shaderCount = 0;
         }
 
         ramMb = Debug.getPss() / 1024f;
@@ -123,8 +130,7 @@ public final class PerformanceHudView extends View {
     }
 
     private Float readGpuUsage() {
-        Float direct = readSinglePercent(
-                "/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage");
+        Float direct = readSinglePercent("/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage");
         if (direct != null) return direct;
 
         try {
@@ -137,8 +143,7 @@ public final class PerformanceHudView extends View {
                     if (total > 0f) return clamp((busy / total) * 100f);
                 }
             }
-        } catch (Throwable ignored) {
-        }
+        } catch (Throwable ignored) {}
 
         try {
             File devfreq = new File("/sys/class/devfreq");
@@ -153,9 +158,7 @@ public final class PerformanceHudView extends View {
                     }
                 }
             }
-        } catch (Throwable ignored) {
-        }
-
+        } catch (Throwable ignored) {}
         return null;
     }
 
@@ -191,73 +194,84 @@ public final class PerformanceHudView extends View {
         return value * density;
     }
 
-    @Override
-    protected void onDraw(Canvas canvas) {
+    @Override protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
         if (getVisibility() != VISIBLE) return;
 
         List<String[]> metrics = new ArrayList<>();
-        if (PerformanceHudPrefs.get(getContext(), PerformanceHudPrefs.KEY_FPS)) {
-            metrics.add(new String[]{"FPS", fps > 0 ? Integer.toString(fps) : "N/A"});
-        }
-        if (PerformanceHudPrefs.get(getContext(), PerformanceHudPrefs.KEY_RAM)) {
+        if (PerformanceHudPrefs.get(getContext(), PerformanceHudPrefs.KEY_FPS))
+            metrics.add(new String[]{"FPS", fps > 0 ? Integer.toString(fps) : "—"});
+        if (PerformanceHudPrefs.get(getContext(), PerformanceHudPrefs.KEY_RAM))
             metrics.add(new String[]{"RAM", ramMb >= 1024f
-                    ? String.format(Locale.US, "%.1f GB", ramMb / 1024f)
-                    : String.format(Locale.US, "%.0f MB", ramMb)});
-        }
-        if (PerformanceHudPrefs.get(getContext(), PerformanceHudPrefs.KEY_CPU)) {
+                    ? String.format(Locale.US, "%.1fG", ramMb / 1024f)
+                    : String.format(Locale.US, "%.0fM", ramMb)});
+        if (PerformanceHudPrefs.get(getContext(), PerformanceHudPrefs.KEY_CPU))
             metrics.add(new String[]{"CPU", String.format(Locale.US, "%.0f%%", cpuPercent)});
-        }
-        if (PerformanceHudPrefs.get(getContext(), PerformanceHudPrefs.KEY_GPU)) {
-            metrics.add(new String[]{"GPU", gpuPercent == null
-                    ? "N/A"
+        if (PerformanceHudPrefs.get(getContext(), PerformanceHudPrefs.KEY_GPU))
+            metrics.add(new String[]{"GPU", gpuPercent == null ? "—"
                     : String.format(Locale.US, "%.0f%%", gpuPercent)});
-        }
-        if (PerformanceHudPrefs.get(getContext(), PerformanceHudPrefs.KEY_BATTERY)) {
-            metrics.add(new String[]{"T. BATT", batteryTemp == null
-                    ? "N/A"
+        if (PerformanceHudPrefs.get(getContext(), PerformanceHudPrefs.KEY_BATTERY))
+            metrics.add(new String[]{"BATT", batteryTemp == null ? "—"
                     : String.format(Locale.US, "%.1f°C", batteryTemp)});
-        }
 
         if (metrics.isEmpty()) return;
 
-        float left = dp(10f);
-        float top = dp(10f);
-        float right = getWidth() - dp(10f);
-        float height = dp(68f);
+        float available = Math.max(dp(180f), getWidth() - dp(20f));
+        float panelWidth = Math.min(available, dp(520f));
+        float left = (getWidth() - panelWidth) / 2f;
+        float top = dp(5f);
+        float height = dp(34f);
+        float right = left + panelWidth;
         RectF panel = new RectF(left, top, right, top + height);
 
-        canvas.drawRoundRect(panel, dp(18f), dp(18f), backgroundPaint);
-        canvas.drawRoundRect(panel, dp(18f), dp(18f), borderPaint);
+        canvas.drawRoundRect(panel, dp(12f), dp(12f), panelPaint);
+        canvas.drawRoundRect(panel, dp(12f), dp(12f), borderPaint);
 
-        labelPaint.setTextSize(dp(10.5f));
-        valuePaint.setTextSize(dp(16f));
-        labelPaint.setTextAlign(Paint.Align.CENTER);
-        valuePaint.setTextAlign(Paint.Align.CENTER);
+        labelPaint.setTextSize(dp(7.5f));
+        valuePaint.setTextSize(dp(11.5f));
 
-        float cellWidth = (right - left) / metrics.size();
-        for (int index = 0; index < metrics.size(); index++) {
-            float x = left + cellWidth * index + cellWidth / 2f;
-            String[] metric = metrics.get(index);
-            canvas.drawText(metric[0], x, top + dp(25f), labelPaint);
-            canvas.drawText(metric[1], x, top + dp(49f), valuePaint);
+        float cellWidth = panelWidth / metrics.size();
+        for (int i = 0; i < metrics.size(); i++) {
+            float center = left + (cellWidth * i) + (cellWidth / 2f);
+            String[] metric = metrics.get(i);
 
-            if (index > 0) {
-                Paint separator = new Paint(Paint.ANTI_ALIAS_FLAG);
-                separator.setColor(Color.argb(75, 139, 92, 246));
-                canvas.drawRect(
-                        left + cellWidth * index,
-                        top + dp(16f),
-                        left + cellWidth * index + dp(1f),
-                        top + height - dp(16f),
-                        separator);
-            }
+            float labelWidth = labelPaint.measureText(metric[0]);
+            float valueWidth = valuePaint.measureText(metric[1]);
+            float gap = dp(4f);
+            float start = center - (labelWidth + gap + valueWidth) / 2f;
+            float baseline = top + dp(22f);
+
+            labelPaint.setTextAlign(Paint.Align.LEFT);
+            valuePaint.setTextAlign(Paint.Align.LEFT);
+            canvas.drawText(metric[0], start, baseline, labelPaint);
+            canvas.drawText(metric[1], start + labelWidth + gap, baseline, valuePaint);
+        }
+
+        if (shaderCount > 0) {
+            String shaderText = "SHADERS  •  " + shaderCount;
+            shaderTextPaint.setTextSize(dp(8.5f));
+            shaderTextPaint.setTextAlign(Paint.Align.CENTER);
+            float textWidth = shaderTextPaint.measureText(shaderText);
+            float pillWidth = textWidth + dp(22f);
+            float pillTop = top + height + dp(3f);
+            RectF pill = new RectF(
+                    getWidth() / 2f - pillWidth / 2f,
+                    pillTop,
+                    getWidth() / 2f + pillWidth / 2f,
+                    pillTop + dp(17f)
+            );
+            canvas.drawRoundRect(pill, dp(8.5f), dp(8.5f), shaderPaint);
+            canvas.drawText(
+                    shaderText,
+                    getWidth() / 2f,
+                    pillTop + dp(11.8f),
+                    shaderTextPaint
+            );
         }
     }
 
-    @Override
-    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+    @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         int width = MeasureSpec.getSize(widthMeasureSpec);
-        setMeasuredDimension(width, (int) dp(88f));
+        setMeasuredDimension(width, (int) dp(62f));
     }
 }

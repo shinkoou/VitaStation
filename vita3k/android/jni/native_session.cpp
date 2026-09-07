@@ -12,11 +12,13 @@
 #include <ime/keyboard.h>
 #include <io/state.h>
 #include <motion/functions.h>
+#include <renderer/state.h>
 
 #include <SDL3/SDL_events.h>
 #include <jni.h>
 
 #include <algorithm>
+#include <chrono>
 
 namespace {
 
@@ -155,6 +157,24 @@ Java_org_vita3k_emulator_NativeLib_getCurrentFps(JNIEnv *, jclass) {
         return 0;
 
     return static_cast<jint>(emuenv->fps);
+}
+
+JNIEXPORT jint JNICALL
+Java_org_vita3k_emulator_NativeLib_getRecentShaderCompileCount(JNIEnv *, jclass) {
+    auto *emuenv = get_emuenv();
+    auto *controller = get_app_session_controller();
+    if (!emuenv || !controller || !controller->is_running() || !emuenv->renderer)
+        return 0;
+
+    const auto &state = *emuenv->renderer;
+    if (state.m_shaders_compiled_count == 0)
+        return 0;
+
+    const auto now = std::chrono::steady_clock::now();
+    if (now - state.m_shaders_compiled_time > std::chrono::milliseconds(1800))
+        return 0;
+
+    return static_cast<jint>(state.m_shaders_compiled_count);
 }
 
 JNIEXPORT jboolean JNICALL

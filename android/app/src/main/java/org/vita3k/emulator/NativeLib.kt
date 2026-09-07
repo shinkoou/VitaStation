@@ -144,6 +144,8 @@ object NativeLib {
     external fun getRunningAppTitle(): String
     /** Returns the emulator current measured FPS. */
     external fun getCurrentFps(): Int
+    /** Returns the current short-lived shader compilation burst count. */
+    external fun getRecentShaderCompileCount(): Int
     /** Returns true while either SceIme or CommonDialog IME is active. */
     external fun isImeActive(): Boolean
     /** Submits the currently active IME session as if the user pressed Enter/OK. */

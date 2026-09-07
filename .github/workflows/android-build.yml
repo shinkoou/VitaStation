@@ -16,7 +16,7 @@ on:
       - '.github/workflows/android-build.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   VCPKG_ROOT: /usr/local/share/vcpkg
@@ -32,6 +32,100 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
+
+      - name: Repair Phase01 Kotlin viewMode clash
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path(
+              "android/app/src/main/java/org/vita3k/emulator/ui/viewmodel/"
+              "AppsListViewModel.kt"
+          )
+          text = path.read_text(encoding="utf-8")
+
+          already_fixed = (
+              "private var _viewMode by mutableStateOf(loadViewMode())" in text
+              and "val viewMode: ViewMode" in text
+              and "fun setViewMode(mode: ViewMode)" in text
+          )
+
+          if already_fixed:
+              print("Phase01 Kotlin setter clash is already repaired.")
+          else:
+              old_property = """    var viewMode by mutableStateOf(loadViewMode())
+                  private set
+          """
+              new_property = """    private var _viewMode by mutableStateOf(loadViewMode())
+              val viewMode: ViewMode
+                  get() = _viewMode
+          """
+
+              if text.count(old_property) != 1:
+                  raise SystemExit(
+                      "Could not find the expected viewMode property exactly once."
+                  )
+              text = text.replace(old_property, new_property, 1)
+
+              replacements = [
+                  (
+                      "        if (viewMode == mode) return\n",
+                      "        if (_viewMode == mode) return\n",
+                  ),
+                  (
+                      "        viewMode = mode\n",
+                      "        _viewMode = mode\n",
+                  ),
+                  (
+                      "        setViewMode(if (viewMode == ViewMode.LIST) ViewMode.GRID else ViewMode.LIST)\n",
+                      "        setViewMode(if (_viewMode == ViewMode.LIST) ViewMode.GRID else ViewMode.LIST)\n",
+                  ),
+              ]
+
+              for old, new in replacements:
+                  if text.count(old) != 1:
+                      raise SystemExit(
+                          f"Expected exactly one occurrence of: {old.strip()}"
+                      )
+                  text = text.replace(old, new, 1)
+
+              path.write_text(text, encoding="utf-8")
+              print("Repaired Phase01 Kotlin setter clash.")
+
+          final = path.read_text(encoding="utf-8")
+
+          if "    var viewMode by mutableStateOf(loadViewMode())" in final:
+              raise SystemExit("Old mutable viewMode property still exists.")
+          if "private var _viewMode by mutableStateOf(loadViewMode())" not in final:
+              raise SystemExit("Backing _viewMode state was not created.")
+          if "fun setViewMode(mode: ViewMode)" not in final:
+              raise SystemExit("Public setViewMode API is missing.")
+
+          print("Phase01 Kotlin repair validation passed.")
+          PY
+
+          git diff --check
+
+      - name: Persist source repair
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TARGET="android/app/src/main/java/org/vita3k/emulator/ui/viewmodel/AppsListViewModel.kt"
+
+          git config user.name "VitaStation Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add "$TARGET"
+
+          if git diff --cached --quiet; then
+            echo "Source repair already committed."
+          else
+            git commit -m "Fix Phase 01 view mode JVM setter clash"
+            git push origin HEAD:main
+          fi
 
       - name: Restore native dependency cache
         uses: actions/cache@v5
@@ -73,7 +167,8 @@ jobs:
         run: |
           set -euo pipefail
           test -f artifacts/vitastation-android/app.apk
-          mv artifacts/vitastation-android/app.apk artifacts/vitastation-android/VitaStation-v0.1.0-Phase01.apk
+          mv artifacts/vitastation-android/app.apk \
+            artifacts/vitastation-android/VitaStation-v0.1.0-Phase01.apk
           ls -lh artifacts/vitastation-android/
 
       - name: Upload VitaStation APK

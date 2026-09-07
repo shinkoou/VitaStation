@@ -204,6 +204,12 @@ fun SettingsRoute(
     }
 
     fun tryBack() {
+        if (!isPerApp) {
+            if (overlayDirty) persistOverlayStateChanges()
+            viewModel.flushGlobalSettings { onBack() }
+            return
+        }
+
         if (hasPendingChanges) showDiscardDialog = true else onBack()
     }
 
@@ -264,7 +270,7 @@ fun SettingsRoute(
                         }
                     },
                     actions = {
-                        if (!searchActive && hasPendingChanges && !viewModel.saving && !viewModel.customDriverBusy) {
+                        if (isPerApp && !searchActive && hasPendingChanges && !viewModel.saving && !viewModel.customDriverBusy) {
                             IconButton(onClick = {
                                 saveSettings { restartRequired ->
                                     if (restartRequired.isNotEmpty()) {

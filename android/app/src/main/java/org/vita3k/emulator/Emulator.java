@@ -55,6 +55,7 @@ import org.libsdl.app.SDLDummyEdit;
 import org.libsdl.app.SDLSurface;
 import org.vita3k.emulator.data.AppStorage;
 import org.vita3k.emulator.data.NativeImeState;
+import org.vita3k.emulator.data.PerformanceHudPrefs;
 import org.vita3k.emulator.overlay.InputOverlay;
 import org.vita3k.emulator.overlay.OverlayLayout;
 import org.vita3k.emulator.overlay.OverlayStore;
@@ -233,19 +234,25 @@ public class Emulator extends SDLActivity
     }
 
     private void installPerformanceHud() {
-        try {
-            performanceHudView = new PerformanceHudView(this);
-            android.widget.FrameLayout.LayoutParams params =
-                    new android.widget.FrameLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.WRAP_CONTENT,
-                            android.view.Gravity.TOP);
-            ViewGroup decor = (ViewGroup) getWindow().getDecorView();
-            decor.addView(performanceHudView, params);
-            performanceHudView.bringToFront();
-        } catch (Throwable t) {
-            Log.w(TAG, "Unable to install VitaStation performance HUD", t);
-        }
+        if (!PerformanceHudPrefs.isMasterEnabled(this)) return;
+
+        final View decorView = getWindow().getDecorView();
+        decorView.postDelayed(() -> {
+            if (isFinishing() || isDestroyed() || performanceHudView != null) return;
+            try {
+                performanceHudView = new PerformanceHudView(this);
+                android.widget.FrameLayout.LayoutParams params =
+                        new android.widget.FrameLayout.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.WRAP_CONTENT,
+                                android.view.Gravity.TOP);
+                ViewGroup decor = (ViewGroup) getWindow().getDecorView();
+                decor.addView(performanceHudView, params);
+                performanceHudView.bringToFront();
+            } catch (Throwable t) {
+                Log.w(TAG, "Unable to install VitaStation performance HUD", t);
+            }
+        }, 1200L);
     }
 
     @Override

@@ -10,6 +10,7 @@ import android.graphics.RectF;
 import android.os.BatteryManager;
 import android.os.Debug;
 import android.os.Process;
+import android.os.SystemClock;
 import android.view.View;
 
 import org.vita3k.emulator.NativeLib;
@@ -23,6 +24,9 @@ import java.util.List;
 import java.util.Locale;
 
 public final class PerformanceHudView extends View {
+    private static final long FAST_UPDATE_MS = 500L;
+    private static final long SLOW_UPDATE_MS = 2000L;
+
     private final Paint panelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint labelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -31,6 +35,7 @@ public final class PerformanceHudView extends View {
     private final Paint shaderTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     private final float density;
+    private final boolean hudEnabled;
     private int fps;
     private int shaderCount;
     private float ramMb;
@@ -39,47 +44,56 @@ public final class PerformanceHudView extends View {
     private Float batteryTemp;
     private long previousCpuMs;
     private long previousWallMs;
+    private long lastSlowUpdateMs;
 
     private final Runnable updater = new Runnable() {
         @Override public void run() {
-            updateMetrics();
-            invalidate();
-            postDelayed(this, 500L);
+            if (hudEnabled) {
+                updateFastMetrics();
+                long now = SystemClock.elapsedRealtime();
+                if (lastSlowUpdateMs == 0L || now - lastSlowUpdateMs >= SLOW_UPDATE_MS) {
+                    updateSlowMetrics(now);
+                }
+                invalidate();
+                postDelayed(this, FAST_UPDATE_MS);
+            }
         }
     };
 
     public PerformanceHudView(Context context) {
         super(context);
         density = getResources().getDisplayMetrics().density;
+        hudEnabled = PerformanceHudPrefs.isMasterEnabled(context);
         setWillNotDraw(false);
         setClickable(false);
         setFocusable(false);
+        setVisibility(hudEnabled ? VISIBLE : GONE);
 
-        panelPaint.setColor(Color.argb(205, 7, 12, 27));
-        borderPaint.setColor(Color.argb(205, 89, 216, 255));
+        panelPaint.setColor(Color.argb(110, 7, 12, 27));
+        borderPaint.setColor(Color.argb(112, 89, 216, 255));
         borderPaint.setStyle(Paint.Style.STROKE);
-        borderPaint.setStrokeWidth(dp(0.8f));
+        borderPaint.setStrokeWidth(dp(0.7f));
 
-        labelPaint.setColor(Color.rgb(149, 163, 188));
+        labelPaint.setColor(Color.argb(220, 170, 181, 201));
         labelPaint.setTypeface(android.graphics.Typeface.create(
                 "sans-serif-medium", android.graphics.Typeface.NORMAL));
         valuePaint.setColor(Color.WHITE);
         valuePaint.setTypeface(android.graphics.Typeface.create(
                 "sans-serif", android.graphics.Typeface.BOLD));
 
-        shaderPaint.setColor(Color.argb(210, 35, 23, 73));
-        shaderTextPaint.setColor(Color.rgb(190, 166, 255));
+        shaderPaint.setColor(Color.argb(112, 35, 23, 73));
+        shaderTextPaint.setColor(Color.argb(235, 205, 188, 255));
         shaderTextPaint.setTypeface(android.graphics.Typeface.create(
                 "sans-serif-medium", android.graphics.Typeface.NORMAL));
 
         previousCpuMs = Process.getElapsedCpuTime();
-        previousWallMs = android.os.SystemClock.elapsedRealtime();
+        previousWallMs = SystemClock.elapsedRealtime();
     }
 
     @Override protected void onAttachedToWindow() {
         super.onAttachedToWindow();
         removeCallbacks(updater);
-        post(updater);
+        if (hudEnabled) post(updater);
     }
 
     @Override protected void onDetachedFromWindow() {
@@ -87,11 +101,7 @@ public final class PerformanceHudView extends View {
         super.onDetachedFromWindow();
     }
 
-    private void updateMetrics() {
-        boolean enabled = PerformanceHudPrefs.isMasterEnabled(getContext());
-        setVisibility(enabled ? VISIBLE : GONE);
-        if (!enabled) return;
-
+    private void updateFastMetrics() {
         try {
             fps = NativeLib.INSTANCE.getCurrentFps();
             shaderCount = NativeLib.INSTANCE.getRecentShaderCompileCount();
@@ -99,11 +109,12 @@ public final class PerformanceHudView extends View {
             fps = 0;
             shaderCount = 0;
         }
+    }
 
+    private void updateSlowMetrics(long nowWall) {
         ramMb = Debug.getPss() / 1024f;
 
         long nowCpu = Process.getElapsedCpuTime();
-        long nowWall = android.os.SystemClock.elapsedRealtime();
         long cpuDelta = Math.max(0L, nowCpu - previousCpuMs);
         long wallDelta = Math.max(1L, nowWall - previousWallMs);
         int cores = Math.max(1, Runtime.getRuntime().availableProcessors());
@@ -113,6 +124,7 @@ public final class PerformanceHudView extends View {
 
         gpuPercent = readGpuUsage();
         batteryTemp = readBatteryTemperature();
+        lastSlowUpdateMs = nowWall;
     }
 
     private Float readBatteryTemperature() {
@@ -196,7 +208,7 @@ public final class PerformanceHudView extends View {
 
     @Override protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        if (getVisibility() != VISIBLE) return;
+        if (!hudEnabled || getVisibility() != VISIBLE) return;
 
         List<String[]> metrics = new ArrayList<>();
         if (PerformanceHudPrefs.get(getContext(), PerformanceHudPrefs.KEY_FPS))
@@ -216,30 +228,28 @@ public final class PerformanceHudView extends View {
 
         if (metrics.isEmpty()) return;
 
-        float available = Math.max(dp(180f), getWidth() - dp(20f));
-        float panelWidth = Math.min(available, dp(520f));
+        float available = Math.max(dp(180f), getWidth() - dp(24f));
+        float panelWidth = Math.min(available, dp(500f));
         float left = (getWidth() - panelWidth) / 2f;
-        float top = dp(5f);
-        float height = dp(34f);
-        float right = left + panelWidth;
-        RectF panel = new RectF(left, top, right, top + height);
+        float top = dp(4f);
+        float height = dp(30f);
+        RectF panel = new RectF(left, top, left + panelWidth, top + height);
 
-        canvas.drawRoundRect(panel, dp(12f), dp(12f), panelPaint);
-        canvas.drawRoundRect(panel, dp(12f), dp(12f), borderPaint);
+        canvas.drawRoundRect(panel, dp(11f), dp(11f), panelPaint);
+        canvas.drawRoundRect(panel, dp(11f), dp(11f), borderPaint);
 
-        labelPaint.setTextSize(dp(7.5f));
-        valuePaint.setTextSize(dp(11.5f));
+        labelPaint.setTextSize(dp(7.2f));
+        valuePaint.setTextSize(dp(10.6f));
 
         float cellWidth = panelWidth / metrics.size();
         for (int i = 0; i < metrics.size(); i++) {
             float center = left + (cellWidth * i) + (cellWidth / 2f);
             String[] metric = metrics.get(i);
-
             float labelWidth = labelPaint.measureText(metric[0]);
             float valueWidth = valuePaint.measureText(metric[1]);
-            float gap = dp(4f);
+            float gap = dp(3.5f);
             float start = center - (labelWidth + gap + valueWidth) / 2f;
-            float baseline = top + dp(22f);
+            float baseline = top + dp(19.7f);
 
             labelPaint.setTextAlign(Paint.Align.LEFT);
             valuePaint.setTextAlign(Paint.Align.LEFT);
@@ -249,29 +259,24 @@ public final class PerformanceHudView extends View {
 
         if (shaderCount > 0) {
             String shaderText = "SHADERS  •  " + shaderCount;
-            shaderTextPaint.setTextSize(dp(8.5f));
+            shaderTextPaint.setTextSize(dp(8.0f));
             shaderTextPaint.setTextAlign(Paint.Align.CENTER);
             float textWidth = shaderTextPaint.measureText(shaderText);
-            float pillWidth = textWidth + dp(22f);
-            float pillTop = top + height + dp(3f);
+            float pillWidth = textWidth + dp(20f);
+            float pillTop = top + height + dp(2.5f);
             RectF pill = new RectF(
                     getWidth() / 2f - pillWidth / 2f,
                     pillTop,
                     getWidth() / 2f + pillWidth / 2f,
-                    pillTop + dp(17f)
+                    pillTop + dp(15.5f)
             );
-            canvas.drawRoundRect(pill, dp(8.5f), dp(8.5f), shaderPaint);
-            canvas.drawText(
-                    shaderText,
-                    getWidth() / 2f,
-                    pillTop + dp(11.8f),
-                    shaderTextPaint
-            );
+            canvas.drawRoundRect(pill, dp(8f), dp(8f), shaderPaint);
+            canvas.drawText(shaderText, getWidth() / 2f, pillTop + dp(10.7f), shaderTextPaint);
         }
     }
 
     @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         int width = MeasureSpec.getSize(widthMeasureSpec);
-        setMeasuredDimension(width, (int) dp(62f));
+        setMeasuredDimension(width, (int) dp(52f));
     }
 }

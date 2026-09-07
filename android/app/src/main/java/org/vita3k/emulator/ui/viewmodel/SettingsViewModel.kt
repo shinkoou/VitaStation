@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -39,6 +40,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     private var loadJob: Job? = null
     private var memoryMappingRefreshJob: Job? = null
+    private var autoSaveJob: Job? = null
     private var loadRequestId = 0
     private var memoryMappingRefreshRequestId = 0
     private var activeLoadRouteKey: String? = null
@@ -492,6 +494,53 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
         if (previousDriverName != updatedConfig.customDriverName) {
             refreshSupportedMemoryMappingMask(updatedConfig.customDriverName)
+        }
+
+        scheduleGlobalAutoSave()
+    }
+
+    private fun scheduleGlobalAutoSave() {
+        if (titleId != null) return
+
+        autoSaveJob?.cancel()
+        autoSaveJob = viewModelScope.launch {
+            delay(400L)
+            while (saving) delay(50L)
+            if (titleId == null && isDirty) save()
+        }
+    }
+
+    fun flushGlobalSettings(onFlushed: () -> Unit = {}) {
+        autoSaveJob?.cancel()
+        viewModelScope.launch {
+            while (saving) delay(50L)
+
+            if (titleId != null || !isDirty) {
+                onFlushed()
+                return@launch
+            }
+
+            val configSnapshot = config.copy()
+            saving = true
+            try {
+                withContext(Dispatchers.IO) {
+                    SettingsRepository.save(null, null, configSnapshot)
+                }
+                originalConfig = configSnapshot.copy()
+                originalModulesList = modulesList
+                loadedRouteKey = routeKey(null)
+                UiLanguages.applyAndPersist(getApplication(), configSnapshot.userLang)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (e: Exception) {
+                operationResult = SettingsOperationResult(
+                    str(R.string.install_error_generic, e.message ?: ""),
+                    true
+                )
+            } finally {
+                saving = false
+                onFlushed()
+            }
         }
     }
 

@@ -1722,6 +1722,7 @@ private fun PerformanceSettingsSection(
             title = stringResource(R.string.settings_emulator_perf_overlay),
             checked = cfg.performanceOverlay,
             onCheckedChange = { enabled ->
+                PerformanceHudPrefs.setMasterEnabled(hudContext, enabled)
                 onUpdate { performanceOverlay = enabled }
             },
             summary = stringResource(R.string.vitastation_hud_compact_summary),

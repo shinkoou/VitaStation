@@ -2,10 +2,12 @@ package org.vita3k.emulator
 
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import java.io.File
 import org.vita3k.emulator.data.AppStorage
 import org.vita3k.emulator.ui.navigation.AppNavigation
 import org.vita3k.emulator.ui.theme.Vita3KTheme
@@ -23,6 +25,14 @@ class MainActivity : AppCompatActivity() {
     private val emulatorLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
+        val startedAt = lastLaunchStartedAtMs
+        if (startedAt > 0L) {
+            val elapsed = SystemClock.elapsedRealtime() - startedAt
+            if (elapsed in 1L..30_000L) appendShortSessionDiagnostic(lastLaunchTitleId, elapsed)
+            lastLaunchStartedAtMs = 0L
+            lastLaunchTitleId = ""
+        }
+
         if (appsListViewModel.initialized) {
             appsListViewModel.reloadAppsList()
         }
@@ -34,6 +44,8 @@ class MainActivity : AppCompatActivity() {
     private var pendingInstallFileExtensions: Set<String>? = null
     private var pendingArchiveFolderExtensions: Set<String>? = null
     private var pendingStorageAction: (() -> Unit)? = null
+    private var lastLaunchStartedAtMs: Long = 0L
+    private var lastLaunchTitleId: String = ""
 
     private val folderPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -190,7 +202,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun launchApp(titleId: String, appTitle: String) {
-        emulatorLauncher.launch(Emulator.createLaunchIntent(this, titleId, appTitle))
+        settingsViewModel.flushGlobalSettings {
+            lastLaunchStartedAtMs = SystemClock.elapsedRealtime()
+            lastLaunchTitleId = titleId
+            emulatorLauncher.launch(Emulator.createLaunchIntent(this, titleId, appTitle))
+        }
+    }
+
+    private fun appendShortSessionDiagnostic(titleId: String, elapsedMs: Long) {
+        runCatching {
+            val root = File(AppStorage.storageRootPath(this))
+            if (!root.exists()) root.mkdirs()
+            File(root, "vitastation-session-diagnostics.log").appendText(
+                "short-session titleId=$titleId elapsedMs=$elapsedMs " +
+                    "device=${Build.MANUFACTURER}/${Build.MODEL} sdk=${Build.VERSION.SDK_INT}
+"
+            )
+        }
     }
 
     private fun launchFilePicker(mimeTypes: Array<String>) {

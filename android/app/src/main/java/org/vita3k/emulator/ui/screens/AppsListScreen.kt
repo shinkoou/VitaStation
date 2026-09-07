@@ -173,13 +173,13 @@ fun AppsListScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .windowInsetsPadding(WindowInsets.statusBars)
-                            .padding(start = 16.dp, end = 12.dp, top = 8.dp, bottom = 12.dp),
+                            .padding(start = 16.dp, end = 12.dp, top = 6.dp, bottom = 10.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(58.dp)
+                                .height(54.dp)
                         ) {
                             Image(
                                 painter = painterResource(R.drawable.vitastation_icon),
@@ -206,12 +206,6 @@ fun AppsListScreen(
                                     text = "PLAY BEYOND LIMITS",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary,
-                                    maxLines = 1
-                                )
-                                Text(
-                                    text = appVersion,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1
                                 )
                             }

@@ -22,6 +22,7 @@ import org.vita3k.emulator.data.AppRepository
 import org.vita3k.emulator.data.SortOption
 import org.vita3k.emulator.data.UpdateCheckResult
 import org.vita3k.emulator.data.ViewMode
+import org.vita3k.emulator.data.VitaStationMigrations
 
 private const val UI_PREFS_NAME = "vitastation_ui"
 private const val KEY_LIBRARY_VIEW_MODE = "library_view_mode"
@@ -89,6 +90,7 @@ class AppsListViewModel(application: Application) : AndroidViewModel(application
             val success = AppRepository.initialize(storagePath)
             initialized = success
             if (success) {
+                VitaStationMigrations.apply(getApplication())
                 firmwareInstallState = AppRepository.getFirmwareInstallState()
                 loadApps()
                 startCompatibilitySync()

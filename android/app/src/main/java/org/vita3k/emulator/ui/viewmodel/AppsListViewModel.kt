@@ -14,14 +14,12 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
-import org.vita3k.emulator.NativeLib
 import org.vita3k.emulator.R
 import org.vita3k.emulator.data.FirmwareInstallState
 import org.vita3k.emulator.data.AppInfo
 import org.vita3k.emulator.data.AppRepository
 import org.vita3k.emulator.data.SortOption
 import org.vita3k.emulator.data.UpdateCheckResult
-import org.vita3k.emulator.data.UpdateCheckStatus
 import org.vita3k.emulator.data.ViewMode
 
 private const val UI_PREFS_NAME = "vitastation_ui"
@@ -47,7 +45,6 @@ class AppsListViewModel(application: Application) : AndroidViewModel(application
     private val availableActionsByTitleId = mutableStateMapOf<String, Set<AppAction>>()
     private var compatSyncStarted = false
     private var compatSyncInProgress = false
-    private var startupUpdateCheckStarted = false
 
     var initialized by mutableStateOf(false)
         private set
@@ -94,7 +91,6 @@ class AppsListViewModel(application: Application) : AndroidViewModel(application
                 firmwareInstallState = AppRepository.getFirmwareInstallState()
                 loadApps()
                 startCompatibilitySync()
-                startUpdateCheckIfEnabled()
             }
             loading = false
         }
@@ -256,41 +252,10 @@ class AppsListViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun checkForUpdates(manual: Boolean = true) {
-        if (updateCheckInProgress) {
-            if (manual) {
-                updateCheckResult = UpdateCheckResult(
-                    status = UpdateCheckStatus.Failed,
-                    message = str(R.string.updates_check_in_progress),
-                    currentDisplayVersion = appVersion
-                )
-            }
-            return
-        }
-
-        updateCheckInProgress = true
-        viewModelScope.launch {
-            try {
-                val result = AppRepository.checkForUpdates(
-                    appVersion = appVersion,
-                    officialBuild = NativeLib.isOfficialBuild()
-                )
-                if (manual || result.status == UpdateCheckStatus.UpdateAvailable || result.status == UpdateCheckStatus.CustomBuildCanUpdate) {
-                    updateCheckResult = result
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (e: Exception) {
-                if (manual) {
-                    updateCheckResult = UpdateCheckResult(
-                        status = UpdateCheckStatus.Failed,
-                        message = str(R.string.install_error_generic, e.message ?: ""),
-                        currentDisplayVersion = appVersion
-                    )
-                }
-            } finally {
-                updateCheckInProgress = false
-            }
-        }
+        // VitaStation intentionally does not use Vita3K's official updater.
+        // A VitaStation updater will be wired only after its own release channel exists.
+        updateCheckInProgress = false
+        updateCheckResult = null
     }
 
     private fun runActionWithProgress(block: suspend () -> String) {
@@ -322,18 +287,6 @@ class AppsListViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             if (syncCompatibilityDatabase()) {
                 loadApps()
-            }
-        }
-    }
-
-    private fun startUpdateCheckIfEnabled() {
-        if (startupUpdateCheckStarted) return
-
-        startupUpdateCheckStarted = true
-        viewModelScope.launch {
-            val enabled = runCatching { NativeLib.getGlobalConfig().checkForUpdatesMode != 0 }.getOrDefault(true)
-            if (enabled) {
-                checkForUpdates(manual = false)
             }
         }
     }

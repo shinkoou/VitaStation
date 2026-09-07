@@ -34,7 +34,6 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -103,7 +102,6 @@ fun AppsListScreen(
     onSearchChanged: (String) -> Unit,
     onSortChanged: (SortOption) -> Unit,
     onViewModeChanged: (ViewMode) -> Unit,
-    onCheckForUpdates: () -> Unit,
     onDismissUpdateCheckResult: () -> Unit,
     onRefresh: () -> Unit,
     onInstallClick: () -> Unit,
@@ -732,16 +730,6 @@ private fun AppsListOverflowMenu(
                     )
                 },
                 onClick = onWelcomeScreen
-            )
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.apps_list_menu_check_updates)) },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.SystemUpdate,
-                        contentDescription = null
-                    )
-                },
-                onClick = onCheckForUpdates
             )
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.apps_list_menu_about)) },

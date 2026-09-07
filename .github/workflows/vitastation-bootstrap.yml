@@ -1,0 +1,52 @@
+name: VitaStation Bootstrap
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout VitaStation
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Import Vita3K-Plus snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/nckstwrt/Vita3K-Plus.git || true
+          git fetch upstream master
+          git checkout upstream/master -- .
+
+      - name: Keep only VitaStation bootstrap workflow for now
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .github/workflows/vitastation-bootstrap.yml /tmp/vitastation-bootstrap.yml
+          rm -rf .github/workflows
+          mkdir -p .github/workflows
+          cp /tmp/vitastation-bootstrap.yml .github/workflows/vitastation-bootstrap.yml
+
+      - name: Apply VitaStation Phase 01 selectable Grid
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --check VitaStation-v0.1.0-Phase01-Selectable-Grid.patch
+          git apply VitaStation-v0.1.0-Phase01-Selectable-Grid.patch
+          git rm VitaStation-v0.1.0-Phase01-Selectable-Grid.patch
+
+      - name: Commit VitaStation foundation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "VitaStation Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "VitaStation v0.1.0 Phase 01: import base and selectable Grid"
+          git push origin HEAD:main

@@ -66,8 +66,9 @@ class AppsListViewModel(application: Application) : AndroidViewModel(application
         private set
     var sortOption by mutableStateOf(SortOption.TITLE)
         private set
-    var viewMode by mutableStateOf(loadViewMode())
-        private set
+    private var _viewMode by mutableStateOf(loadViewMode())
+    val viewMode: ViewMode
+        get() = _viewMode
     var appVersion by mutableStateOf("")
         private set
     var updateCheckInProgress by mutableStateOf(false)
@@ -134,16 +135,16 @@ class AppsListViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun setViewMode(mode: ViewMode) {
-        if (viewMode == mode) return
+        if (_viewMode == mode) return
 
-        viewMode = mode
+        _viewMode = mode
         uiPreferences.edit()
             .putString(KEY_LIBRARY_VIEW_MODE, mode.name)
             .apply()
     }
 
     fun toggleViewMode() {
-        setViewMode(if (viewMode == ViewMode.LIST) ViewMode.GRID else ViewMode.LIST)
+        setViewMode(if (_viewMode == ViewMode.LIST) ViewMode.GRID else ViewMode.LIST)
     }
 
     private fun loadViewMode(): ViewMode {

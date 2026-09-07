@@ -53,10 +53,10 @@ jobs:
               path.write_text(text.replace(old, new, 1), encoding="utf-8")
               print(f"OK: {label}")
 
-          # ------------------------------------------------------------------
+          # ---------------------------------------------------------------
           # AppsListViewModel.kt
-          # Persist the selected Library view mode and expose explicit setter.
-          # ------------------------------------------------------------------
+          # Persist selected Library mode and expose explicit setter.
+          # ---------------------------------------------------------------
           vm = ROOT / "ui/viewmodel/AppsListViewModel.kt"
 
           replace_once(
@@ -134,10 +134,10 @@ jobs:
               "AppsListViewModel explicit/persistent view mode",
           )
 
-          # ------------------------------------------------------------------
+          # ---------------------------------------------------------------
           # FilterSheet.kt
-          # List and Grid become explicit selectable options, not a blind toggle.
-          # ------------------------------------------------------------------
+          # Explicit List/Grid choices.
+          # ---------------------------------------------------------------
           filter_sheet = ROOT / "ui/screens/FilterSheet.kt"
 
           replace_once(
@@ -161,10 +161,12 @@ jobs:
               "FilterSheet GRID selection",
           )
 
-          # ------------------------------------------------------------------
+          # ---------------------------------------------------------------
           # AppsListScreen.kt
-          # Show List/Grid controls directly in the Library top bar.
-          # ------------------------------------------------------------------
+          # Explicit callback + visible buttons in Library toolbar.
+          # FIX2: insertion anchors only to the unique Search action line,
+          # avoiding brittle whitespace matching from FIX1.
+          # ---------------------------------------------------------------
           screen = ROOT / "ui/screens/AppsListScreen.kt"
 
           replace_once(
@@ -174,13 +176,12 @@ jobs:
               "AppsListScreen callback",
           )
 
-          replace_once(
-              screen,
-              """                        } else {
-                              IconButton(onClick = { showSearchBar = true }) {
-          """,
-              """                        } else {
-                              IconButton(onClick = { onViewModeChanged(ViewMode.LIST) }) {
+          search_action = """                            IconButton(onClick = { showSearchBar = true }) {
+                                  Icon(Icons.Default.Search, contentDescription = stringResource(R.string.apps_list_cd_search))
+                              }
+          """
+
+          view_buttons = """                            IconButton(onClick = { onViewModeChanged(ViewMode.LIST) }) {
                                   Icon(
                                       Icons.AutoMirrored.Filled.List,
                                       contentDescription = stringResource(R.string.filter_view_list),
@@ -200,8 +201,12 @@ jobs:
                                           MaterialTheme.colorScheme.onSurfaceVariant
                                   )
                               }
-                              IconButton(onClick = { showSearchBar = true }) {
-          """,
+          """ + search_action
+
+          replace_once(
+              screen,
+              search_action,
+              view_buttons,
               "AppsListScreen visible List/Grid selector",
           )
 
@@ -212,10 +217,10 @@ jobs:
               "AppsListScreen FilterSheet wiring",
           )
 
-          # ------------------------------------------------------------------
+          # ---------------------------------------------------------------
           # AppNavigation.kt
-          # Wire explicit selection into the ViewModel.
-          # ------------------------------------------------------------------
+          # Wire explicit selection to ViewModel.
+          # ---------------------------------------------------------------
           nav = ROOT / "ui/navigation/AppNavigation.kt"
 
           replace_once(
@@ -230,19 +235,22 @@ jobs:
 
           rm -f VitaStation-v0.1.0-Phase01-Selectable-Grid.patch
 
-      - name: Validate changes
+      - name: Validate source changes
         shell: bash
         run: |
           set -euo pipefail
 
-          test -f android/app/src/main/java/org/vita3k/emulator/ui/screens/AppsListScreen.kt
-          test -f android/app/src/main/java/org/vita3k/emulator/ui/viewmodel/AppsListViewModel.kt
+          SCREEN="android/app/src/main/java/org/vita3k/emulator/ui/screens/AppsListScreen.kt"
+          VM="android/app/src/main/java/org/vita3k/emulator/ui/viewmodel/AppsListViewModel.kt"
+          FILTER="android/app/src/main/java/org/vita3k/emulator/ui/screens/FilterSheet.kt"
+          NAV="android/app/src/main/java/org/vita3k/emulator/ui/navigation/AppNavigation.kt"
 
-          grep -q 'onViewModeChanged(ViewMode.GRID)' \
-            android/app/src/main/java/org/vita3k/emulator/ui/screens/AppsListScreen.kt
-
-          grep -q 'KEY_LIBRARY_VIEW_MODE' \
-            android/app/src/main/java/org/vita3k/emulator/ui/viewmodel/AppsListViewModel.kt
+          grep -q 'onViewModeChanged(ViewMode.LIST)' "$SCREEN"
+          grep -q 'onViewModeChanged(ViewMode.GRID)' "$SCREEN"
+          grep -q 'KEY_LIBRARY_VIEW_MODE' "$VM"
+          grep -q 'fun setViewMode(mode: ViewMode)' "$VM"
+          grep -q 'onViewModeChanged(ViewMode.GRID)' "$FILTER"
+          grep -q 'appsListViewModel.setViewMode(mode)' "$NAV"
 
           git diff --check
           git status --short

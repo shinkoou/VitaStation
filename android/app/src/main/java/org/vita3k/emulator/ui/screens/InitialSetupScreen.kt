@@ -260,24 +260,24 @@ private fun WelcomePage() {
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 24.dp)
-                .heightIn(min = maxHeight - 48.dp),
+                .padding(horizontal = 16.dp, vertical = 10.dp)
+                .heightIn(min = maxHeight - 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
             Image(
                 painter = painterResource(id = R.drawable.vitastation_icon),
                 contentDescription = stringResource(R.string.apps_list_app_title),
-                modifier = Modifier.size(118.dp).clip(RoundedCornerShape(30.dp))
+                modifier = Modifier.size(82.dp).clip(RoundedCornerShape(22.dp))
             )
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(5.dp))
             Text("VitaStation", style = MaterialTheme.typography.headlineLarge,
                 fontWeight = FontWeight.Bold, color = setupTextColor, textAlign = TextAlign.Center)
             Text(stringResource(R.string.initial_setup_brand_tagline),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(10.dp))
             Text(stringResource(R.string.initial_setup_welcome_title),
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold, color = setupTextColor, textAlign = TextAlign.Center)
@@ -285,7 +285,7 @@ private fun WelcomePage() {
             Text(stringResource(R.string.initial_setup_welcome_body),
                 style = MaterialTheme.typography.bodyLarge,
                 color = setupTextColor.copy(alpha = 0.88f), textAlign = TextAlign.Center)
-            Spacer(modifier = Modifier.height(18.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(20.dp),
@@ -293,7 +293,7 @@ private fun WelcomePage() {
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.38f))
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(stringResource(R.string.initial_setup_firmware_cta),
@@ -304,7 +304,7 @@ private fun WelcomePage() {
                         tint = MaterialTheme.colorScheme.primary)
                 }
             }
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(7.dp))
             HtmlText(
                 html = stringResource(R.string.initial_setup_info_html),
                 modifier = Modifier.fillMaxWidth(),
@@ -312,7 +312,7 @@ private fun WelcomePage() {
                 textColor = setupTextColor.copy(alpha = 0.82f),
                 gravity = Gravity.CENTER
             )
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(6.dp))
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(18.dp),
@@ -320,7 +320,7 @@ private fun WelcomePage() {
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.34f))
             ) {
                 Text(stringResource(R.string.initial_setup_piracy_notice),
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error,
                     fontWeight = FontWeight.Medium,
@@ -348,8 +348,8 @@ private fun FirmwareSetupPage(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp)
     ) {
         Text(
             text = stringResource(R.string.initial_setup_firmware_title),
@@ -545,8 +545,8 @@ private fun FirmwareCard(
         )
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -586,7 +586,7 @@ private fun StatusBadge(
         color = color.copy(alpha = 0.13f)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {

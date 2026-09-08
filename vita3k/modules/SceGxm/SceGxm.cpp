@@ -5408,7 +5408,13 @@ EXPORT(int, sceGxmTextureSetUAddrModeSafe, SceGxmTexture *texture, SceGxmTexture
     if (!texture)
         return RET_ERROR(SCE_GXM_ERROR_INVALID_POINTER);
 
-    if (!verify_texture_mode(texture, mode))
+    const uint32_t texture_type = texture->type << 29;
+    const bool supported = verify_texture_mode(texture, mode);
+    LOG_INFO("[VS-TEXADDR] axis=U safe=1 type={} mode={} supported={} old_u={} old_v={}",
+        log_hex(texture_type), static_cast<uint32_t>(mode), supported,
+        static_cast<uint32_t>(texture->uaddr_mode), static_cast<uint32_t>(texture->vaddr_mode));
+
+    if (!supported)
         return RET_ERROR(SCE_GXM_ERROR_UNSUPPORTED);
 
     texture->uaddr_mode = mode;
@@ -5432,7 +5438,13 @@ EXPORT(int, sceGxmTextureSetVAddrModeSafe, SceGxmTexture *texture, SceGxmTexture
     if (!texture)
         return RET_ERROR(SCE_GXM_ERROR_INVALID_POINTER);
 
-    if (!verify_texture_mode(texture, mode))
+    const uint32_t texture_type = texture->type << 29;
+    const bool supported = verify_texture_mode(texture, mode);
+    LOG_INFO("[VS-TEXADDR] axis=V safe=1 type={} mode={} supported={} old_u={} old_v={}",
+        log_hex(texture_type), static_cast<uint32_t>(mode), supported,
+        static_cast<uint32_t>(texture->uaddr_mode), static_cast<uint32_t>(texture->vaddr_mode));
+
+    if (!supported)
         return RET_ERROR(SCE_GXM_ERROR_UNSUPPORTED);
 
     texture->vaddr_mode = mode;

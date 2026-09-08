@@ -496,6 +496,18 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
     const vk::ImageView color_handle_view = reinterpret_cast<VKContext *>(state.context)->current_color_view;
     const bool is_same_image = (color_handle_view == info.texture.view) || (color_handle_view == info.alternate_view);
 
+    const bool suspicious_surface_read = is_same_image
+        || ite->first != address
+        || info.format != base_format
+        || start_x != 0
+        || start_sourced_line != 0;
+    if (suspicious_surface_read) {
+        LOG_INFO("[VS-SURFACE-READ] tex={} surface={} tex_bytes={} surface_bytes={} type={} req_fmt={} store_fmt={} stride={} start=({}, {}) write_gen={} same_image={} dirty={}",
+            log_hex(address), log_hex(ite->first), total_surface_size, info.total_bytes,
+            log_hex(texture.texture_type()), static_cast<uint32_t>(base_format), static_cast<uint32_t>(info.format),
+            stride_bytes, start_x, start_sourced_line, info.write_generation, is_same_image, *info.dirty);
+    }
+
     if (state.features.use_texture_viewport && base_format == info.format) {
         // use a texture viewport
         *texture_viewport = {
@@ -647,6 +659,10 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
             };
             cmd_buffer.copyImage(info.texture.image, vk::ImageLayout::eGeneral, casted->texture.image, vk::ImageLayout::eTransferDstOptimal, image_copy);
         } else {
+            LOG_INFO("[VS-TYPELESS] tex={} surface={} req_fmt={} store_fmt={} req_bpp={} store_bpp={} stride={} start=({}, {}) size={}x{} write_gen={} source_gen={} same_image={} scene={}",
+                log_hex(address), log_hex(ite->first), static_cast<uint32_t>(base_format), static_cast<uint32_t>(info.format),
+                bytes_per_pixel_requested, bytes_per_pixel_in_store, stride_bytes, start_x, start_sourced_line,
+                width, height, info.write_generation, source_generation, is_same_image, scene_timestamp);
             LOG_INFO_ONCE("Game is doing typeless copies");
             // We must use a transition buffer
             vk::DeviceSize buffer_size = stride_bytes * static_cast<size_t>(state.res_multiplier * align(height, 4)) + start_x * bytes_per_pixel_requested;

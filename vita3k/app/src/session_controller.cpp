@@ -186,13 +186,23 @@ void AppSessionController::stop(const AppSessionStopReason reason) {
 
     const bool needs_renderer_cleanup = renderer_was_initialized || active_frame_host.has_value();
 
+    LOG_INFO("[VS-EXIT] stage=begin reason={} renderer={} runtime={} app_started={} frame_host={}",
+        static_cast<uint32_t>(reason), renderer_was_initialized, runtime_was_initialized,
+        app_started, active_frame_host.has_value());
+
     if (runtime_was_initialized) {
         if (app_started && reason != AppSessionStopReason::LaunchFailure)
             update_app_time_used(emuenv, emuenv.io.app_path);
 
+        LOG_INFO("[VS-EXIT] stage=shutdown_app_runtime begin");
         shutdown_app_runtime(emuenv);
+        LOG_INFO("[VS-EXIT] stage=shutdown_app_runtime done");
+        LOG_INFO("[VS-EXIT] stage=reset_app_state begin");
         reset_app_state(emuenv);
+        LOG_INFO("[VS-EXIT] stage=reset_app_state done");
+        LOG_INFO("[VS-EXIT] stage=destroy begin");
         destroy(emuenv);
+        LOG_INFO("[VS-EXIT] stage=destroy done");
     } else if (renderer_was_initialized) {
         if (emuenv.renderer) {
             emuenv.renderer->cleanup();
@@ -203,15 +213,23 @@ void AppSessionController::stop(const AppSessionStopReason reason) {
         abort_game_launch(emuenv);
     }
 
-    if (needs_renderer_cleanup && active_frame_host)
+    if (needs_renderer_cleanup && active_frame_host) {
+        LOG_INFO("[VS-EXIT] stage=destroy_render_context begin");
         active_frame_host->get().destroy_render_context();
+        LOG_INFO("[VS-EXIT] stage=destroy_render_context done");
+    }
 
+    LOG_INFO("[VS-EXIT] stage=motion_clear begin");
     emuenv.motion.clear_device_motion_support();
+    LOG_INFO("[VS-EXIT] stage=motion_clear done");
 
     {
         std::lock_guard<std::mutex> lock(mutex);
+        LOG_INFO("[VS-EXIT] stage=reset_session_tracking begin");
         reset_session_tracking();
+        LOG_INFO("[VS-EXIT] stage=reset_session_tracking done");
     }
+    LOG_INFO("[VS-EXIT] stage=complete");
 }
 
 void AppSessionController::apply_runtime_state_locked() {

@@ -26,6 +26,7 @@
 
 #include <shader/spirv_recompiler.h>
 
+#include <atomic>
 #include <iomanip>
 #include <vector>
 
@@ -214,7 +215,7 @@ void pre_compile_program(GLState &renderer, const ShadersHash &hash) {
 }
 
 static SharedGLObject get_or_compile_shader(const SceGxmProgram *program, const FeatureState &features, const Sha256Hash &hash,
-    ShaderCache &cache, const GLenum type, const shader::Hints &hints, bool shader_cache, bool spirv, bool maskupdate, const fs::path &shader_cache_path, const fs::path &shader_log_path, const std::string &shader_version, uint32_t &shaders_count_compiled) {
+    ShaderCache &cache, const GLenum type, const shader::Hints &hints, bool shader_cache, bool spirv, bool maskupdate, const fs::path &shader_cache_path, const fs::path &shader_log_path, const std::string &shader_version, std::atomic<uint32_t> &shaders_count_compiled) {
     const auto cached = cache.find(hash);
     if (cached == cache.end()) {
         SharedGLObject obj = nullptr;
@@ -228,7 +229,7 @@ static SharedGLObject get_or_compile_shader(const SceGxmProgram *program, const 
 
         cache.emplace(hash, obj);
 
-        shaders_count_compiled++;
+        shaders_count_compiled.fetch_add(1, std::memory_order_relaxed);
 
         return obj;
     }

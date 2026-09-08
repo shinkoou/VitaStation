@@ -343,7 +343,10 @@ void PipelineCache::save_pipeline_cache() {
     }
     renderer::save_shaders_cache_hashs(state, shader_cache_copy);
 
-    const std::vector<uint8_t> pipeline_data = state.device.getPipelineCacheData(pipeline_cache);
+    const std::vector<uint8_t> pipeline_data = [&] {
+        std::lock_guard<std::mutex> guard(pipeline_cache_mutex);
+        return state.device.getPipelineCacheData(pipeline_cache);
+    }();
     if (pipeline_data.empty())
         // No pipeline was created
         return;
@@ -361,11 +364,17 @@ void PipelineCache::save_pipeline_cache() {
     auto write_integer = [&]<typename T>(T val) {
         pipeline_cache_file.write(reinterpret_cast<const char *>(&val), sizeof(T));
     };
-    write_integer(pipeline_cache_magic);
-    write_integer(pipelines.size());
-    for (auto &[hash, _] : pipelines) {
-        write_integer(hash);
+    std::vector<uint64_t> pipeline_hashes;
+    {
+        std::lock_guard<std::mutex> guard(pipelines_mutex);
+        pipeline_hashes.reserve(pipelines.size());
+        for (auto &[hash, _] : pipelines)
+            pipeline_hashes.push_back(hash);
     }
+    write_integer(pipeline_cache_magic);
+    write_integer(pipeline_hashes.size());
+    for (const uint64_t hash : pipeline_hashes)
+        write_integer(hash);
 
     // then save the cache
     pipeline_cache_file.write(reinterpret_cast<const char *>(pipeline_data.data()), pipeline_data.size());
@@ -463,77 +472,79 @@ vk::PipelineShaderStageCreateInfo PipelineCache::retrieve_shader(const SceGxmPro
 
     const vk::SpecializationInfo *spec_info = nullptr;
     if (!is_vertex && state.features.should_use_shader_interlock() && program->is_frag_color_used()) {
-        // if the specialization constant is used in the shader
         spec_info = is_srgb ? &srgb_info_true : &srgb_info_false;
     }
 
-    vk::ShaderModule *shader_module;
+    vk::ShaderModule *shader_module = nullptr;
+    bool owns_compilation = false;
     {
-        // look if it is in the cache
         std::unique_lock<std::mutex> lock(shaders_mutex);
         shader_module = &shaders.insert({ hash, nullptr }).first->second;
-        if (*shader_module == shader_compiling) {
-            // another thread is compiling the same exact shader at the same time
-            // it's no use re-compiling it, so just wait for the other thread being done
-            lock.unlock();
 
-            // we shouldn't need atomics and the compiler shouldn't be able to optimize this
-            while (*shader_module == shader_compiling)
-                std::this_thread::yield();
+        if (*shader_module == shader_compiling) {
+            // Phase04A: block efficiently instead of reading the same non-atomic
+            // handle in a std::this_thread::yield() loop.
+            shaders_cv.wait(lock, [&] {
+                return *shader_module != shader_compiling;
+            });
         }
 
-        if (*shader_module == nullptr)
-            // now mark the shader as compiling so that other threads accessing it won't try to compile it a second time
+        if (*shader_module == nullptr) {
             *shader_module = shader_compiling;
+            owns_compilation = true;
+        }
+
+        if (!owns_compilation) {
+            return vk::PipelineShaderStageCreateInfo{
+                .stage = is_vertex ? vk::ShaderStageFlagBits::eVertex : vk::ShaderStageFlagBits::eFragment,
+                .module = *shader_module,
+                .pName = is_vertex ? "main_vs" : "main_fs",
+                .pSpecializationInfo = spec_info,
+            };
+        }
     }
 
-    if (*shader_module == shader_compiling) {
-        precompile_shader(hash, false);
-    }
-
-    if (*shader_module != shader_compiling) {
-        vk::PipelineShaderStageCreateInfo shader_stage_info{
+    if (const vk::ShaderModule cached_shader = precompile_shader(hash, false); cached_shader) {
+        return vk::PipelineShaderStageCreateInfo{
             .stage = is_vertex ? vk::ShaderStageFlagBits::eVertex : vk::ShaderStageFlagBits::eFragment,
-            .module = *shader_module,
+            .module = cached_shader,
             .pName = is_vertex ? "main_vs" : "main_fs",
             .pSpecializationInfo = spec_info,
         };
-        return shader_stage_info;
     }
 
     const std::string hash_text = hex_string(hash);
-
     LOG_INFO("Generating vulkan spv shader {}", hash_text);
     const std::string shader_version = fmt::format("vk{}", shader::CURRENT_VERSION);
 
-    shader::usse::SpirvCode source = load_spirv_shader(*program, state.features, true, hints, maskupdate, state.shaders_path, state.shaders_log_path, shader_version, true);
+    shader::usse::SpirvCode source = load_spirv_shader(
+        *program, state.features, true, hints, maskupdate,
+        state.shaders_path, state.shaders_log_path, shader_version, true);
 
     vk::ShaderModuleCreateInfo shader_info{
         .codeSize = sizeof(uint32_t) * source.size(),
         .pCode = source.data()
     };
 
-    *shader_module = state.device.createShaderModule(shader_info);
+    const vk::ShaderModule compiled_shader = state.device.createShaderModule(shader_info);
     {
         std::lock_guard<std::mutex> guard(shaders_mutex);
-        // Save shader cache hashes
-        // vertex and fragment shaders are not linked together so no need to associate them
-        Sha256Hash empty_hash{};
-        if (is_vertex) {
-            state.shaders_cache_hashs.push_back({ hash, empty_hash });
-        } else {
-            state.shaders_cache_hashs.push_back({ empty_hash, hash });
-        }
-    }
+        *shader_module = compiled_shader;
 
-    vk::PipelineShaderStageCreateInfo shader_stage_info{
+        Sha256Hash empty_hash{};
+        if (is_vertex)
+            state.shaders_cache_hashs.push_back({ hash, empty_hash });
+        else
+            state.shaders_cache_hashs.push_back({ empty_hash, hash });
+    }
+    shaders_cv.notify_all();
+
+    return vk::PipelineShaderStageCreateInfo{
         .stage = is_vertex ? vk::ShaderStageFlagBits::eVertex : vk::ShaderStageFlagBits::eFragment,
-        .module = *shader_module,
+        .module = compiled_shader,
         .pName = is_vertex ? "main_vs" : "main_fs",
         .pSpecializationInfo = spec_info,
     };
-
-    return shader_stage_info;
 }
 
 vk::RenderPass PipelineCache::retrieve_render_pass(vk::Format format, bool force_load, bool force_store, bool is_color_transient, bool no_color) {
@@ -602,12 +613,6 @@ vk::RenderPass PipelineCache::retrieve_render_pass(vk::Format format, bool force
         .dstAccessMask = vk::AccessFlagBits::eColorAttachmentRead | vk::AccessFlagBits::eDepthStencilAttachmentRead
     };
 
-    if (state.features.support_shader_interlock && no_color) {
-        // we must wait for the previous shaders to be done
-        dependencies[1].dstStageMask = vk::PipelineStageFlagBits::eFragmentShader;
-        dependencies[1].dstAccessMask = vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite;
-    }
-
     // if an attachment is sampled from, we want it to be done before the next render pass fragment shader
     dependencies[1] = {
         .srcSubpass = VK_SUBPASS_EXTERNAL,
@@ -617,6 +622,14 @@ vk::RenderPass PipelineCache::retrieve_render_pass(vk::Format format, bool force
         .srcAccessMask = vk::AccessFlagBits::eShaderRead,
         .dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eDepthStencilAttachmentWrite
     };
+
+    if (state.features.support_shader_interlock && no_color) {
+        // Phase04A: the old code configured these masks before assigning dependencies[1],
+        // which immediately erased them. Keep shader-interlock ordering alive.
+        dependencies[1].srcAccessMask |= vk::AccessFlagBits::eShaderWrite;
+        dependencies[1].dstStageMask |= vk::PipelineStageFlagBits::eFragmentShader;
+        dependencies[1].dstAccessMask |= vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite;
+    }
 
     if (state.features.support_shader_interlock && !no_color) {
         // we must wait for the shader interlock shader to be done
@@ -792,7 +805,10 @@ void PipelineCache::compiler_thread(MemState &mem) {
             break;
 
         vk::Pipeline pipeline = compile_pipeline(request->type, request->render_pass, *request->vertex_program_gxm, *request->fragment_program_gxm, *request->get_record(), request->hints, mem);
-        *request->pipeline = pipeline;
+        {
+            std::lock_guard<std::mutex> guard(pipelines_mutex);
+            *request->pipeline = pipeline;
+        }
 
         request->vertex_program_gxm->compile_threads_on.fetch_sub(1, std::memory_order_release);
         request->fragment_program_gxm->compile_threads_on.fetch_sub(1, std::memory_order_release);
@@ -919,7 +935,10 @@ vk::Pipeline PipelineCache::compile_pipeline(SceGxmPrimitiveType type, vk::Rende
         .subpass = 0
     };
 
-    const auto result = state.device.createGraphicsPipeline(pipeline_cache, pipeline_info);
+    const auto result = [&] {
+        std::lock_guard<std::mutex> guard(pipeline_cache_mutex);
+        return state.device.createGraphicsPipeline(pipeline_cache, pipeline_info);
+    }();
     if (result.result != vk::Result::eSuccess) {
         LOG_CRITICAL("Failed to create pipeline.");
         return nullptr;
@@ -930,58 +949,56 @@ vk::Pipeline PipelineCache::compile_pipeline(SceGxmPrimitiveType type, vk::Rende
 
 vk::Pipeline PipelineCache::retrieve_pipeline(VKContext &context, SceGxmPrimitiveType &type, bool consider_for_async, MemState &mem) {
     const GxmRecordState &record = context.record;
-    // get the hash of the current context
     uint64_t key = XXH3_64bits(&record, record_pipeline_len);
 
-    // add the hash of the blending
     SceGxmFragmentProgram &fragment_program_gxm = *record.fragment_program.get(mem);
     const VKFragmentProgram &fragment_program = *reinterpret_cast<VKFragmentProgram *>(
         fragment_program_gxm.renderer_data.get());
     key ^= fragment_program.blending_hash;
 
-    // add the hash of the attribute and stream layout
     SceGxmVertexProgram &vertex_program_gxm = *record.vertex_program.get(mem);
     key ^= vertex_program_gxm.key_hash;
-
-    // and also add the primitive type
     key ^= static_cast<uint64_t>(type);
 
-    // can't use constexpr because of apple clang...
     const vk::Pipeline pipeline_compiling = std::bit_cast<vk::Pipeline, uint64_t>(~0ULL);
-    // if the pipeline is in the pipeline cache, we can expect its creation time to be almost instantaneous
     bool already_in_cache = false;
+    vk::Pipeline *pipeline_slot = nullptr;
 
-    auto it = pipelines.find(key);
-    if (it != pipelines.end()) {
-        if (it->second != nullptr) {
-            if (it->second == pipeline_compiling)
-                // pipeline is still compiling
-                return nullptr;
-            else
+    {
+        std::lock_guard<std::mutex> guard(pipelines_mutex);
+        auto it = pipelines.find(key);
+        if (it != pipelines.end()) {
+            if (it->second != nullptr) {
+                if (it->second == pipeline_compiling)
+                    return nullptr;
                 return it->second;
+            }
+            already_in_cache = true;
+            it->second = pipeline_compiling;
+            pipeline_slot = &it->second;
+        } else {
+            auto inserted = pipelines.insert({ key, pipeline_compiling }).first;
+            pipeline_slot = &inserted->second;
         }
-        already_in_cache = true;
-    } else {
-        // the pipeline hash was not in the cache;
-        it = pipelines.insert({ key, pipeline_compiling }).first;
     }
 
-    // get the correct renderpass here
     const SceGxmProgram *gxm_fragment_shader = fragment_program_gxm.program.get(mem);
     const bool use_shader_interlock = state.features.support_shader_interlock && gxm_fragment_shader->is_frag_color_used();
     const vk::RenderPass render_pass = use_shader_interlock ? context.current_shader_interlock_pass : context.current_render_pass;
-    // update the shader hints
+
     context.shader_hints.color_format = record.color_surface.colorFormat;
     context.shader_hints.attributes = &vertex_program_gxm.attributes;
 
-    // note: the flag can_use_deferred_compilation is not considered here because it causes way too many false positives
-    const bool compile_pipeline_async = !already_in_cache && consider_for_async && use_async_compilation;
+    const bool compile_pipeline_async =
+        !already_in_cache
+        && consider_for_async
+        && use_async_compilation
+        && can_use_deferred_compilation;
 
     if (compile_pipeline_async) {
-        // create the pipeline compile request
         CompileRequest *request = new CompileRequest;
         *request = {
-            .pipeline = &it->second,
+            .pipeline = pipeline_slot,
             .type = type,
             .render_pass = render_pass,
             .vertex_program_gxm = &vertex_program_gxm,
@@ -989,36 +1006,37 @@ vk::Pipeline PipelineCache::retrieve_pipeline(VKContext &context, SceGxmPrimitiv
             .hints = context.shader_hints
         };
         memcpy(request->record_data, &record, record_pipeline_len);
-        it->second = pipeline_compiling;
 
-        // we must not delete these programs until the worker is done
         vertex_program_gxm.compile_threads_on.fetch_add(1, std::memory_order_relaxed);
         fragment_program_gxm.compile_threads_on.fetch_add(1, std::memory_order_relaxed);
 
         pipeline_compile_queue.enqueue(pipeline_compile_queue_token, request);
-
         return nullptr;
-    } else {
-        // can't wait, compile it right now
-        vk::Pipeline result = compile_pipeline(type, render_pass, vertex_program_gxm, fragment_program_gxm, record, context.shader_hints, mem);
+    }
 
-        const auto time_s = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    vk::Pipeline result = compile_pipeline(
+        type, render_pass, vertex_program_gxm, fragment_program_gxm,
+        record, context.shader_hints, mem);
+
+    const auto time_s = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+
+    {
+        std::lock_guard<std::mutex> guard(pipelines_mutex);
+        *pipeline_slot = result;
         next_pipeline_cache_save = time_s + pipeline_cache_save_delay;
-
         if (!already_in_cache)
             state.shaders_count_compiled++;
-
-        it->second = result;
-
-        return result;
     }
+
+    return result;
 }
 
 vk::ShaderModule PipelineCache::precompile_shader(const Sha256Hash &hash, bool search_first) {
     if (search_first) {
-        // happens while loading the thread, no parallel access so no need for a mutex
+        std::lock_guard<std::mutex> guard(shaders_mutex);
         auto it = shaders.find(hash);
-        if (it != shaders.end())
+        if (it != shaders.end() && it->second != std::bit_cast<vk::ShaderModule>(~0ULL))
             return it->second;
     }
 
@@ -1027,8 +1045,10 @@ vk::ShaderModule PipelineCache::precompile_shader(const Sha256Hash &hash, bool s
 
     Sha256Hash shader_hash;
     memcpy(shader_hash.data(), hash.data(), sizeof(Sha256Hash));
-    const std::string shader_file_name = fmt::format("vk{}-{}.spv", shader::CURRENT_VERSION, hex_string(shader_hash));
-    const std::vector<uint32_t> source = renderer::pre_load_shader_spirv(state.shaders_path / shader_file_name);
+    const std::string shader_file_name = fmt::format(
+        "vk{}-{}.spv", shader::CURRENT_VERSION, hex_string(shader_hash));
+    const std::vector<uint32_t> source =
+        renderer::pre_load_shader_spirv(state.shaders_path / shader_file_name);
 
     if (source.empty())
         return nullptr;
@@ -1038,12 +1058,12 @@ vk::ShaderModule PipelineCache::precompile_shader(const Sha256Hash &hash, bool s
         .pCode = source.data()
     };
 
-    vk::ShaderModule shader = state.device.createShaderModule(shader_info);
+    const vk::ShaderModule shader = state.device.createShaderModule(shader_info);
     {
         std::lock_guard<std::mutex> guard(shaders_mutex);
         shaders[hash] = shader;
     }
-
+    shaders_cv.notify_all();
     return shader;
 }
 } // namespace renderer::vulkan

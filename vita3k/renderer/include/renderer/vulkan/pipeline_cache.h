@@ -22,8 +22,10 @@
 #include <vkutil/vkutil.h>
 
 #include <array>
+#include <condition_variable>
 #include <limits>
 #include <map>
+#include <mutex>
 #include <set>
 #include <thread>
 #include <vector>
@@ -85,8 +87,12 @@ private:
     // render passes used along shader interlock
     std::map<vk::Format, vk::RenderPass> shader_interlock_pass;
 
-    // only used when accessing the shaders map
+    // Synchronization for shader modules and pipeline slots.
+    // Phase04A removes the previous busy-spin/data races on Android.
     std::mutex shaders_mutex;
+    std::condition_variable shaders_cv;
+    std::mutex pipelines_mutex;
+    std::mutex pipeline_cache_mutex;
     // because of multithreading, we want the pointers to remain stable
     unordered_map_stable<Sha256Hash, vk::ShaderModule> shaders;
     unordered_map_stable<uint64_t, vk::Pipeline> pipelines;
@@ -110,7 +116,7 @@ public:
 
     // modified by the surface cache, estimates if it is safe to use async pipeline compilation
     // (i.e that it does not causes permanent graphical issues)
-    bool can_use_deferred_compilation;
+    bool can_use_deferred_compilation = false;
 
     vk::DescriptorSetLayout uniforms_layout;
     // used for the mask, color attachment

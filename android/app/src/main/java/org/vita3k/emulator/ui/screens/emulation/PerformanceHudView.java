@@ -148,17 +148,31 @@ public final class PerformanceHudView extends View {
     }
 
     private Float readGpuUsage() {
-        Float direct = readSinglePercent("/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage");
-        if (direct != null) return direct;
+        boolean sawReadableZero = false;
+
+        for (String path : new String[]{
+                "/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage",
+                "/sys/class/kgsl/kgsl-3d0/devfreq/gpu_load",
+                "/sys/class/kgsl/kgsl-3d0/devfreq/load",
+                "/sys/class/kgsl/kgsl-3d0/devfreq/utilization"}) {
+            Float value = readSinglePercent(path);
+            if (value == null) continue;
+            if (value > 0f || fps <= 0) return value;
+            sawReadableZero = true;
+        }
 
         try {
             String text = readText("/sys/class/kgsl/kgsl-3d0/gpubusy");
             if (text != null) {
-                String[] parts = text.trim().split("\\s+");
+                String[] parts = text.trim().split("\s+");
                 if (parts.length >= 2) {
                     float busy = Float.parseFloat(parts[0]);
                     float total = Float.parseFloat(parts[1]);
-                    if (total > 0f) return clamp((busy / total) * 100f);
+                    if (total > 0f) {
+                        float value = clamp((busy / total) * 100f);
+                        if (value > 0f || fps <= 0) return value;
+                        sawReadableZero = true;
+                    }
                 }
             }
         } catch (Throwable ignored) {}
@@ -168,16 +182,32 @@ public final class PerformanceHudView extends View {
             File[] devices = devfreq.listFiles();
             if (devices != null) {
                 for (File device : devices) {
-                    String name = device.getName().toLowerCase(Locale.ROOT);
-                    if (!name.contains("gpu") && !name.contains("mali")) continue;
-                    for (String leaf : new String[]{"load", "utilization", "busy_percent"}) {
+                    String descriptor = device.getName().toLowerCase(Locale.ROOT);
+                    try {
+                        descriptor += " " + device.getCanonicalPath().toLowerCase(Locale.ROOT);
+                    } catch (Throwable ignored) {}
+
+                    if (!descriptor.contains("gpu")
+                            && !descriptor.contains("mali")
+                            && !descriptor.contains("kgsl")
+                            && !descriptor.contains("3d0")) {
+                        continue;
+                    }
+
+                    for (String leaf : new String[]{
+                            "load", "utilization", "busy_percent", "gpu_load"}) {
                         Float value = readSinglePercent(new File(device, leaf).getAbsolutePath());
-                        if (value != null) return value;
+                        if (value == null) continue;
+                        if (value > 0f || fps <= 0) return value;
+                        sawReadableZero = true;
                     }
                 }
             }
         } catch (Throwable ignored) {}
-        return null;
+
+        // Do not lie with a permanent 0% while a game is visibly rendering.
+        // If SELinux blocks reliable counters, the HUD shows "—".
+        return sawReadableZero && fps <= 0 ? 0f : null;
     }
 
     private Float readSinglePercent(String path) {
@@ -185,6 +215,8 @@ public final class PerformanceHudView extends View {
             String text = readText(path);
             if (text == null) return null;
             String token = text.trim().split("\\s+")[0].replace("%", "");
+            int at = token.indexOf('@');
+            if (at > 0) token = token.substring(0, at);
             float value = Float.parseFloat(token);
             if (value > 100f && value <= 1000f) value /= 10f;
             if (value < 0f) return null;

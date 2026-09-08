@@ -15,39 +15,85 @@ env:
 
 jobs:
   android-build:
-    name: Build VitaStation v0.2.11 Phase04B-FIX2
+    name: Build VitaStation v0.3.0 Alpha 1
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout VitaStation
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Apply Phase04B-FIX2 in CI workspace
+      - name: Apply VitaStation v0.3.0 Alpha 1
         shell: bash
         run: |
           set -euo pipefail
-          printf '%s' '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' | base64 --decode | gzip --decompress > /tmp/vs-fix2.py
-          python3 /tmp/vs-fix2.py
-          git diff --check
-          grep -q 'versionName = "0.2.11"' android/app/build.gradle
-          grep -q '\[VS-TEXADDR\]' vita3k/modules/SceGxm/SceGxm.cpp
-          grep -q '\[VS-SURFACE-READ\]' vita3k/renderer/src/vulkan/surface_cache.cpp
-          grep -q '\[VS-EXIT\]' vita3k/app/src/session_controller.cpp
+          printf '%s' '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' | base64 --decode | gzip --decompress > /tmp/vitastation-v030-alpha1.py
+          python3 /tmp/vitastation-v030-alpha1.py
 
-      - uses: actions/setup-java@v5
+          # Text/resource hygiene.
+          python3 - <<'PY'
+          from pathlib import Path
+          for raw in [
+              "android/app/src/main/res/values/strings.xml",
+              "android/app/src/main/res/values-pt-rBR/strings.xml",
+          ]:
+              p = Path(raw)
+              p.write_text(p.read_text(encoding="utf-8").rstrip() + "\n", encoding="utf-8")
+          PY
+
+          git diff --check
+          grep -q 'versionCode = 37' android/app/build.gradle
+          grep -q 'versionName = "0.3.0-alpha1"' android/app/build.gradle
+          grep -q 'last_write_scene' vita3k/renderer/include/renderer/vulkan/surface_cache.h
+          grep -q 'needs_late_resolve' vita3k/renderer/src/vulkan/surface_cache.cpp
+          grep -q '\[VS-SURFACE-RESOLVE\]' vita3k/renderer/src/vulkan/surface_cache.cpp
+          grep -q 'FrameTimingHistory' vita3k/renderer/src/vulkan/frame_generation.cpp
+          grep -q '\[VS-FG\]' vita3k/renderer/src/vulkan/frame_generation.cpp
+          ! grep -q 'Para começar, instale os arquivos de firmware do seu PS Vita.&lt;br&gt;&lt;br&gt;' android/app/src/main/res/values-pt-rBR/strings.xml
+
+      - name: Restore native dependency cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            /usr/local/share/vcpkg/installed
+            /usr/local/share/vcpkg/packages
+          key: vitastation-android-native-v030a1-${{ hashFiles('CMakeLists.txt', 'vita3k/CMakeLists.txt', 'external/lsfg-vk-android/framegen/CMakeLists.txt', 'cmake/**', '.ci/**', 'android/app/build.gradle', 'vcpkg.json') }}
+          restore-keys: |
+            vitastation-android-native-lsfg-
+            vitastation-android-native-
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
         with:
+          add-job-summary: on-failure
+          cache-provider: basic
           validate-wrappers: false
-      - uses: android-actions/setup-android@v4
+
+      - name: Set up Android SDK tools
+        uses: android-actions/setup-android@v4
+
       - name: Set up Android build environment
         run: bash ./.ci/setup-android.sh
-      - uses: hendrikmuhs/ccache-action@v1.2.23
 
-      - name: Configure permanent signing
+      - name: Release resource and Kotlin preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd android
+          bash ./gradlew             :app:mergeReleaseResources             :app:compileReleaseKotlin             --stacktrace
+
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2.23
+
+      - name: Configure permanent VitaStation signing
         shell: bash
         env:
           KEYSTORE_B64: ${{ secrets.VITASTATION_KEYSTORE_B64 }}
@@ -56,54 +102,81 @@ jobs:
           KEY_PASSWORD: ${{ secrets.VITASTATION_KEY_PASSWORD }}
         run: |
           set -euo pipefail
+          missing=0
           for name in KEYSTORE_B64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
-            test -n "${!name:-}" || { echo "::error::Missing signing secret: $name"; exit 1; }
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing permanent signing secret: $name"
+              missing=1
+            fi
           done
-          SIGNING_FILE="$RUNNER_TEMP/vitastation-release.jks"
+          if [ "$missing" -ne 0 ]; then exit 1; fi
+
+          SIGNING_FILE="$RUNNER_TEMP/vitastation-permanent-release.jks"
           umask 077
           printf '%s' "$KEYSTORE_B64" | base64 --decode > "$SIGNING_FILE"
-          keytool -list -v -keystore "$SIGNING_FILE" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" > "$RUNNER_TEMP/key.txt"
-          actual="$(grep -m1 'SHA256:' "$RUNNER_TEMP/key.txt" | sed 's/.*SHA256: //' | tr -d ':' | tr '[:upper:]' '[:lower:]')"
-          test "$actual" = "$VITASTATION_SIGNING_CERT_SHA256"
+
+          keytool -list -v             -keystore "$SIGNING_FILE"             -storepass "$STORE_PASSWORD"             -alias "$KEY_ALIAS" > "$RUNNER_TEMP/vitastation-key-info.txt"
+
+          actual_fingerprint="$(
+            grep -m1 'SHA256:' "$RUNNER_TEMP/vitastation-key-info.txt"               | sed 's/.*SHA256: //'               | tr -d ':'               | tr '[:upper:]' '[:lower:]'
+          )"
+          if [ "$actual_fingerprint" != "$VITASTATION_SIGNING_CERT_SHA256" ]; then
+            echo "::error::Permanent signing certificate fingerprint mismatch."
+            exit 1
+          fi
+
           echo "SIGNING_STORE_PATH=$SIGNING_FILE" >> "$GITHUB_ENV"
           echo "SIGNING_STORE_PASSWORD=$STORE_PASSWORD" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build signed v0.2.11
+      - name: Build VitaStation v0.3.0 Alpha 1 APK
         run: bash ./.ci/build-android.sh artifacts/vitastation-android
 
-      - name: Verify signature
+      - name: Verify permanent APK signature
         shell: bash
         run: |
           set -euo pipefail
-          APK=artifacts/vitastation-android/app.apk
+          APK="artifacts/vitastation-android/app.apk"
           test -f "$APK"
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
-          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/apksigner.txt"
-          actual="$(grep -m1 'certificate SHA-256 digest:' "$RUNNER_TEMP/apksigner.txt" | sed 's/.*digest: //' | tr -d ':' | tr '[:upper:]' '[:lower:]')"
-          test "$actual" = "$VITASTATION_SIGNING_CERT_SHA256"
+          test -x "$APKSIGNER"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/apksigner-output.txt"
+          actual="$(
+            grep -m1 'certificate SHA-256 digest:' "$RUNNER_TEMP/apksigner-output.txt"               | sed 's/.*digest: //' | tr -d ':' | tr '[:upper:]' '[:lower:]'
+          )"
+          if [ "$actual" != "$VITASTATION_SIGNING_CERT_SHA256" ]; then
+            echo "::error::APK permanent signature mismatch."
+            exit 1
+          fi
 
-      - name: Persist source only after green signed build
+      - name: Persist Alpha 1 only after successful signed build
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "VitaStation Bot"
           git config user.email "actions@users.noreply.github.com"
-          git add android/app/build.gradle \
-            android/app/src/main/java/org/vita3k/emulator/ui/screens/InitialSetupScreen.kt \
-            vita3k/modules/SceGxm/SceGxm.cpp \
-            vita3k/renderer/src/vulkan/surface_cache.cpp \
-            vita3k/app/src/session_controller.cpp
-          if ! git diff --cached --quiet; then
-            git commit -m "VitaStation v0.2.11 Phase04B-FIX2: texture/surface/exit diagnostics + compact setup [skip ci]"
+
+          git add             android/app/build.gradle             android/app/src/main/res/values/strings.xml             android/app/src/main/res/values-pt-rBR/strings.xml             vita3k/renderer/include/renderer/vulkan/surface_cache.h             vita3k/renderer/src/vulkan/surface_cache.cpp             vita3k/renderer/include/renderer/vulkan/frame_generation.h             vita3k/renderer/src/vulkan/frame_generation.cpp
+
+          if git diff --cached --quiet; then
+            echo "v0.3.0-alpha1 source already applied."
+          else
+            git commit -m "VitaStation v0.3.0 Alpha 1: Renderer 2.0 + adaptive FrameGen foundation [skip ci]"
             git push origin HEAD:main
           fi
 
       - name: Rename APK
-        run: mv artifacts/vitastation-android/app.apk artifacts/vitastation-android/VitaStation-v0.2.11-Phase04B-FIX2-TexAddr-Surface-Exit-Compact-Signed.apk
-      - uses: actions/upload-artifact@v7
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f artifacts/vitastation-android/app.apk
+          mv artifacts/vitastation-android/app.apk             artifacts/vitastation-android/VitaStation-v0.3.0-Alpha1-Renderer2-SurfaceDeps-AdaptiveFG-Signed.apk
+          ls -lh artifacts/vitastation-android/
+
+      - name: Upload VitaStation v0.3.0 Alpha 1 APK
+        uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.2.11-Phase04B-FIX2-Signed-Android
-          path: artifacts/vitastation-android/VitaStation-v0.2.11-Phase04B-FIX2-TexAddr-Surface-Exit-Compact-Signed.apk
+          name: VitaStation-v0.3.0-Alpha1-Renderer2-SurfaceDeps-AdaptiveFG-Signed-Android
+          path: artifacts/vitastation-android/VitaStation-v0.3.0-Alpha1-Renderer2-SurfaceDeps-AdaptiveFG-Signed.apk
           if-no-files-found: error

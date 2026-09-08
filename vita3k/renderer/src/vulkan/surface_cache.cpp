@@ -281,6 +281,8 @@ SurfaceRetrieveResult VKSurfaceCache::retrieve_color_surface_for_framebuffer(Mem
 
             last_written_surface = &info;
             ++info.write_generation;
+            info.last_write_scene = context->scene_timestamp;
+            info.last_write_draw = context->draw_timestamp;
 
             // if this surface has not been rendered to for the last 60 frames, consider it is not safe not to render all shaders to it
             constexpr uint64_t big_delay_between_frames = 60;
@@ -367,6 +369,10 @@ SurfaceRetrieveResult VKSurfaceCache::retrieve_color_surface_for_framebuffer(Mem
 
     last_written_surface = &info_added;
     ++info_added.write_generation;
+    info_added.last_write_scene = context->scene_timestamp;
+    info_added.last_write_draw = context->draw_timestamp;
+    info_added.last_resolve_scene = 0;
+    info_added.last_resolve_generation = 0;
     info_added.need_surface_sync.reset();
     info_added.need_surface_sync = std::make_shared<bool>(false);
     info_added.dirty = std::make_shared<bool>(false);
@@ -493,22 +499,33 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
     // We should be able to use this texture, so set it as mru
     color_surface_queue.set_as_mru(&info);
 
-    const vk::ImageView color_handle_view = reinterpret_cast<VKContext *>(state.context)->current_color_view;
+    VKContext *context = reinterpret_cast<VKContext *>(state.context);
+    const vk::ImageView color_handle_view = context->current_color_view;
     const bool is_same_image = (color_handle_view == info.texture.view) || (color_handle_view == info.alternate_view);
 
-    const bool suspicious_surface_read = is_same_image
+    // Surface Dependency Tracker:
+    // - same_image catches framebuffer feedback from the active target.
+    // - written_this_scene catches a target produced earlier in this same scene.
+    // Both must resolve in render_cmd, after producer draws, never in prerender_cmd.
+    const bool written_this_scene = info.last_write_scene == context->scene_timestamp;
+    const bool needs_late_resolve = is_same_image || written_this_scene;
+
+    const bool suspicious_surface_read = needs_late_resolve
         || ite->first != address
         || info.format != base_format
         || start_x != 0
         || start_sourced_line != 0;
     if (suspicious_surface_read) {
-        LOG_INFO("[VS-SURFACE-READ] tex={} surface={} tex_bytes={} surface_bytes={} type={} req_fmt={} store_fmt={} stride={} start=({}, {}) write_gen={} same_image={} dirty={}",
+        LOG_DEBUG("[VS-SURFACE-READ] tex={} surface={} tex_bytes={} surface_bytes={} type={} req_fmt={} store_fmt={} stride={} start=({}, {}) write_gen={} same_image={} dirty={}",
             log_hex(address), log_hex(ite->first), total_surface_size, info.total_bytes,
             log_hex(texture.texture_type()), static_cast<uint32_t>(base_format), static_cast<uint32_t>(info.format),
             stride_bytes, start_x, start_sourced_line, info.write_generation, is_same_image, *info.dirty);
     }
 
-    if (state.features.use_texture_viewport && base_format == info.format) {
+    // Texture viewport is a fast path, not a correctness path. Returning the
+    // active/recent render target directly would create a framebuffer feedback
+    // hazard on games such as Uncharted's bloom/G-buffer passes.
+    if (state.features.use_texture_viewport && base_format == info.format && !needs_late_resolve) {
         // use a texture viewport
         *texture_viewport = {
             .ratio = {
@@ -546,10 +563,9 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
         };
     }
 
-    if (is_same_image || (start_sourced_line != 0) || (start_x != 0) || (info.width != width) || (info.height != height) || (info.format != base_format)) {
-        VKContext *context = reinterpret_cast<VKContext *>(state.context);
+    if (needs_late_resolve || (start_sourced_line != 0) || (start_x != 0) || (info.width != width) || (info.height != height) || (info.format != base_format)) {
         const uint64_t scene_timestamp = context->scene_timestamp;
-        const uint64_t source_generation = is_same_image
+        const uint64_t source_generation = needs_late_resolve
             ? ((context->draw_timestamp << 1) | 1ULL)
             : (info.write_generation << 1);
 
@@ -576,13 +592,15 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
             }
         }
 
-        // context was resolved above when the cast freshness token was built.
-        const bool feedback_from_active_target = is_same_image && context->in_renderpass;
-        vk::CommandBuffer cmd_buffer = feedback_from_active_target
+        // Any surface written in this scene must be resolved after its producer
+        // commands. If a render pass is currently open, close it because Vulkan
+        // copy commands are illegal inside a render pass, then resume afterwards.
+        const bool late_resolve_in_renderpass = needs_late_resolve && context->in_renderpass;
+        vk::CommandBuffer cmd_buffer = needs_late_resolve
             ? context->render_cmd
             : context->prerender_cmd;
 
-        if (feedback_from_active_target) {
+        if (late_resolve_in_renderpass) {
             context->stop_render_pass();
 
             vk::ImageMemoryBarrier to_transfer{
@@ -659,7 +677,7 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
             };
             cmd_buffer.copyImage(info.texture.image, vk::ImageLayout::eGeneral, casted->texture.image, vk::ImageLayout::eTransferDstOptimal, image_copy);
         } else {
-            LOG_INFO("[VS-TYPELESS] tex={} surface={} req_fmt={} store_fmt={} req_bpp={} store_bpp={} stride={} start=({}, {}) size={}x{} write_gen={} source_gen={} same_image={} scene={}",
+            LOG_DEBUG("[VS-TYPELESS] tex={} surface={} req_fmt={} store_fmt={} req_bpp={} store_bpp={} stride={} start=({}, {}) size={}x{} write_gen={} source_gen={} same_image={} scene={}",
                 log_hex(address), log_hex(ite->first), static_cast<uint32_t>(base_format), static_cast<uint32_t>(info.format),
                 bytes_per_pixel_requested, bytes_per_pixel_in_store, stride_bytes, start_x, start_sourced_line,
                 width, height, info.write_generation, source_generation, is_same_image, scene_timestamp);
@@ -712,7 +730,7 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
         }
         casted->texture.transition_to(cmd_buffer, vkutil::ImageLayout::ColorAttachmentReadWrite);
 
-        if (feedback_from_active_target) {
+        if (late_resolve_in_renderpass) {
             vk::ImageMemoryBarrier back_to_render{
                 .srcAccessMask = vk::AccessFlagBits::eTransferRead,
                 .dstAccessMask = vk::AccessFlagBits::eColorAttachmentRead
@@ -731,6 +749,16 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
                 vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eFragmentShader,
                 vk::DependencyFlags{}, {}, {}, back_to_render);
             context->start_render_pass(false);
+        }
+
+        info.last_resolve_scene = scene_timestamp;
+        info.last_resolve_generation = source_generation;
+
+        if (needs_late_resolve) {
+            LOG_DEBUG("[VS-SURFACE-RESOLVE] surface={} scene={} write_scene={} write_draw={} current_draw={} generation={} same_image={} reason={}",
+                log_hex(ite->first), scene_timestamp, info.last_write_scene, info.last_write_draw,
+                context->draw_timestamp, source_generation, is_same_image,
+                is_same_image ? "FRAMEBUFFER_FEEDBACK" : "SAME_SCENE_RAW");
         }
 
         return TextureLookupResult{

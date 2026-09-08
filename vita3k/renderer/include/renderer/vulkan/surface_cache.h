@@ -84,6 +84,15 @@ struct ColorSurfaceCacheInfo : public SurfaceCacheInfo {
     uint64_t last_frame_rendered;
     uint64_t write_generation = 0;
 
+    // VitaStation Renderer 2.0 dependency identity.
+    // A color surface may be rendered and sampled again before the scene ends.
+    // Keep the producer scene/draw so reads can be resolved in render_cmd instead
+    // of accidentally copying an older image from prerender_cmd.
+    uint64_t last_write_scene = 0;
+    uint64_t last_write_draw = 0;
+    uint64_t last_resolve_scene = 0;
+    uint64_t last_resolve_generation = 0;
+
     SceGxmColorBaseFormat format;
     vk::ComponentMapping swizzle;
 

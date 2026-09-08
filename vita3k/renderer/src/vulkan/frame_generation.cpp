@@ -14,6 +14,7 @@
 #include <atomic>
 #include <cstdint>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -44,6 +45,113 @@ std::atomic<bool> g_active{ false };
 std::atomic<int> g_active_multiplier{ 1 };
 std::mutex g_error_mutex;
 std::string g_last_error;
+
+// VitaStation FrameGen 2.0 scheduler.
+// This is intentionally independent from LSFG internals: the emulator owns the
+// real-frame cadence and can decide when interpolation is safe before invoking
+// the backend.
+struct FrameTimingHistory {
+    static constexpr size_t kCapacity = 120;
+    static constexpr size_t kMinimumSamples = 12;
+    static constexpr double kMinimumRealFps = 18.0;
+    static constexpr double kMaximumRelativeJitter = 0.30;
+
+    std::vector<double> intervals_ms;
+    std::chrono::steady_clock::time_point last_real_frame{};
+    double generation_ema_ms = 0.0;
+    uint32_t cooldown_frames = 0;
+    uint64_t queue_misses = 0;
+    uint64_t generated_frames = 0;
+
+    void reset() {
+        intervals_ms.clear();
+        last_real_frame = {};
+        generation_ema_ms = 0.0;
+        cooldown_frames = 0;
+        queue_misses = 0;
+        generated_frames = 0;
+    }
+
+    double observe_real_frame() {
+        const auto now = std::chrono::steady_clock::now();
+        if (last_real_frame.time_since_epoch().count() == 0) {
+            last_real_frame = now;
+            return 0.0;
+        }
+
+        const double delta_ms = std::chrono::duration<double, std::milli>(now - last_real_frame).count();
+        last_real_frame = now;
+
+        const double avg = average_ms();
+        const bool discontinuity = delta_ms > 250.0
+            || (avg > 0.0 && delta_ms > std::max(80.0, avg * 2.25));
+        if (discontinuity) {
+            intervals_ms.clear();
+            cooldown_frames = std::max<uint32_t>(cooldown_frames, 8);
+            return delta_ms;
+        }
+
+        if (delta_ms >= 2.0 && delta_ms <= 250.0) {
+            intervals_ms.push_back(delta_ms);
+            if (intervals_ms.size() > kCapacity)
+                intervals_ms.erase(intervals_ms.begin());
+        }
+        return delta_ms;
+    }
+
+    double average_ms() const {
+        if (intervals_ms.empty())
+            return 0.0;
+        double sum = 0.0;
+        for (const double value : intervals_ms)
+            sum += value;
+        return sum / static_cast<double>(intervals_ms.size());
+    }
+
+    double jitter_ratio() const {
+        if (intervals_ms.size() < 2)
+            return 1.0;
+        const double avg = average_ms();
+        if (avg <= 0.0)
+            return 1.0;
+        double variance = 0.0;
+        for (const double value : intervals_ms) {
+            const double d = value - avg;
+            variance += d * d;
+        }
+        variance /= static_cast<double>(intervals_ms.size());
+        return std::sqrt(variance) / avg;
+    }
+
+    double real_fps() const {
+        const double avg = average_ms();
+        return avg > 0.0 ? 1000.0 / avg : 0.0;
+    }
+
+    bool eligible() {
+        if (cooldown_frames > 0) {
+            --cooldown_frames;
+            return false;
+        }
+        if (intervals_ms.size() < kMinimumSamples)
+            return false;
+        return real_fps() >= kMinimumRealFps
+            && jitter_ratio() <= kMaximumRelativeJitter;
+    }
+
+    void note_generation(const double generation_ms) {
+        if (generation_ema_ms <= 0.0)
+            generation_ema_ms = generation_ms;
+        else
+            generation_ema_ms = generation_ema_ms * 0.90 + generation_ms * 0.10;
+        ++generated_frames;
+    }
+
+    void note_queue_miss() {
+        ++queue_misses;
+        cooldown_frames = std::max<uint32_t>(cooldown_frames, 2);
+    }
+};
 
 RuntimeSettings runtime_snapshot() {
     std::lock_guard<std::mutex> lock(g_runtime_mutex);
@@ -375,6 +483,7 @@ struct FrameGenerationPresenter::Impl {
     uint64_t frame_index = 0;
     uint64_t lsfg_frame_index = 0;
     uint32_t generation_miss_streak = 0;
+    FrameTimingHistory timing;
     std::string library_cache_dir;
 
     static constexpr uint64_t kWarmupFrames = 60;
@@ -923,6 +1032,7 @@ struct FrameGenerationPresenter::Impl {
         frame_index = 0;
         lsfg_frame_index = 0;
         generation_miss_streak = 0;
+        timing.reset();
 
         if (swapchain == VK_NULL_HANDLE
             && context_id < 0
@@ -1056,6 +1166,7 @@ struct FrameGenerationPresenter::Impl {
             frame_index = 0;
             lsfg_frame_index = 0;
             generation_miss_streak = 0;
+            timing.reset();
             set_last_error("");
             // Runtime-active stays false during the startup warm-up. This keeps
             // the HUD from advertising doubled FPS before a generated frame is
@@ -1088,12 +1199,24 @@ struct FrameGenerationPresenter::Impl {
         bool render_ready_consumed = false;
 
         try {
+            timing.observe_real_frame();
+
             // Do not put LSFG in the game's startup path. Shader precompile,
             // DLC/network checks and first-scene boot are timing-sensitive on
             // several Vita titles. During warm-up, present the real frame using
             // the renderer semaphore exactly like the normal Vita3K path.
             if (frame_index + 1 < kWarmupFrames) {
                 set_active(false);
+                ++frame_index;
+                return queue_present(real_image_index, render_ready);
+            }
+
+            // Adaptive 2x: only interpolate when the real-frame cadence is
+            // healthy enough. Loading screens, severe stutter and low base FPS
+            // stay on real frames and re-prime after stability returns.
+            if (!timing.eligible()) {
+                set_active(false);
+                input_primed = false;
                 ++frame_index;
                 return queue_present(real_image_index, render_ready);
             }
@@ -1129,6 +1252,7 @@ struct FrameGenerationPresenter::Impl {
             const auto generation_end = std::chrono::steady_clock::now();
             const auto generation_us = std::chrono::duration_cast<std::chrono::microseconds>(
                 generation_end - generation_begin).count();
+            timing.note_generation(static_cast<double>(generation_us) / 1000.0);
 
             ++lsfg_frame_index;
 
@@ -1148,6 +1272,7 @@ struct FrameGenerationPresenter::Impl {
 
             if (acquire_result == VK_NOT_READY || acquire_result == VK_TIMEOUT) {
                 ++generation_miss_streak;
+                timing.note_queue_miss();
                 if (generation_miss_streak >= kMissesBeforeHudPause)
                     set_active(false);
                 ++frame_index;
@@ -1176,8 +1301,11 @@ struct FrameGenerationPresenter::Impl {
 
             if ((frame_index % 120u) == 0u) {
                 LOG_INFO(
-                    "VitaStation LSFG 3.1P: generation {} us, output {}x{}, internal {}x{}",
-                    generation_us,
+                    "[VS-FG] LSFG 3.1P adaptive-2x: real_fps={:.1f} jitter={:.3f} generation_ema={:.2f}ms queue_misses={} output={}x{} internal={}x{}",
+                    timing.real_fps(),
+                    timing.jitter_ratio(),
+                    timing.generation_ema_ms,
+                    timing.queue_misses,
                     extent.width,
                     extent.height,
                     fg_extent.width,

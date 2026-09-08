@@ -17,6 +17,8 @@ bool frame_generation_active();
 int frame_generation_active_multiplier();
 std::string frame_generation_last_error();
 
+// VitaStation FrameGen 2.0
+// Presenter owns emulator-integrated scheduling; LSFG remains the interpolation backend.
 class FrameGenerationPresenter {
 public:
     explicit FrameGenerationPresenter(VKState& state);

@@ -754,7 +754,7 @@
     <string name="vitastation_hud_gpu">GPU usage</string>
     <string name="vitastation_hud_battery">T. BATT (°C)</string>
 
-    <string name="initial_setup_info_html">&lt;div align="center"&gt;Install your PS Vita firmware files to get started.&lt;br&gt;&lt;br&gt;See the &lt;a href="https://vita3k.org/quickstart.html"&gt;Quickstart&lt;/a&gt; guide and the &lt;a href="https://vita3k.org/compatibility.html"&gt;commercial&lt;/a&gt; / &lt;a href="https://vita3k.org/compatibility-homebrew.html"&gt;homebrew&lt;/a&gt; compatibility lists.&lt;br&gt;&lt;br&gt;VitaStation is based on Vita3K-Plus and Vita3K. &lt;a href="https://github.com/shinkoou/VitaStation"&gt;Project source&lt;/a&gt;.&lt;/div&gt;</string>
+    <string name="initial_setup_info_html">&lt;div align="center"&gt;VitaStation is based on Vita3K-Plus and Vita3K. &lt;a href="https://github.com/shinkoou/VitaStation"&gt;Project source&lt;/a&gt;.&lt;/div&gt;</string>
     <string name="settings_tab_performance">Performance HUD</string>
     <string name="settings_home_subtitle">Choose a category to configure VitaStation.</string>
     <string name="settings_category_system_desc">Language, region, date and emulated system behavior</string>

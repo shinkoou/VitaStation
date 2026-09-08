@@ -112,7 +112,7 @@
     <string name="apps_list_menu_about">Sobre</string>
     <string name="apps_list_menu_trophies">Troféus</string>
     <string name="initial_setup_skip">Pular por agora</string>
-    <string name="initial_setup_info_html">&lt;div align="center"&gt;Para começar, instale os arquivos de firmware do seu PS Vita.&lt;br&gt;&lt;br&gt;Consulte o guia &lt;a href="https://vita3k.org/quickstart.html"&gt;Quickstart&lt;/a&gt; e as listas de compatibilidade de jogos &lt;a href="https://vita3k.org/compatibility.html"&gt;comerciais&lt;/a&gt; e &lt;a href="https://vita3k.org/compatibility-homebrew.html"&gt;homebrew&lt;/a&gt;.&lt;br&gt;&lt;br&gt;O VitaStation é baseado no Vita3K-Plus e Vita3K. &lt;a href="https://github.com/shinkoou/VitaStation"&gt;Código do projeto&lt;/a&gt;.&lt;/div&gt;</string>
+    <string name="initial_setup_info_html">&lt;div align="center"&gt;Consulte o guia &lt;a href="https://vita3k.org/quickstart.html"&gt;Quickstart&lt;/a&gt; e as listas de compatibilidade de jogos &lt;a href="https://vita3k.org/compatibility.html"&gt;comerciais&lt;/a&gt; e &lt;a href="https://vita3k.org/compatibility-homebrew.html"&gt;homebrew&lt;/a&gt;.&lt;br&gt;&lt;br&gt;O VitaStation é baseado no Vita3K-Plus e Vita3K. &lt;a href="https://github.com/shinkoou/VitaStation"&gt;Código do projeto&lt;/a&gt;.&lt;/div&gt;</string>
     <string name="settings_title">Configurações</string>
     <string name="settings_custom_config_label">Configurações • %1$s</string>
     <string name="settings_custom_config_banner">Usando configuração personalizada para este jogo</string>

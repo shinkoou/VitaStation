@@ -118,10 +118,10 @@ fun InitialSetupScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(
-                    start = 20.dp,
-                    end = 20.dp,
-                    top = systemBars.calculateTopPadding() + 8.dp,
-                    bottom = systemBars.calculateBottomPadding() + 20.dp
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = systemBars.calculateTopPadding() + 4.dp,
+                    bottom = systemBars.calculateBottomPadding() + 12.dp
                 )
         ) {
             Row(
@@ -143,13 +143,13 @@ fun InitialSetupScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
             Surface(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
-                shape = RoundedCornerShape(32.dp),
+                shape = RoundedCornerShape(28.dp),
                 color = setupPanelColor,
                 contentColor = setupTextColor,
                 tonalElevation = 6.dp,
@@ -175,7 +175,7 @@ fun InitialSetupScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(18.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             SetupPageIndicator(
                 currentPage = page,
@@ -183,7 +183,7 @@ fun InitialSetupScreen(
                 modifier = Modifier.align(Alignment.CenterHorizontally)
             )
 
-            Spacer(modifier = Modifier.height(18.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -298,18 +298,18 @@ private fun FirmwareSetupPage(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text(
             text = stringResource(R.string.initial_setup_firmware_title),
-            style = MaterialTheme.typography.headlineSmall,
+            style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.SemiBold,
             color = setupTextColor
         )
         Text(
             text = stringResource(R.string.initial_setup_firmware_body),
-            style = MaterialTheme.typography.bodyLarge,
+            style = MaterialTheme.typography.bodyMedium,
             color = setupTextColor
         )
 
@@ -320,8 +320,8 @@ private fun FirmwareSetupPage(
         ) {
             if (!firmwareInstallState.components.preinstalled) {
                 FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     FilledTonalButton(onClick = { uriHandler.openUri(FirmwareLinks.PREINSTALL_URL) }) {
                         Text(stringResource(R.string.initial_setup_download))
@@ -342,10 +342,10 @@ private fun FirmwareSetupPage(
                     selectedIndex = firmwareLocaleIndex,
                     onSelected = onFirmwareLocaleSelected
                 )
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(5.dp))
                 FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     FilledTonalButton(onClick = {
                         uriHandler.openUri(FirmwareLinks.firmwareDownloadUrl(firmwareLocaleIndex))
@@ -365,8 +365,8 @@ private fun FirmwareSetupPage(
         ) {
             if (!firmwareInstallState.components.fontPackage) {
                 FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     FilledTonalButton(onClick = { uriHandler.openUri(FirmwareLinks.FONT_PACKAGE_URL) }) {
                         Text(stringResource(R.string.initial_setup_download))
@@ -387,10 +387,10 @@ private fun FirmwareLanguagePicker(
 ) {
     var expanded by remember { mutableStateOf(false) }
 
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
             text = stringResource(R.string.initial_setup_select_firmware_language),
-            style = MaterialTheme.typography.labelLarge,
+            style = MaterialTheme.typography.labelMedium,
             color = setupTextColor
         )
         Box {
@@ -425,7 +425,7 @@ private fun FirmwareCard(
     val resolvedMissingStatusText = missingStatusText ?: stringResource(R.string.initial_setup_status_missing)
 
     Surface(
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(22.dp),
         color = setupCardColor,
         contentColor = setupTextColor,
         border = BorderStroke(
@@ -434,8 +434,8 @@ private fun FirmwareCard(
         )
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -444,12 +444,12 @@ private fun FirmwareCard(
             ) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = setupTextColor,
                     modifier = Modifier.weight(1f)
                 )
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(8.dp))
                 StatusBadge(
                     installed = installed,
                     missingStatusText = resolvedMissingStatusText
@@ -469,7 +469,7 @@ private fun StatusBadge(installed: Boolean, missingStatusText: String) {
         color = color.copy(alpha = 0.13f)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -485,7 +485,7 @@ private fun StatusBadge(installed: Boolean, missingStatusText: String) {
                 } else {
                     missingStatusText
                 },
-                style = MaterialTheme.typography.labelLarge,
+                style = MaterialTheme.typography.labelMedium,
                 color = color,
                 fontWeight = FontWeight.SemiBold
             )

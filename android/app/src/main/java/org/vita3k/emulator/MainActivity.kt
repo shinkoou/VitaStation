@@ -9,6 +9,7 @@ import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import java.io.File
 import org.vita3k.emulator.data.AppStorage
+import org.vita3k.emulator.data.FrameGenerationManager
 import org.vita3k.emulator.ui.navigation.AppNavigation
 import org.vita3k.emulator.ui.theme.Vita3KTheme
 import org.vita3k.emulator.ui.viewmodel.AppsListViewModel
@@ -203,6 +204,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun launchApp(titleId: String, appTitle: String) {
         settingsViewModel.flushGlobalSettings {
+            FrameGenerationManager.syncNative(this)
             lastLaunchStartedAtMs = SystemClock.elapsedRealtime()
             lastLaunchTitleId = titleId
             emulatorLauncher.launch(Emulator.createLaunchIntent(this, titleId, appTitle))

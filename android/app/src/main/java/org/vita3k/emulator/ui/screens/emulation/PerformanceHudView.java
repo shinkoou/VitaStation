@@ -37,6 +37,8 @@ public final class PerformanceHudView extends View {
     private final float density;
     private final boolean hudEnabled;
     private int fps;
+    private boolean frameGenerationActive;
+    private int frameGenerationMultiplier = 1;
     private int shaderCount;
     private float ramMb;
     private float cpuPercent;
@@ -104,9 +106,13 @@ public final class PerformanceHudView extends View {
     private void updateFastMetrics() {
         try {
             fps = NativeLib.INSTANCE.getCurrentFps();
+            frameGenerationActive = NativeLib.INSTANCE.isLsfgFrameGenerationActive();
+            frameGenerationMultiplier = Math.max(1, NativeLib.INSTANCE.getLsfgFrameGenerationMultiplier());
             shaderCount = NativeLib.INSTANCE.getRecentShaderCompileCount();
         } catch (Throwable ignored) {
             fps = 0;
+            frameGenerationActive = false;
+            frameGenerationMultiplier = 1;
             shaderCount = 0;
         }
     }
@@ -211,8 +217,10 @@ public final class PerformanceHudView extends View {
         if (!hudEnabled || getVisibility() != VISIBLE) return;
 
         List<String[]> metrics = new ArrayList<>();
-        if (PerformanceHudPrefs.get(getContext(), PerformanceHudPrefs.KEY_FPS))
-            metrics.add(new String[]{"FPS", fps > 0 ? Integer.toString(fps) : "—"});
+        if (PerformanceHudPrefs.get(getContext(), PerformanceHudPrefs.KEY_FPS)) {
+            int presentedFps = frameGenerationActive && fps > 0 ? fps * frameGenerationMultiplier : fps;
+            metrics.add(new String[]{"FPS", presentedFps > 0 ? Integer.toString(presentedFps) : "—"});
+        }
         if (PerformanceHudPrefs.get(getContext(), PerformanceHudPrefs.KEY_RAM))
             metrics.add(new String[]{"RAM", ramMb >= 1024f
                     ? String.format(Locale.US, "%.1fG", ramMb / 1024f)
@@ -257,21 +265,47 @@ public final class PerformanceHudView extends View {
             canvas.drawText(metric[1], start + labelWidth + gap, baseline, valuePaint);
         }
 
+        List<String> statusPills = new ArrayList<>();
+        if (frameGenerationActive && fps > 0) {
+            statusPills.add("FR: " + fps + "  |  FG: " + frameGenerationMultiplier + "x");
+        }
         if (shaderCount > 0) {
-            String shaderText = "SHADERS  •  " + shaderCount;
+            statusPills.add("SHADERS  •  " + shaderCount);
+        }
+
+        if (!statusPills.isEmpty()) {
             shaderTextPaint.setTextSize(dp(8.0f));
             shaderTextPaint.setTextAlign(Paint.Align.CENTER);
-            float textWidth = shaderTextPaint.measureText(shaderText);
-            float pillWidth = textWidth + dp(20f);
+
+            float gap = dp(5f);
+            float totalWidth = 0f;
+            List<Float> pillWidths = new ArrayList<>();
+            for (String status : statusPills) {
+                float width = shaderTextPaint.measureText(status) + dp(20f);
+                pillWidths.add(width);
+                totalWidth += width;
+            }
+            totalWidth += gap * Math.max(0, statusPills.size() - 1);
+
             float pillTop = top + height + dp(2.5f);
-            RectF pill = new RectF(
-                    getWidth() / 2f - pillWidth / 2f,
-                    pillTop,
-                    getWidth() / 2f + pillWidth / 2f,
-                    pillTop + dp(15.5f)
-            );
-            canvas.drawRoundRect(pill, dp(8f), dp(8f), shaderPaint);
-            canvas.drawText(shaderText, getWidth() / 2f, pillTop + dp(10.7f), shaderTextPaint);
+            float cursor = getWidth() / 2f - totalWidth / 2f;
+            for (int i = 0; i < statusPills.size(); i++) {
+                float width = pillWidths.get(i);
+                RectF pill = new RectF(
+                        cursor,
+                        pillTop,
+                        cursor + width,
+                        pillTop + dp(15.5f)
+                );
+                canvas.drawRoundRect(pill, dp(8f), dp(8f), shaderPaint);
+                canvas.drawText(
+                        statusPills.get(i),
+                        cursor + width / 2f,
+                        pillTop + dp(10.7f),
+                        shaderTextPaint
+                );
+                cursor += width + gap;
+            }
         }
     }
 

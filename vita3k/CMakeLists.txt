@@ -192,6 +192,14 @@ if(ANDROID)
     endif()
     set_target_properties(lsfg-vk-framegen PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
+    target_sources(renderer PRIVATE
+        renderer/src/vulkan/frame_generation.cpp
+    )
+    target_link_libraries(renderer PRIVATE
+        lsfg-vk-framegen
+        android
+    )
+
     add_library(vitastation-lsfg-support STATIC
         android/lsfg/shader_store.cpp
         "${VITASTATION_LSFG_ROOT}/src/extract/trans.cpp"

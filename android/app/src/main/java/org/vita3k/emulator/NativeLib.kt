@@ -116,6 +116,10 @@ object NativeLib {
     external fun prepareLsfgShaders(dllPath: String, cacheDir: String): Int
     external fun areLsfgShadersReady(cacheDir: String): Boolean
     external fun getLsfgBackendInfo(): String
+    external fun configureLsfgFrameGeneration(enabled: Boolean, multiplier: Int, cacheDir: String): Boolean
+    external fun isLsfgFrameGenerationActive(): Boolean
+    external fun getLsfgFrameGenerationMultiplier(): Int
+    external fun getLsfgFrameGenerationLastError(): String
 
     // --- Users ---
     /** Returns all frontend-visible Vita users with their active state. */

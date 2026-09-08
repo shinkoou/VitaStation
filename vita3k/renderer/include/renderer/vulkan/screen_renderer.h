@@ -20,6 +20,9 @@
 #include <vkutil/objects.h>
 
 #include "screen_filters.h"
+#ifdef __ANDROID__
+#include "frame_generation.h"
+#endif
 
 #include <atomic>
 #include <memory>
@@ -61,6 +64,7 @@ public:
 #ifdef __ANDROID__
     // renderpass used to (partially) prevent a driver bug using stock adreno drivers
     vk::RenderPass stock_adreno_pass;
+    std::unique_ptr<FrameGenerationPresenter> frame_generation;
 #endif
 
     std::unique_ptr<ScreenFilter> filter;

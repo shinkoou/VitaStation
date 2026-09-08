@@ -72,6 +72,9 @@ bool has_android_surface() {
 
 ScreenRenderer::ScreenRenderer(VKState &state)
     : state(state) {
+#ifdef __ANDROID__
+    frame_generation = std::make_unique<FrameGenerationPresenter>(state);
+#endif
 }
 
 bool ScreenRenderer::create() {
@@ -262,6 +265,11 @@ void ScreenRenderer::create_swapchain() {
     // Create Swapchain
     {
         vk::ImageUsageFlags surface_usage = vk::ImageUsageFlagBits::eColorAttachment;
+        if (surface_capabilities.supportedUsageFlags & vk::ImageUsageFlagBits::eTransferSrc)
+            surface_usage |= vk::ImageUsageFlagBits::eTransferSrc;
+        if (surface_capabilities.supportedUsageFlags & vk::ImageUsageFlagBits::eTransferDst)
+            surface_usage |= vk::ImageUsageFlagBits::eTransferDst;
+
         vk::ImageUsageFlags fsr_flags = vk::ImageUsageFlagBits::eTransferDst;
         if (!state.is_adreno_turnip)
             // workaround for a Turnip driver bug: adding storage flag here breaks the swapchain
@@ -337,9 +345,35 @@ void ScreenRenderer::create_swapchain() {
     }
 
     create_layout_sync();
+
+#ifdef __ANDROID__
+    if (frame_generation) {
+        std::vector<VkImage> raw_images;
+        raw_images.reserve(swapchain_images.size());
+        for (const vk::Image image : swapchain_images)
+            raw_images.push_back(static_cast<VkImage>(image));
+
+        const auto transfer_flags =
+            vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst;
+        const bool transfer_compatible =
+            (surface_capabilities.supportedUsageFlags & transfer_flags) == transfer_flags;
+
+        frame_generation->configure_for_swapchain(
+            static_cast<VkSwapchainKHR>(swapchain),
+            VkExtent2D{ extent.width, extent.height },
+            static_cast<VkFormat>(surface_format.format),
+            raw_images,
+            transfer_compatible);
+    }
+#endif
 }
 
 void ScreenRenderer::destroy_swapchain() {
+#ifdef __ANDROID__
+    if (frame_generation)
+        frame_generation->release_swapchain();
+#endif
+
     for (vk::Framebuffer framebuffer : swapchain_framebuffers)
         state.device.destroy(framebuffer);
     swapchain_framebuffers.clear();
@@ -356,6 +390,11 @@ void ScreenRenderer::destroy_swapchain() {
 
 void ScreenRenderer::cleanup() {
     state.device.waitIdle();
+
+#ifdef __ANDROID__
+    if (frame_generation)
+        frame_generation->shutdown();
+#endif
 
     filter.reset();
 
@@ -560,7 +599,22 @@ void ScreenRenderer::swap_window() {
         .pImageIndices = &swapchain_image_idx,
     };
 
+#ifdef __ANDROID__
+    vk::Result result;
+    if (frame_generation && frame_generation->active()) {
+        result = static_cast<vk::Result>(
+            frame_generation->present(
+                static_cast<VkSemaphore>(image_ready_semaphores[current_frame]),
+                swapchain_image_idx));
+        if (result == vk::Result::eErrorInitializationFailed) {
+            result = state.general_queue.presentKHR(&present_info);
+        }
+    } else {
+        result = state.general_queue.presentKHR(&present_info);
+    }
+#else
     auto result = state.general_queue.presentKHR(&present_info);
+#endif
     if (result == vk::Result::eSuboptimalKHR) {
         need_rebuild = !surface_matches_window_size();
     } else if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eErrorSurfaceLostKHR) {

@@ -274,7 +274,7 @@
     <string name="settings_lang_english_gb">Inglês (Reino Unido)</string>
     <string name="settings_lang_turkish">Turco</string>
     <string name="settings_gpu_framegen">Frame Generation (LSFG)</string>
-    <string name="settings_gpu_framegen_desc">Geração de quadros experimental do VitaStation baseada no backend Android lsfg-vk de licença MIT. A Phase03A prepara o backend nativo e os shaders fornecidos pelo próprio usuário; a interpolação só será ativada depois de validarmos a integração com o renderer.</string>
+    <string name="settings_gpu_framegen_desc">Gera um quadro LSFG entre dois quadros reais do emulador. A Phase03B usa integração direta Vulkan/AHardwareBuffer do VitaStation e, por enquanto, trabalha em modo 2x.</string>
     <string name="settings_gpu_framegen_foundation_ready">Shaders LSFG prontos • integração com o renderer pendente</string>
     <string name="settings_gpu_framegen_foundation_not_ready">Importe sua própria Lossless.dll para preparar os shaders LSFG</string>
     <string name="settings_gpu_framegen_import_dll">Importar Lossless.dll</string>
@@ -287,4 +287,7 @@
     <string name="settings_gpu_framegen_import_error">Não foi possível preparar o cache de shaders LSFG.</string>
     <string name="settings_gpu_framegen_cache_ready">O cache privado de shaders está pronto. A DLL não fica armazenada.</string>
     <string name="settings_gpu_framegen_import_hint">Use uma Lossless.dll obtida legitimamente. O VitaStation não distribui a DLL.</string>
+    <string name="settings_gpu_framegen_active_2x">Ativado • 2x • entra em ação ao iniciar o jogo</string>
+    <string name="settings_gpu_framegen_ready_off">Shaders prontos • Frame Generation desligado</string>
+    <string name="settings_gpu_framegen_runtime_hint">O modo 2x está ativado. No jogo, o HUD mostra o FPS apresentado e também FR e FG quando o contexto LSFG do renderer estiver ativo.</string>
 </resources>

@@ -11,6 +11,8 @@ import java.security.MessageDigest
 object FrameGenerationManager {
     private const val PREFS = "vitastation_frame_generation"
     private const val KEY_DLL_SHA256 = "dll_sha256"
+    private const val KEY_ENABLED = "enabled"
+    private const val KEY_MULTIPLIER = "multiplier"
 
     const val RESULT_OK = 0
     const val RESULT_DLL_UNREADABLE = -1
@@ -18,6 +20,8 @@ object FrameGenerationManager {
     const val RESULT_TRANSLATION_FAILED = -3
     const val RESULT_WRITE_FAILED = -4
     const val RESULT_COPY_FAILED = -10
+
+    const val MULTIPLIER_2X = 2
 
     fun shaderCacheDir(context: Context): File =
         File(context.filesDir, "lsfg/shaders")
@@ -34,6 +38,42 @@ object FrameGenerationManager {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(KEY_DLL_SHA256, "")
             .orEmpty()
+
+    fun isEnabled(context: Context): Boolean {
+        if (!isReady(context)) return false
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_ENABLED, false)
+    }
+
+    fun multiplier(context: Context): Int =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getInt(KEY_MULTIPLIER, MULTIPLIER_2X)
+            .coerceAtLeast(MULTIPLIER_2X)
+
+    fun setEnabled(context: Context, requested: Boolean): Boolean {
+        val effective = requested && isReady(context)
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_ENABLED, effective)
+            .putInt(KEY_MULTIPLIER, MULTIPLIER_2X)
+            .apply()
+        syncNative(context)
+        return effective
+    }
+
+    fun syncNative(context: Context): Boolean {
+        val ready = isReady(context)
+        val enabled = ready && context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_ENABLED, false)
+
+        return runCatching {
+            NativeLib.configureLsfgFrameGeneration(
+                enabled,
+                MULTIPLIER_2X,
+                shaderCacheDir(context).absolutePath
+            )
+        }.getOrDefault(false)
+    }
 
     suspend fun importLosslessDll(context: Context, uri: Uri): Int =
         withContext(Dispatchers.IO) {
@@ -77,7 +117,9 @@ object FrameGenerationManager {
                     context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                         .edit()
                         .putString(KEY_DLL_SHA256, sha)
+                        .putInt(KEY_MULTIPLIER, MULTIPLIER_2X)
                         .apply()
+                    syncNative(context)
                 }
 
                 result

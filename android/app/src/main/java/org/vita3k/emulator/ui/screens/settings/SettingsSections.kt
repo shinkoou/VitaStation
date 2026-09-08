@@ -1715,6 +1715,7 @@ private fun FrameGenerationFoundationBlock(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var ready by remember { mutableStateOf(FrameGenerationManager.isReady(context)) }
+    var enabled by remember { mutableStateOf(FrameGenerationManager.isEnabled(context)) }
     var importing by remember { mutableStateOf(false) }
     var importResult by remember { mutableStateOf<Int?>(null) }
 
@@ -1727,19 +1728,22 @@ private fun FrameGenerationFoundationBlock(
             importing = true
             importResult = FrameGenerationManager.importLosslessDll(context, uri)
             ready = FrameGenerationManager.isReady(context)
+            enabled = FrameGenerationManager.isEnabled(context)
             importing = false
         }
     }
 
     SettingsToggleRow(
         title = stringResource(R.string.settings_gpu_framegen),
-        checked = false,
-        onCheckedChange = {},
-        enabled = false,
-        summary = if (ready) {
-            stringResource(R.string.settings_gpu_framegen_foundation_ready)
-        } else {
-            stringResource(R.string.settings_gpu_framegen_foundation_not_ready)
+        checked = ready && enabled,
+        onCheckedChange = { requested ->
+            enabled = FrameGenerationManager.setEnabled(context, requested)
+        },
+        enabled = ready && !importing,
+        summary = when {
+            !ready -> stringResource(R.string.settings_gpu_framegen_foundation_not_ready)
+            enabled -> stringResource(R.string.settings_gpu_framegen_active_2x)
+            else -> stringResource(R.string.settings_gpu_framegen_ready_off)
         },
         help = SettingsHelpEntry(
             title = stringResource(R.string.settings_gpu_framegen),
@@ -1756,9 +1760,6 @@ private fun FrameGenerationFoundationBlock(
     ) {
         FilledTonalButton(
             onClick = {
-                // Android document providers do not agree on a MIME type for
-                // Windows DLL files. Accept the document here and validate the
-                // PE "MZ" header in FrameGenerationManager after selection.
                 dllPicker.launch(arrayOf("*/*"))
             },
             enabled = !importing
@@ -1789,6 +1790,7 @@ private fun FrameGenerationFoundationBlock(
             stringResource(R.string.settings_gpu_framegen_import_translation_error)
         importResult != null ->
             stringResource(R.string.settings_gpu_framegen_import_error)
+        ready && enabled -> stringResource(R.string.settings_gpu_framegen_runtime_hint)
         ready -> stringResource(R.string.settings_gpu_framegen_cache_ready)
         else -> stringResource(R.string.settings_gpu_framegen_import_hint)
     }

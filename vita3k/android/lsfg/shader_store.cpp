@@ -158,7 +158,7 @@ bool shaders_ready(const std::string& cache_dir) {
 }
 
 const char* backend_info() {
-    return "lsfg-vk-android 1.0.0 / Vulkan AHardwareBuffer foundation";
+    return "lsfg-vk-android 1.0.0 / LSFG 3.1P Performance / Vulkan AHardwareBuffer";
 }
 
 } // namespace vitastation::lsfg

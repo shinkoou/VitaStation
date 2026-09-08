@@ -5,7 +5,7 @@
 #include <renderer/vulkan/state.h>
 #include <util/log.h>
 
-#include <lsfg_3_1.hpp>
+#include <lsfg_3_1p.hpp>
 
 #include <android/hardware_buffer.h>
 #include <vulkan/vulkan_android.h>
@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -96,6 +97,34 @@ const std::unordered_map<std::string, uint32_t>& shader_name_table() {
         { "beta[2]", 277 },
         { "beta[3]", 278 },
         { "beta[4]", 279 },
+
+        // LSFG 3.1P Performance shader aliases.
+        { "p_mipmaps", 255 },
+        { "p_generate", 256 },
+        { "p_gamma[0]", 280 },
+        { "p_delta[0]", 280 },
+        { "p_delta[5]", 281 },
+        { "p_gamma[1]", 282 },
+        { "p_gamma[2]", 283 },
+        { "p_gamma[3]", 284 },
+        { "p_gamma[4]", 285 },
+        { "p_delta[1]", 286 },
+        { "p_delta[2]", 287 },
+        { "p_delta[3]", 288 },
+        { "p_delta[4]", 289 },
+        { "p_alpha[0]", 290 },
+        { "p_alpha[1]", 291 },
+        { "p_alpha[2]", 292 },
+        { "p_alpha[3]", 293 },
+        { "p_delta[6]", 294 },
+        { "p_delta[7]", 295 },
+        { "p_delta[8]", 296 },
+        { "p_delta[9]", 297 },
+        { "p_beta[0]", 298 },
+        { "p_beta[1]", 299 },
+        { "p_beta[2]", 300 },
+        { "p_beta[3]", 301 },
+        { "p_beta[4]", 302 },
     };
     return table;
 }
@@ -324,6 +353,7 @@ struct FrameGenerationPresenter::Impl {
 
     VkSwapchainKHR swapchain = VK_NULL_HANDLE;
     VkExtent2D extent{};
+    VkExtent2D fg_extent{};
     VkFormat swapchain_format = VK_FORMAT_UNDEFINED;
     std::vector<VkImage> swapchain_images;
 
@@ -333,14 +363,22 @@ struct FrameGenerationPresenter::Impl {
 
     VkCommandBuffer copy_command_buffer = VK_NULL_HANDLE;
     VkSemaphore generated_acquire = VK_NULL_HANDLE;
+    VkSemaphore generated_ready = VK_NULL_HANDLE;
+    VkFence copy_fence = VK_NULL_HANDLE;
 
     int32_t context_id = -1;
     bool library_initialized = false;
     bool session_active = false;
     bool session_failed = false;
+    bool input_primed = false;
     int session_multiplier = 2;
     uint64_t frame_index = 0;
+    uint64_t lsfg_frame_index = 0;
+    uint32_t generation_miss_streak = 0;
     std::string library_cache_dir;
+
+    static constexpr uint64_t kWarmupFrames = 60;
+    static constexpr uint32_t kMissesBeforeHudPause = 2;
 
     VkDevice device() const {
         return static_cast<VkDevice>(state.device);
@@ -376,9 +414,31 @@ struct FrameGenerationPresenter::Impl {
             VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateSemaphore(
                 device(), &semaphore_info, nullptr, &generated_acquire),
             "vkCreateSemaphore(LSFG acquire)");
+        check_vk(
+            VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateSemaphore(
+                device(), &semaphore_info, nullptr, &generated_ready),
+            "vkCreateSemaphore(LSFG ready)");
+
+        const VkFenceCreateInfo fence_info{
+            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = VK_FENCE_CREATE_SIGNALED_BIT,
+        };
+        check_vk(
+            VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateFence(
+                device(), &fence_info, nullptr, &copy_fence),
+            "vkCreateFence(LSFG copy)");
     }
 
     void destroy_sync_objects() {
+        if (copy_fence != VK_NULL_HANDLE) {
+            VULKAN_HPP_DEFAULT_DISPATCHER.vkDestroyFence(device(), copy_fence, nullptr);
+            copy_fence = VK_NULL_HANDLE;
+        }
+        if (generated_ready != VK_NULL_HANDLE) {
+            VULKAN_HPP_DEFAULT_DISPATCHER.vkDestroySemaphore(device(), generated_ready, nullptr);
+            generated_ready = VK_NULL_HANDLE;
+        }
         if (generated_acquire != VK_NULL_HANDLE) {
             VULKAN_HPP_DEFAULT_DISPATCHER.vkDestroySemaphore(device(), generated_acquire, nullptr);
             generated_acquire = VK_NULL_HANDLE;
@@ -398,13 +458,13 @@ struct FrameGenerationPresenter::Impl {
             return;
 
         if (library_initialized) {
-            LSFG_3_1::waitIdle();
-            LSFG_3_1::finalize();
+            LSFG_3_1P::waitIdle();
+            LSFG_3_1P::finalize();
             library_initialized = false;
             library_cache_dir.clear();
         }
 
-        LSFG_3_1::initialize(
+        LSFG_3_1P::initialize(
             device_uuid(state),
             false,
             1.0f,
@@ -418,6 +478,13 @@ struct FrameGenerationPresenter::Impl {
     }
 
     void begin_copy_commands() {
+        if (copy_fence != VK_NULL_HANDLE) {
+            check_vk(
+                VULKAN_HPP_DEFAULT_DISPATCHER.vkWaitForFences(
+                    device(), 1, &copy_fence, VK_TRUE, std::numeric_limits<uint64_t>::max()),
+                "vkWaitForFences(LSFG copy)");
+        }
+
         check_vk(
             VULKAN_HPP_DEFAULT_DISPATCHER.vkResetCommandBuffer(copy_command_buffer, 0),
             "vkResetCommandBuffer(LSFG)");
@@ -570,7 +637,7 @@ struct FrameGenerationPresenter::Impl {
             },
             .dstOffsets = {
                 { 0, 0, 0 },
-                { static_cast<int32_t>(extent.width), static_cast<int32_t>(extent.height), 1 },
+                { static_cast<int32_t>(fg_extent.width), static_cast<int32_t>(fg_extent.height), 1 },
             },
         };
 
@@ -701,7 +768,7 @@ struct FrameGenerationPresenter::Impl {
             },
             .srcOffsets = {
                 { 0, 0, 0 },
-                { static_cast<int32_t>(extent.width), static_cast<int32_t>(extent.height), 1 },
+                { static_cast<int32_t>(fg_extent.width), static_cast<int32_t>(fg_extent.height), 1 },
             },
             .dstSubresource = {
                 .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -779,7 +846,7 @@ struct FrameGenerationPresenter::Impl {
         end_copy_commands();
     }
 
-    void submit_copy_waiting(const VkSemaphore wait) {
+    void submit_copy_and_wait(const VkSemaphore wait) {
         const VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
         const VkSubmitInfo submit{
             .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -794,19 +861,45 @@ struct FrameGenerationPresenter::Impl {
         };
 
         check_vk(
-            VULKAN_HPP_DEFAULT_DISPATCHER.vkQueueSubmit(queue(), 1, &submit, VK_NULL_HANDLE),
-            "vkQueueSubmit(LSFG copy)");
+            VULKAN_HPP_DEFAULT_DISPATCHER.vkResetFences(device(), 1, &copy_fence),
+            "vkResetFences(LSFG copy)");
         check_vk(
-            VULKAN_HPP_DEFAULT_DISPATCHER.vkQueueWaitIdle(queue()),
-            "vkQueueWaitIdle(LSFG copy)");
+            VULKAN_HPP_DEFAULT_DISPATCHER.vkQueueSubmit(queue(), 1, &submit, copy_fence),
+            "vkQueueSubmit(LSFG input copy)");
+        check_vk(
+            VULKAN_HPP_DEFAULT_DISPATCHER.vkWaitForFences(
+                device(), 1, &copy_fence, VK_TRUE, std::numeric_limits<uint64_t>::max()),
+            "vkWaitForFences(LSFG input copy)");
     }
 
-    VkResult queue_present_no_wait(const uint32_t image_index) {
+    void submit_copy_async(const VkSemaphore wait, const VkSemaphore signal) {
+        const VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        const VkSubmitInfo submit{
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .pNext = nullptr,
+            .waitSemaphoreCount = wait != VK_NULL_HANDLE ? 1u : 0u,
+            .pWaitSemaphores = wait != VK_NULL_HANDLE ? &wait : nullptr,
+            .pWaitDstStageMask = wait != VK_NULL_HANDLE ? &wait_stage : nullptr,
+            .commandBufferCount = 1,
+            .pCommandBuffers = &copy_command_buffer,
+            .signalSemaphoreCount = signal != VK_NULL_HANDLE ? 1u : 0u,
+            .pSignalSemaphores = signal != VK_NULL_HANDLE ? &signal : nullptr,
+        };
+
+        check_vk(
+            VULKAN_HPP_DEFAULT_DISPATCHER.vkResetFences(device(), 1, &copy_fence),
+            "vkResetFences(LSFG output)");
+        check_vk(
+            VULKAN_HPP_DEFAULT_DISPATCHER.vkQueueSubmit(queue(), 1, &submit, copy_fence),
+            "vkQueueSubmit(LSFG output copy)");
+    }
+
+    VkResult queue_present(const uint32_t image_index, const VkSemaphore wait = VK_NULL_HANDLE) {
         const VkPresentInfoKHR present_info{
             .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
             .pNext = nullptr,
-            .waitSemaphoreCount = 0,
-            .pWaitSemaphores = nullptr,
+            .waitSemaphoreCount = wait != VK_NULL_HANDLE ? 1u : 0u,
+            .pWaitSemaphores = wait != VK_NULL_HANDLE ? &wait : nullptr,
             .swapchainCount = 1,
             .pSwapchains = &swapchain,
             .pImageIndices = &image_index,
@@ -826,7 +919,10 @@ struct FrameGenerationPresenter::Impl {
         set_active(false);
         session_active = false;
         session_failed = false;
+        input_primed = false;
         frame_index = 0;
+        lsfg_frame_index = 0;
+        generation_miss_streak = 0;
 
         if (swapchain == VK_NULL_HANDLE
             && context_id < 0
@@ -839,8 +935,8 @@ struct FrameGenerationPresenter::Impl {
 
         if (context_id >= 0) {
             try {
-                LSFG_3_1::waitIdle();
-                LSFG_3_1::deleteContext(context_id);
+                LSFG_3_1P::waitIdle();
+                LSFG_3_1P::deleteContext(context_id);
             } catch (const std::exception& e) {
                 LOG_WARN("VitaStation LSFG context cleanup failed: {}", e.what());
             }
@@ -856,14 +952,15 @@ struct FrameGenerationPresenter::Impl {
         swapchain = VK_NULL_HANDLE;
         swapchain_format = VK_FORMAT_UNDEFINED;
         extent = {};
+        fg_extent = {};
     }
 
     void shutdown() {
         release_swapchain();
         if (library_initialized) {
             try {
-                LSFG_3_1::waitIdle();
-                LSFG_3_1::finalize();
+                LSFG_3_1P::waitIdle();
+                LSFG_3_1P::finalize();
             } catch (const std::exception& e) {
                 LOG_WARN("VitaStation LSFG finalization failed: {}", e.what());
             }
@@ -896,7 +993,7 @@ struct FrameGenerationPresenter::Impl {
         }
 
         if (runtime.multiplier != 2) {
-            set_last_error("Phase03B currently supports LSFG 2x only");
+            set_last_error("VitaStation currently supports LSFG 2x only");
             return false;
         }
 
@@ -925,15 +1022,19 @@ struct FrameGenerationPresenter::Impl {
         try {
             swapchain = new_swapchain;
             extent = new_extent;
+            fg_extent = {
+                std::max(2u, (new_extent.width / 2u) & ~1u),
+                std::max(2u, (new_extent.height / 2u) & ~1u)
+            };
             swapchain_format = new_swapchain_format;
             swapchain_images = new_images;
             session_multiplier = 2;
 
             create_sync_objects();
 
-            input_0.create(state, extent, internal_format);
-            input_1.create(state, extent, internal_format);
-            output_0.create(state, extent, internal_format);
+            input_0.create(state, fg_extent, internal_format);
+            input_1.create(state, fg_extent, internal_format);
+            output_0.create(state, fg_extent, internal_format);
 
             initialize_ahb_layout(input_0);
             initialize_ahb_layout(input_1);
@@ -942,23 +1043,31 @@ struct FrameGenerationPresenter::Impl {
             initialize_library(runtime.cache_dir);
 
             std::vector<AHardwareBuffer*> outputs{ output_0.ahb };
-            context_id = LSFG_3_1::createContextFromAHB(
+            context_id = LSFG_3_1P::createContextFromAHB(
                 input_0.ahb,
                 input_1.ahb,
                 outputs,
-                extent,
+                fg_extent,
                 internal_format);
 
             session_active = true;
             session_failed = false;
+            input_primed = false;
             frame_index = 0;
+            lsfg_frame_index = 0;
+            generation_miss_streak = 0;
             set_last_error("");
-            set_active(true, session_multiplier);
+            // Runtime-active stays false during the startup warm-up. This keeps
+            // the HUD from advertising doubled FPS before a generated frame is
+            // actually presented.
+            set_active(false);
 
             LOG_INFO(
-                "VitaStation LSFG 2x active: {}x{} on {}",
+                "VitaStation LSFG 3.1P 2x ready: output {}x{}, internal {}x{} on {}",
                 extent.width,
                 extent.height,
+                fg_extent.width,
+                fg_extent.height,
                 state.physical_device_properties.deviceName.data());
             return true;
         } catch (const std::exception& e) {
@@ -976,46 +1085,104 @@ struct FrameGenerationPresenter::Impl {
             return VK_ERROR_INITIALIZATION_FAILED;
         }
 
+        bool render_ready_consumed = false;
+
         try {
-            AhbImage& current_input = (frame_index % 2 == 0) ? input_0 : input_1;
-
-            record_real_to_input(swapchain_images[real_image_index], current_input);
-            submit_copy_waiting(render_ready);
-
-            VkResult generated_result = VK_SUCCESS;
-
-            // First frame primes input A. From the second real frame onward,
-            // one LSFG frame is inserted between the previous and current real frame.
-            if (frame_index > 0) {
-                LSFG_3_1::presentContext(context_id, -1, {});
-                LSFG_3_1::waitIdle();
-
-                uint32_t generated_index = 0;
-                const VkResult acquire_result =
-                    VULKAN_HPP_DEFAULT_DISPATCHER.vkAcquireNextImageKHR(
-                        device(),
-                        swapchain,
-                        std::numeric_limits<uint64_t>::max(),
-                        generated_acquire,
-                        VK_NULL_HANDLE,
-                        &generated_index);
-
-                if (acquire_result != VK_SUCCESS && acquire_result != VK_SUBOPTIMAL_KHR)
-                    return acquire_result;
-
-                record_output_to_swapchain(output_0, swapchain_images.at(generated_index));
-                submit_copy_waiting(generated_acquire);
-
-                generated_result = queue_present_no_wait(generated_index);
-                if (generated_result != VK_SUCCESS && generated_result != VK_SUBOPTIMAL_KHR)
-                    return generated_result;
+            // Do not put LSFG in the game's startup path. Shader precompile,
+            // DLC/network checks and first-scene boot are timing-sensitive on
+            // several Vita titles. During warm-up, present the real frame using
+            // the renderer semaphore exactly like the normal Vita3K path.
+            if (frame_index + 1 < kWarmupFrames) {
+                set_active(false);
+                ++frame_index;
+                return queue_present(real_image_index, render_ready);
             }
 
-            const VkResult real_result = queue_present_no_wait(real_image_index);
+            // One frame before generation starts, capture a previous frame into
+            // the opposite input image. The first LSFG call (frame 0) expects
+            // input_0 to be current and input_1 to be previous.
+            if (!input_primed) {
+                AhbImage& previous_input =
+                    (lsfg_frame_index % 2 == 0) ? input_1 : input_0;
+                record_real_to_input(swapchain_images[real_image_index], previous_input);
+                submit_copy_and_wait(render_ready);
+                render_ready_consumed = true;
+                input_primed = true;
+                ++frame_index;
+                set_active(false);
+                return queue_present(real_image_index);
+            }
+
+            AhbImage& current_input =
+                (lsfg_frame_index % 2 == 0) ? input_0 : input_1;
+
+            record_real_to_input(swapchain_images[real_image_index], current_input);
+            submit_copy_and_wait(render_ready);
+            render_ready_consumed = true;
+
+            // AHardwareBuffer is shared with LSFG's own Vulkan device. We still
+            // need the LSFG-side waitIdle for cross-device visibility, but the
+            // VitaStation queue itself is no longer stalled with queueWaitIdle.
+            const auto generation_begin = std::chrono::steady_clock::now();
+            LSFG_3_1P::presentContext(context_id, -1, {});
+            LSFG_3_1P::waitIdle();
+            const auto generation_end = std::chrono::steady_clock::now();
+            const auto generation_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                generation_end - generation_begin).count();
+
+            ++lsfg_frame_index;
+
+            // Never block the emulator waiting for a second swapchain image.
+            // If Android's compositor has no free image right now, keep the real
+            // frame and try FG again next frame instead of turning a 30 FPS game
+            // into a stuttering 15 FPS game.
+            uint32_t generated_index = 0;
+            const VkResult acquire_result =
+                VULKAN_HPP_DEFAULT_DISPATCHER.vkAcquireNextImageKHR(
+                    device(),
+                    swapchain,
+                    0,
+                    generated_acquire,
+                    VK_NULL_HANDLE,
+                    &generated_index);
+
+            if (acquire_result == VK_NOT_READY || acquire_result == VK_TIMEOUT) {
+                ++generation_miss_streak;
+                if (generation_miss_streak >= kMissesBeforeHudPause)
+                    set_active(false);
+                ++frame_index;
+                return queue_present(real_image_index);
+            }
+
+            if (acquire_result != VK_SUCCESS && acquire_result != VK_SUBOPTIMAL_KHR)
+                return acquire_result;
+
+            generation_miss_streak = 0;
+
+            record_output_to_swapchain(output_0, swapchain_images.at(generated_index));
+            submit_copy_async(generated_acquire, generated_ready);
+
+            VkResult generated_result = queue_present(generated_index, generated_ready);
+            if (generated_result != VK_SUCCESS && generated_result != VK_SUBOPTIMAL_KHR)
+                return generated_result;
+
+            const VkResult real_result = queue_present(real_image_index);
             ++frame_index;
 
             if (real_result != VK_SUCCESS && real_result != VK_SUBOPTIMAL_KHR)
                 return real_result;
+
+            set_active(true, session_multiplier);
+
+            if ((frame_index % 120u) == 0u) {
+                LOG_INFO(
+                    "VitaStation LSFG 3.1P: generation {} us, output {}x{}, internal {}x{}",
+                    generation_us,
+                    extent.width,
+                    extent.height,
+                    fg_extent.width,
+                    fg_extent.height);
+            }
 
             return generated_result == VK_SUBOPTIMAL_KHR
                 ? generated_result
@@ -1023,7 +1190,15 @@ struct FrameGenerationPresenter::Impl {
         } catch (const std::exception& e) {
             const std::string message = std::string("LSFG runtime failed: ") + e.what();
             mark_session_failed(message);
-            return VK_ERROR_INITIALIZATION_FAILED;
+
+            // If the input copy already consumed the renderer's semaphore, do
+            // not wait on it again in the fallback present.
+            const VkResult fallback = queue_present(
+                real_image_index,
+                render_ready_consumed ? VK_NULL_HANDLE : render_ready);
+            return fallback == VK_SUCCESS || fallback == VK_SUBOPTIMAL_KHR
+                ? fallback
+                : VK_ERROR_INITIALIZATION_FAILED;
         }
     }
 };

@@ -772,7 +772,7 @@
     <string name="vitastation_hud_compact_desc">Compact VitaStation performance HUD for gameplay.</string>
     <string name="vitastation_hud_compact_summary">Small top-center HUD</string>
     <string name="settings_gpu_framegen">Frame Generation (LSFG)</string>
-    <string name="settings_gpu_framegen_desc">Generate one LSFG frame between two real emulator frames. Phase03B uses the direct VitaStation Vulkan/AHardwareBuffer path and currently supports 2x mode.</string>
+    <string name="settings_gpu_framegen_desc">Generates one LSFG frame between real emulator frames. FIX3 uses LSFG 3.1P Performance, Android AHardwareBuffer and a reduced internal FG resolution to preserve real FPS.</string>
     <string name="settings_gpu_framegen_foundation_ready">LSFG shaders ready • renderer integration pending</string>
     <string name="settings_gpu_framegen_foundation_not_ready">Import your own Lossless.dll to prepare the LSFG shaders</string>
     <string name="settings_gpu_framegen_import_dll">Import Lossless.dll</string>
@@ -785,7 +785,9 @@
     <string name="settings_gpu_framegen_import_error">Could not prepare the LSFG shader cache.</string>
     <string name="settings_gpu_framegen_cache_ready">Private shader cache is ready. The DLL itself is not retained.</string>
     <string name="settings_gpu_framegen_import_hint">Use a legitimately obtained Lossless.dll. VitaStation never bundles the DLL.</string>
-    <string name="settings_gpu_framegen_active_2x">Enabled • 2x • activates when the game starts</string>
+    <string name="settings_gpu_framegen_active_2x">Enabled • 2x • Performance • starts after game warm-up</string>
     <string name="settings_gpu_framegen_ready_off">Shaders ready • Frame Generation is off</string>
-    <string name="settings_gpu_framegen_runtime_hint">2x is enabled. In-game HUD shows presented FPS plus FR and FG when the LSFG renderer context is active.</string>
+    <string name="settings_gpu_framegen_runtime_hint">2x Performance mode is enabled. The HUD only marks FG active after generated frames are actually being presented.</string>
+    <string name="initial_setup_status_configured">Configured</string>
+    <string name="initial_setup_framegen_body">Optional. Import your own Lossless.dll to prepare LSFG shaders. VitaStation does not store or distribute the DLL.</string>
 </resources>

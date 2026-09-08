@@ -1,6 +1,8 @@
 package org.vita3k.emulator.ui.screens
 
 import android.view.Gravity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
@@ -34,6 +36,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
@@ -48,6 +51,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -56,14 +60,17 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import org.vita3k.emulator.R
 import org.vita3k.emulator.data.FirmwareInstallState
+import org.vita3k.emulator.data.FrameGenerationManager
 import org.vita3k.emulator.data.FirmwareLinks
 import org.vita3k.emulator.ui.components.HtmlText
 
@@ -81,6 +88,25 @@ fun InitialSetupScreen(
     onFinish: () -> Unit
 ) {
     val systemBars = WindowInsets.systemBars.asPaddingValues()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var frameGenerationReady by remember { mutableStateOf(FrameGenerationManager.isReady(context)) }
+    var frameGenerationImporting by remember { mutableStateOf(false) }
+    var frameGenerationImportResult by remember { mutableStateOf<Int?>(null) }
+
+    val losslessPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+
+        scope.launch {
+            frameGenerationImporting = true
+            frameGenerationImportResult = FrameGenerationManager.importLosslessDll(context, uri)
+            frameGenerationReady = FrameGenerationManager.isReady(context)
+            frameGenerationImporting = false
+        }
+    }
+
     var page by rememberSaveable { mutableIntStateOf(0) }
     var firmwareLocaleIndex by rememberSaveable {
         mutableIntStateOf(FirmwareLinks.coerceLocaleIndex(preferredLanguageIndex))
@@ -169,7 +195,13 @@ fun InitialSetupScreen(
                             firmwareInstallState = firmwareInstallState,
                             firmwareLocaleIndex = firmwareLocaleIndex,
                             onFirmwareLocaleSelected = { firmwareLocaleIndex = it },
-                            onInstallFirmware = onInstallFirmware
+                            onInstallFirmware = onInstallFirmware,
+                            frameGenerationReady = frameGenerationReady,
+                            frameGenerationImporting = frameGenerationImporting,
+                            frameGenerationImportResult = frameGenerationImportResult,
+                            onImportLosslessDll = {
+                                losslessPicker.launch(arrayOf("*/*"))
+                            }
                         )
                     }
                 }
@@ -290,7 +322,11 @@ private fun FirmwareSetupPage(
     firmwareInstallState: FirmwareInstallState,
     firmwareLocaleIndex: Int,
     onFirmwareLocaleSelected: (Int) -> Unit,
-    onInstallFirmware: () -> Unit
+    onInstallFirmware: () -> Unit,
+    frameGenerationReady: Boolean,
+    frameGenerationImporting: Boolean,
+    frameGenerationImportResult: Int?,
+    onImportLosslessDll: () -> Unit
 ) {
     val uriHandler = LocalUriHandler.current
 
@@ -377,6 +413,66 @@ private fun FirmwareSetupPage(
                 }
             }
         }
+
+        FirmwareCard(
+            title = stringResource(R.string.settings_gpu_framegen),
+            installed = frameGenerationReady,
+            missingStatusText = stringResource(R.string.initial_setup_status_optional),
+            installedStatusText = stringResource(R.string.initial_setup_status_configured)
+        ) {
+            Text(
+                text = stringResource(R.string.initial_setup_framegen_body),
+                style = MaterialTheme.typography.bodySmall,
+                color = setupTextColor.copy(alpha = 0.82f)
+            )
+
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                FilledTonalButton(
+                    onClick = onImportLosslessDll,
+                    enabled = !frameGenerationImporting
+                ) {
+                    Text(
+                        if (frameGenerationReady) {
+                            stringResource(R.string.settings_gpu_framegen_reimport_dll)
+                        } else {
+                            stringResource(R.string.settings_gpu_framegen_import_dll)
+                        }
+                    )
+                }
+
+                if (frameGenerationImporting) {
+                    CircularProgressIndicator(modifier = Modifier.size(22.dp))
+                }
+            }
+
+            val frameGenerationStatus = when {
+                frameGenerationImporting ->
+                    stringResource(R.string.settings_gpu_framegen_importing)
+                frameGenerationImportResult == FrameGenerationManager.RESULT_OK ->
+                    stringResource(R.string.settings_gpu_framegen_import_success)
+                frameGenerationImportResult == FrameGenerationManager.RESULT_DLL_UNREADABLE ->
+                    stringResource(R.string.settings_gpu_framegen_import_bad_dll)
+                frameGenerationImportResult == FrameGenerationManager.RESULT_MISSING_SHADERS ->
+                    stringResource(R.string.settings_gpu_framegen_import_missing)
+                frameGenerationImportResult == FrameGenerationManager.RESULT_TRANSLATION_FAILED ->
+                    stringResource(R.string.settings_gpu_framegen_import_translation_error)
+                frameGenerationImportResult != null ->
+                    stringResource(R.string.settings_gpu_framegen_import_error)
+                frameGenerationReady ->
+                    stringResource(R.string.settings_gpu_framegen_cache_ready)
+                else ->
+                    stringResource(R.string.settings_gpu_framegen_import_hint)
+            }
+
+            Text(
+                text = frameGenerationStatus,
+                style = MaterialTheme.typography.bodySmall,
+                color = setupTextColor.copy(alpha = 0.70f)
+            )
+        }
     }
 }
 
@@ -420,6 +516,7 @@ private fun FirmwareCard(
     title: String,
     installed: Boolean,
     missingStatusText: String? = null,
+    installedStatusText: String? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val resolvedMissingStatusText = missingStatusText ?: stringResource(R.string.initial_setup_status_missing)
@@ -452,7 +549,9 @@ private fun FirmwareCard(
                 Spacer(modifier = Modifier.width(8.dp))
                 StatusBadge(
                     installed = installed,
-                    missingStatusText = resolvedMissingStatusText
+                    missingStatusText = resolvedMissingStatusText,
+                    installedStatusText = installedStatusText
+                        ?: stringResource(R.string.initial_setup_status_installed)
                 )
             }
             content()
@@ -461,7 +560,11 @@ private fun FirmwareCard(
 }
 
 @Composable
-private fun StatusBadge(installed: Boolean, missingStatusText: String) {
+private fun StatusBadge(
+    installed: Boolean,
+    missingStatusText: String,
+    installedStatusText: String
+) {
     val color = if (installed) Color(0xFF1B8A5A) else MaterialTheme.colorScheme.tertiary
 
     Surface(
@@ -480,11 +583,7 @@ private fun StatusBadge(installed: Boolean, missingStatusText: String) {
                     .background(color)
             )
             Text(
-                text = if (installed) {
-                    stringResource(R.string.initial_setup_status_installed)
-                } else {
-                    missingStatusText
-                },
+                text = if (installed) installedStatusText else missingStatusText,
                 style = MaterialTheme.typography.labelMedium,
                 color = color,
                 fontWeight = FontWeight.SemiBold

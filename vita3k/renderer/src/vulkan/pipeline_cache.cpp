@@ -809,6 +809,7 @@ void PipelineCache::compiler_thread(MemState &mem) {
             std::lock_guard<std::mutex> guard(pipelines_mutex);
             *request->pipeline = pipeline;
         }
+        pipelines_cv.notify_all();
 
         request->vertex_program_gxm->compile_threads_on.fetch_sub(1, std::memory_order_release);
         request->fragment_program_gxm->compile_threads_on.fetch_sub(1, std::memory_order_release);
@@ -965,12 +966,19 @@ vk::Pipeline PipelineCache::retrieve_pipeline(VKContext &context, SceGxmPrimitiv
     vk::Pipeline *pipeline_slot = nullptr;
 
     {
-        std::lock_guard<std::mutex> guard(pipelines_mutex);
+        std::unique_lock<std::mutex> lock(pipelines_mutex);
         auto it = pipelines.find(key);
         if (it != pipelines.end()) {
             if (it->second != nullptr) {
-                if (it->second == pipeline_compiling)
-                    return nullptr;
+                if (it->second == pipeline_compiling) {
+                    if (consider_for_async)
+                        return nullptr;
+
+                    pipelines_cv.wait(lock, [&] {
+                        return it->second != pipeline_compiling;
+                    });
+                    return it->second;
+                }
                 return it->second;
             }
             already_in_cache = true;
@@ -1028,6 +1036,7 @@ vk::Pipeline PipelineCache::retrieve_pipeline(VKContext &context, SceGxmPrimitiv
         if (!already_in_cache)
             state.shaders_count_compiled++;
     }
+    pipelines_cv.notify_all();
 
     return result;
 }

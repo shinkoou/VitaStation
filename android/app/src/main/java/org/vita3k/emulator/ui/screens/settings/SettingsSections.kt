@@ -233,6 +233,7 @@ internal fun SettingsCategoryBody(
     onResetControlsLayout: (() -> Unit)? = null,
     controllerConnected: Boolean = false,
     connectedGamepads: List<ConnectedGamepad> = emptyList(),
+    sessionSafe: Boolean = false,
     onShowHelp: (SettingsHelpEntry) -> Unit
 ) {
     when (category) {
@@ -257,6 +258,7 @@ internal fun SettingsCategoryBody(
             showCustomDriverManagement = showCustomDriverManagement,
             showCustomDriverSection = showCustomDriverSection,
             showTurboModeOption = showTurboModeOption,
+            sessionSafe = sessionSafe,
             onInstallCustomDriver = onInstallCustomDriver,
             onDownloadCustomDriver = onDownloadCustomDriver,
             onRequestRemoveCustomDriver = onRequestRemoveCustomDriver,
@@ -461,6 +463,7 @@ private fun GpuSettingsSection(
     showCustomDriverManagement: Boolean,
     showCustomDriverSection: Boolean,
     showTurboModeOption: Boolean,
+    sessionSafe: Boolean,
     onInstallCustomDriver: () -> Unit,
     onDownloadCustomDriver: () -> Unit,
     onRequestRemoveCustomDriver: (String) -> Unit,
@@ -802,7 +805,7 @@ private fun GpuSettingsSection(
                     onShowHelp = onShowHelp
                 )
             }
-            if (!isPerApp && isVulkan) {
+            if (!sessionSafe && !isPerApp && isVulkan) {
                 FrameGenerationFoundationBlock(onShowHelp = onShowHelp)
             }
         }

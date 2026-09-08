@@ -110,7 +110,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         load(titleId = null)
     }
 
-    fun load(titleId: String?, force: Boolean = false) {
+    fun load(
+        titleId: String?,
+        force: Boolean = false,
+        sessionSafe: Boolean = false
+    ) {
         val routeKey = routeKey(titleId)
         this.titleId = titleId
         if (!force && loading && activeLoadRouteKey == routeKey) {
@@ -121,10 +125,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         val requestId = ++loadRequestId
         activeLoadRouteKey = routeKey
         loading = true
+        val useSessionSafeLoad = sessionSafe ||
+            runCatching { NativeLib.isAppRunning() }.getOrDefault(false)
         loadJob = viewModelScope.launch {
             try {
                 val snapshot = withContext(Dispatchers.IO) {
-                    SettingsRepository.load(titleId)
+                    SettingsRepository.load(titleId, sessionSafe = useSessionSafeLoad)
                 }
                 if (loadRequestId != requestId) return@launch
                 applySnapshot(titleId, routeKey, snapshot)

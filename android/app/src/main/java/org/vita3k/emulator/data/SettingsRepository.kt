@@ -50,14 +50,28 @@ internal object SettingsRepository {
     private val customDriverSupportInfoCache = mutableMapOf<String, CustomDriverSupportInfo>()
 
 
-    suspend fun load(titleId: String?): SettingsSnapshot = withContext(Dispatchers.IO) {
-        val hasCustomConfig = titleId != null && NativeLib.hasCustomConfig(titleId)
-        val loadedConfig = when {
-            titleId == null -> NativeLib.getGlobalConfig()
-            hasCustomConfig -> requireNotNull(NativeLib.getCustomConfig(titleId))
-            else -> NativeLib.getGlobalConfig()
+    suspend fun load(
+        titleId: String?,
+        sessionSafe: Boolean = false
+    ): SettingsSnapshot = withContext(Dispatchers.IO) {
+        if (sessionSafe) {
+            val customConfig = titleId?.let { NativeLib.getCustomConfig(it) }
+            val hasCustomConfig = customConfig != null
+            val loadedConfig = when {
+                titleId == null -> NativeLib.getGlobalConfig()
+                customConfig != null -> customConfig
+                else -> NativeLib.getGlobalConfig()
+            }
+            buildSessionSnapshot(loadedConfig, hasCustomConfig)
+        } else {
+            val hasCustomConfig = titleId != null && NativeLib.hasCustomConfig(titleId)
+            val loadedConfig = when {
+                titleId == null -> NativeLib.getGlobalConfig()
+                hasCustomConfig -> requireNotNull(NativeLib.getCustomConfig(titleId))
+                else -> NativeLib.getGlobalConfig()
+            }
+            buildSnapshot(loadedConfig, hasCustomConfig)
         }
-        buildSnapshot(loadedConfig, hasCustomConfig)
     }
 
     suspend fun save(routeTitleId: String?, effectiveTitleId: String?, config: EmulatorConfig): SettingsSaveResult {
@@ -142,6 +156,32 @@ internal object SettingsRepository {
         }
 
         return supportInfo
+    }
+
+    private fun buildSessionSnapshot(
+        config: EmulatorConfig,
+        hasCustomConfig: Boolean
+    ): SettingsSnapshot {
+        val currentMappingBit = when (config.memoryMapping) {
+            "double-buffer" -> 1 shl 1
+            "external-host" -> 1 shl 2
+            "page-table" -> 1 shl 3
+            "native-buffer" -> 1 shl 4
+            else -> 0
+        }
+
+        return SettingsSnapshot(
+            config = config,
+            emulatorStoragePath = "",
+            hasCustomConfig = hasCustomConfig,
+            modulesList = config.lleModules.distinct().sorted().map { it to true },
+            installedCustomDrivers = emptyList(),
+            showCustomDriverOptions = false,
+            supportedMemoryMappingMask = 1 or currentMappingBit,
+            customDriverLoadStatus = CustomDriverLoadStatus.Default,
+            availableCameras = emptyList(),
+            availableAdhocAddresses = emptyList()
+        )
     }
 
     private fun buildSnapshot(config: EmulatorConfig, hasCustomConfig: Boolean): SettingsSnapshot {

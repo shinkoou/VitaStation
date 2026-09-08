@@ -292,6 +292,24 @@ SDLMAIN_DECLSPEC int SDL_main(int argc, char *argv[]) {
         jni_env->DeleteLocalRef(activity);
     };
 
+    const auto notify_session_finished = [](const int exit_code) {
+        JNIEnv *jni_env = reinterpret_cast<JNIEnv *>(SDL_GetAndroidJNIEnv());
+        jobject activity = reinterpret_cast<jobject>(SDL_GetAndroidActivity());
+        if (!jni_env || !activity)
+            return;
+
+        jclass clazz = jni_env->GetObjectClass(activity);
+        jmethodID method_id = jni_env->GetMethodID(clazz, "onNativeSessionFinished", "(I)V");
+        if (method_id)
+            jni_env->CallVoidMethod(activity, method_id, static_cast<jint>(exit_code));
+
+        if (jni_env->ExceptionCheck())
+            jni_env->ExceptionClear();
+
+        jni_env->DeleteLocalRef(clazz);
+        jni_env->DeleteLocalRef(activity);
+    };
+
     AppLaunchRequest launch_request{
         .app_path = title_id,
     };
@@ -533,6 +551,7 @@ SDLMAIN_DECLSPEC int SDL_main(int argc, char *argv[]) {
                 : app::AppSessionStopReason::UserRequest);
     } while (relaunch_requested);
 
+    notify_session_finished(exit_code);
     return exit_code;
 }
 

@@ -70,7 +70,7 @@ public class Emulator extends SDLActivity
 {
     private static final String TAG = "Vita3K";
     private static final long IME_RESTORE_DELAY_MS = 250L;
-    private static final long NATIVE_QUIT_FALLBACK_MS = 4000L;
+    private static final long NATIVE_QUIT_WATCHDOG_MS = 8000L;
     public static final String EXTRA_TITLE_ID = "title_id";
     public static final String EXTRA_GAME_TITLE = "game_title";
     private static final String APP_RESTART_PARAMETERS = "AppStartParameters";
@@ -494,23 +494,57 @@ public class Emulator extends SDLActivity
 
             if (!queued) {
                 nativeQuitRequested = false;
-                if (!isFinishing()) {
+
+                boolean stillRunning = true;
+                try {
+                    stillRunning = NativeLib.INSTANCE.isAppRunning();
+                } catch (Throwable ignored) {
+                }
+
+                if (!stillRunning && !isFinishing() && !isDestroyed()) {
                     finish();
+                } else {
+                    Log.w(TAG, "Native quit request was not queued; keeping Emulator activity alive.");
                 }
                 return;
             }
 
-            // Do not finish immediately. SDLThread must consume SDL_EVENT_QUIT,
-            // clean the native emulator session, leave SDL_main and finish the
-            // Activity itself. Immediate Java teardown races native renderer
-            // cleanup on some devices, including the S24 Ultra.
             final View decorView = getWindow().getDecorView();
             decorView.postDelayed(() -> {
-                if (!isFinishing() && !isDestroyed()) {
-                    Log.w(TAG, "Native quit timeout; using Activity fallback.");
-                    finish();
+                if (isFinishing() || isDestroyed()) {
+                    return;
                 }
-            }, NATIVE_QUIT_FALLBACK_MS);
+
+                boolean stillRunning = true;
+                try {
+                    stillRunning = NativeLib.INSTANCE.isAppRunning();
+                } catch (Throwable ignored) {
+                }
+
+                if (!stillRunning) {
+                    nativeQuitRequested = false;
+                    finish();
+                    return;
+                }
+
+                nativeQuitRequested = false;
+                Log.w(TAG, "Native quit watchdog: session is still active; refusing unsafe Activity teardown.");
+            }, NATIVE_QUIT_WATCHDOG_MS);
+        });
+    }
+
+    @Keep
+    public void onNativeSessionFinished(int exitCode) {
+        runOnUiThread(() -> {
+            nativeQuitRequested = false;
+            releaseControllerOverlayInputs();
+            setResult(exitCode == 0
+                    ? android.app.Activity.RESULT_OK
+                    : android.app.Activity.RESULT_CANCELED);
+
+            if (!isFinishing() && !isDestroyed()) {
+                finish();
+            }
         });
     }
 

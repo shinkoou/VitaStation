@@ -393,10 +393,24 @@ void draw(VKContext &context, SceGxmPrimitiveType type, SceGxmIndexFormat format
         context.refresh_pipeline = false;
         context.last_primitive = type;
 
-        // We don't want to defer cases where we draw a whole quad over the screen as these draws could be necessary
-        // to be able to see anything
-        bool can_be_whole_quad = instance_count == 1 && count <= 6;
-        vk::Pipeline new_pipeline = context.state.pipeline_cache.retrieve_pipeline(context, type, !can_be_whole_quad, mem);
+        // Phase04A-2: keep async compilation for disposable geometry, but never
+        // sacrifice draws that can define or feed later framebuffer/surface contents.
+        const bool can_be_whole_quad = instance_count == 1 && count <= 6;
+        const bool uses_framebuffer_fetch = fragment_program_gxp.is_frag_color_used();
+        const bool updates_mask = context.record.is_maskupdate;
+        const bool transient_or_memoryless_color = !context.record.color_surface.data;
+        const bool surface_requires_complete_draws =
+            !context.state.pipeline_cache.can_use_deferred_compilation;
+
+        const bool critical_draw =
+            can_be_whole_quad
+            || uses_framebuffer_fetch
+            || updates_mask
+            || transient_or_memoryless_color
+            || surface_requires_complete_draws;
+
+        vk::Pipeline new_pipeline =
+            context.state.pipeline_cache.retrieve_pipeline(context, type, !critical_draw, mem);
 
         if (new_pipeline != context.current_pipeline) {
             context.current_pipeline = new_pipeline;

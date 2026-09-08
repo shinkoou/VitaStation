@@ -154,13 +154,13 @@ private fun EmulationPauseMenu(
 
     LaunchedEffect(uiState.titleId) {
         if (uiState.titleId.isNotBlank()) {
-            settingsViewModel.load(uiState.titleId)
+            settingsViewModel.load(uiState.titleId, sessionSafe = true)
         }
     }
 
     LaunchedEffect(uiState.showMenu) {
         if (uiState.showMenu && !globalSettingsViewModel.isLoaded(titleId = null)) {
-            globalSettingsViewModel.load(titleId = null)
+            globalSettingsViewModel.load(titleId = null, sessionSafe = true)
         }
     }
 
@@ -771,7 +771,7 @@ private fun ControllerTab(
             FilledTonalButton(
                 onClick = {
                     globalSettingsViewModel.save { _ ->
-                        globalSettingsViewModel.load(titleId = null, force = true)
+                        globalSettingsViewModel.load(titleId = null, force = true, sessionSafe = true)
                         sessionViewModel.showStatusMessage(activity.getString(R.string.emulation_settings_saved))
                     }
                 },
@@ -861,7 +861,7 @@ private fun EmbeddedSettingsTab(
         if (activeScope == PauseSettingsScope.Global) {
             globalSettingsViewModel.save { restartRequired ->
                 if (!settingsViewModel.hasCustomConfig && !settingsViewModel.isDirty) {
-                    settingsViewModel.load(titleId, force = true)
+                    settingsViewModel.load(titleId, force = true, sessionSafe = true)
                 }
                 onSaved(restartRequired)
             }
@@ -988,6 +988,7 @@ private fun EmbeddedSettingsTab(
             onStartControlsEditor = { sessionViewModel.startControlsEditor(activity) },
             onResetControlsLayout = { sessionViewModel.resetControlsLayout(activity) },
             controllerConnected = sessionViewModel.uiState.controllerConnected,
+            sessionSafe = true,
             onShowHelp = onShowHelp
         )
 

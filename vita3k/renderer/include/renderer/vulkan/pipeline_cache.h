@@ -92,6 +92,7 @@ private:
     std::mutex shaders_mutex;
     std::condition_variable shaders_cv;
     std::mutex pipelines_mutex;
+    std::condition_variable pipelines_cv;
     std::mutex pipeline_cache_mutex;
     // because of multithreading, we want the pointers to remain stable
     unordered_map_stable<Sha256Hash, vk::ShaderModule> shaders;

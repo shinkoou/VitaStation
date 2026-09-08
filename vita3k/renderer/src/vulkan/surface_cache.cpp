@@ -280,6 +280,7 @@ SurfaceRetrieveResult VKSurfaceCache::retrieve_color_surface_for_framebuffer(Mem
             *info.dirty = false;
 
             last_written_surface = &info;
+            ++info.write_generation;
 
             // if this surface has not been rendered to for the last 60 frames, consider it is not safe not to render all shaders to it
             constexpr uint64_t big_delay_between_frames = 60;
@@ -365,6 +366,7 @@ SurfaceRetrieveResult VKSurfaceCache::retrieve_color_surface_for_framebuffer(Mem
     image.transition_to(cmd_buffer, vkutil::ImageLayout::ColorAttachmentReadWrite);
 
     last_written_surface = &info_added;
+    ++info_added.write_generation;
     info_added.need_surface_sync.reset();
     info_added.need_surface_sync = std::make_shared<bool>(false);
     info_added.dirty = std::make_shared<bool>(false);
@@ -533,7 +535,11 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
     }
 
     if (is_same_image || (start_sourced_line != 0) || (start_x != 0) || (info.width != width) || (info.height != height) || (info.format != base_format)) {
-        const uint64_t scene_timestamp = reinterpret_cast<VKContext *>(state.context)->scene_timestamp;
+        VKContext *context = reinterpret_cast<VKContext *>(state.context);
+        const uint64_t scene_timestamp = context->scene_timestamp;
+        const uint64_t source_generation = is_same_image
+            ? ((context->draw_timestamp << 1) | 1ULL)
+            : (info.write_generation << 1);
 
         std::vector<CastedTexture> &casted_vec = info.casted_textures;
 
@@ -544,12 +550,7 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
             if ((casted_vec[i].cropped_height == height) && (casted_vec[i].cropped_width == width) && (casted_vec[i].cropped_y == start_sourced_line) && (casted_vec[i].cropped_x == start_x) && (casted_vec[i].format == base_format)) {
                 casted = &casted_vec[i];
 
-                const bool typeless_reinterpret =
-                    bytes_per_pixel_requested != bytes_per_pixel_in_store;
-                if (casted->scene_timestamp == scene_timestamp && !typeless_reinterpret) {
-                    // Normal casts can reuse the scene-local copy. Typeless
-                    // reinterpretations must refresh because their backing
-                    // color surface may have been rendered again meanwhile.
+                if (casted->source_generation == source_generation) {
                     return TextureLookupResult{
                         casted->texture.view,
                         casted->texture.layout,
@@ -563,9 +564,37 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
             }
         }
 
-        // use prerender cmd as we can't copy an image or use pipeline barriers in a render pass
-        VKContext *context = reinterpret_cast<VKContext *>(state.context);
-        vk::CommandBuffer cmd_buffer = context->prerender_cmd;
+        // context was resolved above when the cast freshness token was built.
+        const bool feedback_from_active_target = is_same_image && context->in_renderpass;
+        vk::CommandBuffer cmd_buffer = feedback_from_active_target
+            ? context->render_cmd
+            : context->prerender_cmd;
+
+        if (feedback_from_active_target) {
+            context->stop_render_pass();
+
+            vk::ImageMemoryBarrier to_transfer{
+                .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eShaderWrite,
+                .dstAccessMask = vk::AccessFlagBits::eTransferRead,
+                .oldLayout = vk::ImageLayout::eGeneral,
+                .newLayout = vk::ImageLayout::eGeneral,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .image = info.texture.image,
+                .subresourceRange = vkutil::color_subresource_range
+            };
+            cmd_buffer.pipelineBarrier(
+                vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eFragmentShader,
+                vk::PipelineStageFlagBits::eTransfer,
+                vk::DependencyFlags{}, {}, {}, to_transfer);
+
+            context->current_render_pass = state.pipeline_cache.retrieve_render_pass(
+                context->current_color_format, true, true, !context->record.color_surface.data);
+            if (state.features.support_shader_interlock) {
+                context->current_shader_interlock_pass = state.pipeline_cache.retrieve_render_pass(
+                    context->current_color_format, true, true, !context->record.color_surface.data, true);
+            }
+        }
 
         if (casted == nullptr) {
             // Try to crop + cast
@@ -600,6 +629,7 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
         }
 
         casted->scene_timestamp = scene_timestamp;
+        casted->source_generation = source_generation;
 
         if (bytes_per_pixel_requested == bytes_per_pixel_in_store) {
             vk::ImageCopy image_copy{
@@ -641,6 +671,20 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
             };
             cmd_buffer.copyImageToBuffer(info.texture.image, vk::ImageLayout::eGeneral, casted->transition_buffer.buffer, copy_image_buffer);
 
+            vk::BufferMemoryBarrier transition_buffer_barrier{
+                .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
+                .dstAccessMask = vk::AccessFlagBits::eTransferRead,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .buffer = casted->transition_buffer.buffer,
+                .offset = 0,
+                .size = VK_WHOLE_SIZE
+            };
+            cmd_buffer.pipelineBarrier(
+                vk::PipelineStageFlagBits::eTransfer,
+                vk::PipelineStageFlagBits::eTransfer,
+                vk::DependencyFlags{}, {}, transition_buffer_barrier, {});
+
             // then the buffer to the image
             const uint32_t dst_pixel_stride = (stride_bytes / bytes_per_pixel_requested) * state.res_multiplier;
             copy_image_buffer
@@ -651,6 +695,27 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
             cmd_buffer.copyBufferToImage(casted->transition_buffer.buffer, casted->texture.image, vk::ImageLayout::eTransferDstOptimal, copy_image_buffer);
         }
         casted->texture.transition_to(cmd_buffer, vkutil::ImageLayout::ColorAttachmentReadWrite);
+
+        if (feedback_from_active_target) {
+            vk::ImageMemoryBarrier back_to_render{
+                .srcAccessMask = vk::AccessFlagBits::eTransferRead,
+                .dstAccessMask = vk::AccessFlagBits::eColorAttachmentRead
+                    | vk::AccessFlagBits::eColorAttachmentWrite
+                    | vk::AccessFlagBits::eShaderRead
+                    | vk::AccessFlagBits::eShaderWrite,
+                .oldLayout = vk::ImageLayout::eGeneral,
+                .newLayout = vk::ImageLayout::eGeneral,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .image = info.texture.image,
+                .subresourceRange = vkutil::color_subresource_range
+            };
+            cmd_buffer.pipelineBarrier(
+                vk::PipelineStageFlagBits::eTransfer,
+                vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eFragmentShader,
+                vk::DependencyFlags{}, {}, {}, back_to_render);
+            context->start_render_pass(false);
+        }
 
         return TextureLookupResult{
             casted->texture.view,

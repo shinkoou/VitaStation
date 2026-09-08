@@ -56,6 +56,7 @@ import org.libsdl.app.SDLSurface;
 import org.vita3k.emulator.data.AppStorage;
 import org.vita3k.emulator.data.NativeImeState;
 import org.vita3k.emulator.data.PerformanceHudPrefs;
+import org.vita3k.emulator.data.UiLanguages;
 import org.vita3k.emulator.overlay.InputOverlay;
 import org.vita3k.emulator.overlay.OverlayLayout;
 import org.vita3k.emulator.overlay.OverlayStore;
@@ -106,6 +107,12 @@ public class Emulator extends SDLActivity
     private boolean hasLastTextInputState;
     private ImagePathResultCallback pendingImagePathCallback;
     private boolean nativeQuitRequested;
+    private boolean libraryReturnRequested;
+
+    @Override
+    protected void attachBaseContext(Context newBase) {
+        super.attachBaseContext(UiLanguages.wrapContext(newBase));
+    }
 
     public static Intent createLaunchIntent(Context context, String titleId, String gameTitle) {
         Intent intent = new Intent(context, Emulator.class);
@@ -522,10 +529,19 @@ public class Emulator extends SDLActivity
                         Log.w(TAG, "Native quit watchdog retry failed", t);
                     }
                 } else {
-                    Log.i(TAG, "Native session stopped; waiting for SDLActivity to finish Emulator activity.");
+                    Log.i(TAG, "Native session stopped; returning to VitaStation library.");
+                    returnToLibrary();
                 }
             }, NATIVE_QUIT_WATCHDOG_MS);
         });
+    }
+
+    private void returnToLibrary() {
+        if (libraryReturnRequested || isDestroyed()) return;
+        libraryReturnRequested = true;
+        Intent libraryIntent = new Intent(this, MainActivity.class);
+        libraryIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        startActivity(libraryIntent);
     }
 
     public void ensurePauseMenuOnTop() {

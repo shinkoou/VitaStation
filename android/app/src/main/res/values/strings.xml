@@ -174,7 +174,7 @@
 
     <!-- Initial setup -->
     <string name="initial_setup_welcome_title">Welcome to VitaStation</string>
-    <string name="initial_setup_welcome_body">VitaStation is an Android-focused PlayStation Vita emulator project based on Vita3K-Plus and Vita3K. It focuses on a modern Android interface, performance, compatibility, and upstream-friendly development.</string>
+    <string name="initial_setup_welcome_body">A handheld console emulator for Android, built on Vita3K-Plus and Vita3K.</string>
     <string name="initial_setup_piracy_notice">VitaStation does not condone piracy. You must dump your own games.</string>
     <string name="initial_setup_firmware_title">Install Firmware</string>
     <string name="initial_setup_firmware_body">To get started, install the PS Vita firmware files below.</string>
@@ -790,4 +790,17 @@
     <string name="settings_gpu_framegen_runtime_hint">2x Performance mode is enabled. The HUD only marks FG active after generated frames are actually being presented.</string>
     <string name="initial_setup_status_configured">Configured</string>
     <string name="initial_setup_framegen_body">Optional. Import your own Lossless.dll to prepare LSFG shaders. VitaStation does not store or distribute the DLL.</string>
+
+    <string name="settings_language_system_default">System default</string>
+    <string name="settings_language_english">English</string>
+    <string name="settings_language_portuguese_br">Português (Brasil)</string>
+    <string name="settings_gpu_filter_nearest">Nearest</string>
+    <string name="settings_gpu_filter_bilinear">Bilinear</string>
+    <string name="settings_gpu_filter_bicubic">Bicubic</string>
+    <string name="settings_gpu_filter_fxaa">FXAA</string>
+    <string name="settings_gpu_filter_sgsr">Snapdragon GSR</string>
+    <string name="settings_gpu_filter_sgsr_edgedir">Snapdragon GSR EdgeDir</string>
+    <string name="settings_gpu_filter_fsr">AMD FidelityFX Super Resolution</string>
+    <string name="initial_setup_brand_tagline">PLAY ANYWHERE</string>
+    <string name="initial_setup_firmware_cta">To get started, install the firmware files from your own device.</string>
 </resources>

@@ -132,6 +132,24 @@ public:
     }
 };
 
+class SnapdragonGSRScreenFilter : public SinglePassScreenFilter {
+protected:
+    std::string_view get_fragment_name() override;
+    vk::Sampler create_sampler() override;
+public:
+    SnapdragonGSRScreenFilter(ScreenRenderer &screen) : SinglePassScreenFilter(screen) {}
+    std::string_view get_name() override { return "Snapdragon GSR"; }
+};
+
+class SnapdragonGSREdgeDirScreenFilter : public SinglePassScreenFilter {
+protected:
+    std::string_view get_fragment_name() override;
+    vk::Sampler create_sampler() override;
+public:
+    SnapdragonGSREdgeDirScreenFilter(ScreenRenderer &screen) : SinglePassScreenFilter(screen) {}
+    std::string_view get_name() override { return "Snapdragon GSR EdgeDir"; }
+};
+
 class FSRScreenFilter : public ScreenFilter {
 private:
     // dst of the easu shader, src of the rcas shader

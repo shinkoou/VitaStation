@@ -260,58 +260,72 @@ private fun WelcomePage() {
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 28.dp, vertical = 32.dp)
-                .heightIn(min = maxHeight - 64.dp),
+                .padding(horizontal = 24.dp, vertical = 24.dp)
+                .heightIn(min = maxHeight - 48.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
             Image(
                 painter = painterResource(id = R.drawable.vitastation_icon),
                 contentDescription = stringResource(R.string.apps_list_app_title),
-                modifier = Modifier
-                    .size(148.dp)
-                    .clip(RoundedCornerShape(34.dp))
-                    .alpha(1f)
+                modifier = Modifier.size(118.dp).clip(RoundedCornerShape(30.dp))
             )
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            Text(
-                text = stringResource(R.string.initial_setup_welcome_title),
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = setupTextColor,
-                textAlign = TextAlign.Center
-            )
-
             Spacer(modifier = Modifier.height(10.dp))
-
-            Text(
-                text = stringResource(R.string.initial_setup_welcome_body),
+            Text("VitaStation", style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Bold, color = setupTextColor, textAlign = TextAlign.Center)
+            Text(stringResource(R.string.initial_setup_brand_tagline),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+            Spacer(modifier = Modifier.height(24.dp))
+            Text(stringResource(R.string.initial_setup_welcome_title),
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold, color = setupTextColor, textAlign = TextAlign.Center)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(stringResource(R.string.initial_setup_welcome_body),
                 style = MaterialTheme.typography.bodyLarge,
-                color = setupTextColor,
-                textAlign = TextAlign.Center
-            )
-
+                color = setupTextColor.copy(alpha = 0.88f), textAlign = TextAlign.Center)
             Spacer(modifier = Modifier.height(18.dp))
-
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                color = setupCardColor,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.38f))
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(stringResource(R.string.initial_setup_firmware_cta),
+                        style = MaterialTheme.typography.bodyMedium, color = setupTextColor,
+                        modifier = Modifier.weight(1f))
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
             HtmlText(
                 html = stringResource(R.string.initial_setup_info_html),
                 modifier = Modifier.fillMaxWidth(),
-                textStyle = MaterialTheme.typography.bodyLarge,
-                textColor = setupTextColor,
+                textStyle = MaterialTheme.typography.bodyMedium,
+                textColor = setupTextColor.copy(alpha = 0.82f),
                 gravity = Gravity.CENTER
             )
-
-            Spacer(modifier = Modifier.height(18.dp))
-
-            Text(
-                text = stringResource(R.string.initial_setup_piracy_notice),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-                fontWeight = FontWeight.Medium,
-                textAlign = TextAlign.Center
-            )
+            Spacer(modifier = Modifier.height(14.dp))
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                color = MaterialTheme.colorScheme.error.copy(alpha = 0.13f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.34f))
+            ) {
+                Text(stringResource(R.string.initial_setup_piracy_notice),
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center)
+            }
         }
     }
 }

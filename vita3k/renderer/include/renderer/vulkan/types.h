@@ -229,6 +229,7 @@ struct VKContext : public renderer::Context {
 
     uint64_t frame_timestamp = 1;
     uint64_t scene_timestamp = 1;
+    uint64_t draw_timestamp = 0;
     std::vector<vk::CommandBuffer> cmdbuffers_to_submit = {};
 
     vkutil::HostRingBuffer vertex_stream_ring_buffer;

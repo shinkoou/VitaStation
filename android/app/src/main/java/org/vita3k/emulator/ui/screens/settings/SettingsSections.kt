@@ -493,16 +493,29 @@ private fun GpuSettingsSection(
             val screenFilterTitle = stringResource(R.string.settings_gpu_screen_filter)
             val screenFilterHelp = helpEntry(screenFilterTitle, stringResource(R.string.settings_gpu_screen_filter_desc))
             val filterOptions = if (isVulkan) {
-                listOf("Nearest", "Bilinear", "Bicubic", "FXAA", "FSR")
+                listOf(
+                    "Nearest" to stringResource(R.string.settings_gpu_filter_nearest),
+                    "Bilinear" to stringResource(R.string.settings_gpu_filter_bilinear),
+                    "Bicubic" to stringResource(R.string.settings_gpu_filter_bicubic),
+                    "FXAA" to stringResource(R.string.settings_gpu_filter_fxaa),
+                    "Snapdragon GSR" to stringResource(R.string.settings_gpu_filter_sgsr),
+                    "Snapdragon GSR EdgeDir" to stringResource(R.string.settings_gpu_filter_sgsr_edgedir),
+                    "FSR" to stringResource(R.string.settings_gpu_filter_fsr)
+                )
             } else {
-                listOf("Bilinear", "FXAA")
+                listOf(
+                    "Bilinear" to stringResource(R.string.settings_gpu_filter_bilinear),
+                    "FXAA" to stringResource(R.string.settings_gpu_filter_fxaa)
+                )
             }
-            val selectedFilter = cfg.screenFilter.takeIf { it in filterOptions } ?: filterOptions.first()
+            val selectedFilter = cfg.screenFilter
+                .takeIf { value -> filterOptions.any { it.first == value } }
+                ?: filterOptions.first().first
             SettingsChoiceField(
                 title = screenFilterTitle,
-                options = filterOptions,
-                selectedIndex = filterOptions.indexOf(selectedFilter).coerceAtLeast(0),
-                onSelect = { index -> onUpdate { screenFilter = filterOptions[index] } },
+                options = filterOptions.map { it.second },
+                selectedIndex = filterOptions.indexOfFirst { it.first == selectedFilter }.coerceAtLeast(0),
+                onSelect = { index -> onUpdate { screenFilter = filterOptions[index].first } },
                 help = screenFilterHelp,
                 onShowHelp = onShowHelp
             )
@@ -1502,7 +1515,7 @@ private fun InterfaceSettingsSection(
         }
         SettingsScrollableChoiceField(
             title = uiLanguageTitle,
-            options = uiLanguageOptions.map { it.label },
+            options = uiLanguageOptions.map { stringResource(it.labelRes) },
             selectedIndex = uiLanguageIndex,
             onSelect = { index ->
                 val tag = uiLanguageOptions[index].tag

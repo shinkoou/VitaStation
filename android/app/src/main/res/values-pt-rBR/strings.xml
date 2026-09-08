@@ -14,7 +14,7 @@
     <string name="vitastation_nav_settings">Configurações</string>
 
     <string name="initial_setup_welcome_title">Bem-vindo ao VitaStation</string>
-    <string name="initial_setup_welcome_body">O VitaStation é um emulador de PlayStation Vita focado em Android, baseado no Vita3K-Plus e Vita3K, com foco em interface moderna, desempenho e compatibilidade.</string>
+    <string name="initial_setup_welcome_body">Um emulador de console portátil para Android, baseado no Vita3K-Plus e Vita3K.</string>
     <string name="initial_setup_back">Voltar</string>
     <string name="initial_setup_next">Próximo</string>
     <string name="initial_setup_open_library">Abrir Biblioteca</string>
@@ -292,4 +292,17 @@
     <string name="settings_gpu_framegen_runtime_hint">O modo 2x Performance está ativado. O HUD só marca FG como ativo depois que quadros gerados estiverem realmente sendo apresentados.</string>
     <string name="initial_setup_status_configured">Configurado</string>
     <string name="initial_setup_framegen_body">Opcional. Importe sua própria Lossless.dll para preparar os shaders LSFG. O VitaStation não armazena nem distribui a DLL.</string>
+
+    <string name="settings_language_system_default">Padrão do sistema</string>
+    <string name="settings_language_english">English</string>
+    <string name="settings_language_portuguese_br">Português (Brasil)</string>
+    <string name="settings_gpu_filter_nearest">Mais próximo</string>
+    <string name="settings_gpu_filter_bilinear">Bilinear</string>
+    <string name="settings_gpu_filter_bicubic">Bicúbico</string>
+    <string name="settings_gpu_filter_fxaa">FXAA</string>
+    <string name="settings_gpu_filter_sgsr">Snapdragon GSR</string>
+    <string name="settings_gpu_filter_sgsr_edgedir">Snapdragon GSR EdgeDir</string>
+    <string name="settings_gpu_filter_fsr">AMD FidelityFX Super Resolution</string>
+    <string name="initial_setup_brand_tagline">PLAY ANYWHERE</string>
+    <string name="initial_setup_firmware_cta">Para começar, instale os arquivos de firmware do seu próprio dispositivo.</string>
 </resources>

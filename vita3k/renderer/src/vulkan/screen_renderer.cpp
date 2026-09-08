@@ -638,6 +638,10 @@ void ScreenRenderer::set_filter(const std::string_view &filter) {
     this->filter.reset();
     if (filter == "FSR")
         this->filter = std::make_unique<FSRScreenFilter>(*this);
+    else if (filter == "Snapdragon GSR EdgeDir")
+        this->filter = std::make_unique<SnapdragonGSREdgeDirScreenFilter>(*this);
+    else if (filter == "Snapdragon GSR")
+        this->filter = std::make_unique<SnapdragonGSRScreenFilter>(*this);
     else if (filter == "FXAA")
         this->filter = std::make_unique<FXAAScreenFilter>(*this);
     else if (filter == "Bicubic")

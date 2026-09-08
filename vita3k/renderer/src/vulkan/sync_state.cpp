@@ -59,15 +59,38 @@ void sync_clipping(VKContext &context) {
         break;
     }
 
-    // Vulkan does not allow the offset to be negative
-    if (context.scissor.offset.x < 0) {
-        context.scissor.extent.width = std::max(context.scissor.extent.width - context.scissor.offset.x, 0U);
-        context.scissor.offset.x = 0;
+    // VitaStation Phase04B: perform a true rectangle intersection.
+    // The previous negative-offset correction enlarged the extent because it
+    // subtracted a negative offset, which could expose stale border pixels.
+    int64_t left = std::max<int64_t>(context.scissor.offset.x, 0);
+    int64_t top = std::max<int64_t>(context.scissor.offset.y, 0);
+    int64_t right = std::min<int64_t>(
+        static_cast<int64_t>(context.scissor.offset.x) + context.scissor.extent.width,
+        context.render_target->width);
+    int64_t bottom = std::min<int64_t>(
+        static_cast<int64_t>(context.scissor.offset.y) + context.scissor.extent.height,
+        context.render_target->height);
+
+    const auto &color_surface = context.record.color_surface;
+    if (color_surface.data && color_surface.clip_enabled) {
+        const int64_t clip_left = static_cast<int64_t>(color_surface.clip_x_min * res_multiplier);
+        const int64_t clip_top = static_cast<int64_t>(color_surface.clip_y_min * res_multiplier);
+        const int64_t clip_right = static_cast<int64_t>((color_surface.clip_x_max + 1u) * res_multiplier);
+        const int64_t clip_bottom = static_cast<int64_t>((color_surface.clip_y_max + 1u) * res_multiplier);
+
+        left = std::max(left, clip_left);
+        top = std::max(top, clip_top);
+        right = std::min(right, clip_right);
+        bottom = std::min(bottom, clip_bottom);
     }
 
-    if (context.scissor.offset.y < 0) {
-        context.scissor.extent.height = std::max(context.scissor.extent.height - context.scissor.offset.y, 0U);
-        context.scissor.offset.y = 0;
+    if (right <= left || bottom <= top) {
+        context.scissor = vk::Rect2D{};
+    } else {
+        context.scissor = vk::Rect2D{
+            { static_cast<int32_t>(left), static_cast<int32_t>(top) },
+            { static_cast<uint32_t>(right - left), static_cast<uint32_t>(bottom - top) }
+        };
     }
 
     if (!context.is_recording)

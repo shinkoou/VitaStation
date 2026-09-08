@@ -168,6 +168,8 @@ void set_context(VKContext &context, MemState &mem, VKRenderTarget *rt, const Fe
     state.surface_cache.set_render_target(rt);
 
     context.start_recording(true);
+    // ColorSurface clip may change between scenes independently of region clip.
+    sync_clipping(context);
 
     bool force_load = context.record.depth_stencil_surface.force_load;
     bool force_store = context.record.depth_stencil_surface.force_store;

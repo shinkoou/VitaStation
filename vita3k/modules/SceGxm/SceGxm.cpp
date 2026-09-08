@@ -1771,10 +1771,22 @@ DECL_EXPORT(int, sceGxmTextureSetData, SceGxmTexture *texture, Ptr<const void> d
 DECL_EXPORT(int, sceGxmTextureSetFormat, SceGxmTexture *texture, SceGxmTextureFormat texFormat);
 DECL_EXPORT(int, sceGxmTextureSetGammaMode, SceGxmTexture *texture, SceGxmTextureGammaMode gammaMode);
 
-EXPORT(void, sceGxmColorSurfaceGetClip, const SceGxmColorSurface *surface, uint32_t *xMin, uint32_t *yMin, uint32_t *xMax, uint32_t *yMax) {
+EXPORT(void, sceGxmColorSurfaceGetClip, const SceGxmColorSurface *surface,
+    uint32_t *xMin, uint32_t *yMin, uint32_t *xMax, uint32_t *yMax) {
     TRACY_FUNC(sceGxmColorSurfaceGetClip, surface, xMin, yMin, xMax, yMax);
     assert(surface);
-    UNIMPLEMENTED();
+
+    const uint32_t default_x_max = surface->width > 0 ? surface->width - 1 : 0;
+    const uint32_t default_y_max = surface->height > 0 ? surface->height - 1 : 0;
+
+    if (xMin)
+        *xMin = surface->clip_enabled ? surface->clip_x_min : 0;
+    if (yMin)
+        *yMin = surface->clip_enabled ? surface->clip_y_min : 0;
+    if (xMax)
+        *xMax = surface->clip_enabled ? surface->clip_x_max : default_x_max;
+    if (yMax)
+        *yMax = surface->clip_enabled ? surface->clip_y_max : default_y_max;
 }
 
 EXPORT(Ptr<void>, sceGxmColorSurfaceGetData, const SceGxmColorSurface *surface) {
@@ -1849,6 +1861,14 @@ EXPORT(int, sceGxmColorSurfaceInit, SceGxmColorSurface *surface, SceGxmColorForm
     surface->surfaceType = surfaceType;
     surface->outputRegisterSize = outputRegisterSize;
 
+    // VitaStation Phase04B: a new color surface starts with full-surface clip.
+    constexpr uint32_t VITASTATION_MAX_COLOR_CLIP = (1u << 13) - 1u;
+    surface->clip_enabled = 1;
+    surface->clip_x_min = 0;
+    surface->clip_y_min = 0;
+    surface->clip_x_max = std::min(width > 0 ? width - 1 : 0u, VITASTATION_MAX_COLOR_CLIP);
+    surface->clip_y_max = std::min(height > 0 ? height - 1 : 0u, VITASTATION_MAX_COLOR_CLIP);
+
     SceGxmTextureFormat tex_format;
     if (!gxm::convert_color_format_to_texture_format(colorFormat, tex_format)) {
         LOG_WARN("Unable to convert color surface type 0x{:X} to texture format enum for background texture of color surface!", static_cast<std::uint32_t>(colorFormat));
@@ -1889,10 +1909,17 @@ EXPORT(bool, sceGxmColorSurfaceIsEnabled, const SceGxmColorSurface *surface) {
     return !surface->disabled;
 }
 
-EXPORT(void, sceGxmColorSurfaceSetClip, SceGxmColorSurface *surface, uint32_t xMin, uint32_t yMin, uint32_t xMax, uint32_t yMax) {
+EXPORT(void, sceGxmColorSurfaceSetClip, SceGxmColorSurface *surface,
+    uint32_t xMin, uint32_t yMin, uint32_t xMax, uint32_t yMax) {
     TRACY_FUNC(sceGxmColorSurfaceSetClip, surface, xMin, yMin, xMax, yMax);
     assert(surface);
-    UNIMPLEMENTED();
+
+    constexpr uint32_t VITASTATION_MAX_COLOR_CLIP = (1u << 13) - 1u;
+    surface->clip_enabled = 1;
+    surface->clip_x_min = std::min(xMin, VITASTATION_MAX_COLOR_CLIP);
+    surface->clip_y_min = std::min(yMin, VITASTATION_MAX_COLOR_CLIP);
+    surface->clip_x_max = std::min(xMax, VITASTATION_MAX_COLOR_CLIP);
+    surface->clip_y_max = std::min(yMax, VITASTATION_MAX_COLOR_CLIP);
 }
 
 EXPORT(int, sceGxmColorSurfaceSetData, SceGxmColorSurface *surface, Ptr<void> data) {

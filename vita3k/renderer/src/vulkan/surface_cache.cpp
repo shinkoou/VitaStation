@@ -544,8 +544,12 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
             if ((casted_vec[i].cropped_height == height) && (casted_vec[i].cropped_width == width) && (casted_vec[i].cropped_y == start_sourced_line) && (casted_vec[i].cropped_x == start_x) && (casted_vec[i].format == base_format)) {
                 casted = &casted_vec[i];
 
-                if (casted->scene_timestamp == scene_timestamp) {
-                    // already copied for this scene, don't do it again
+                const bool typeless_reinterpret =
+                    bytes_per_pixel_requested != bytes_per_pixel_in_store;
+                if (casted->scene_timestamp == scene_timestamp && !typeless_reinterpret) {
+                    // Normal casts can reuse the scene-local copy. Typeless
+                    // reinterpretations must refresh because their backing
+                    // color surface may have been rendered again meanwhile.
                     return TextureLookupResult{
                         casted->texture.view,
                         casted->texture.layout,

@@ -484,6 +484,7 @@ public class Emulator extends SDLActivity
 
             nativeQuitRequested = true;
             releaseControllerOverlayInputs();
+            setResult(android.app.Activity.RESULT_OK);
 
             boolean queued = false;
             try {
@@ -494,21 +495,13 @@ public class Emulator extends SDLActivity
 
             if (!queued) {
                 nativeQuitRequested = false;
-
-                boolean stillRunning = true;
-                try {
-                    stillRunning = NativeLib.INSTANCE.isAppRunning();
-                } catch (Throwable ignored) {
-                }
-
-                if (!stillRunning && !isFinishing() && !isDestroyed()) {
-                    finish();
-                } else {
-                    Log.w(TAG, "Native quit request was not queued; keeping Emulator activity alive.");
-                }
+                Log.w(TAG, "Native quit request was not queued; SDLActivity remains owner of Activity teardown.");
                 return;
             }
 
+            // SDLActivity finishes this Activity after SDL_main returns.
+            // Never call finish() here: doing so races native renderer/SDL
+            // teardown and can enter SDL's process-level lifecycle fallback.
             final View decorView = getWindow().getDecorView();
             decorView.postDelayed(() -> {
                 if (isFinishing() || isDestroyed()) {
@@ -521,30 +514,17 @@ public class Emulator extends SDLActivity
                 } catch (Throwable ignored) {
                 }
 
-                if (!stillRunning) {
-                    nativeQuitRequested = false;
-                    finish();
-                    return;
+                if (stillRunning) {
+                    Log.w(TAG, "Native quit watchdog: session still active; retrying SDL quit without Activity teardown.");
+                    try {
+                        NativeLib.INSTANCE.requestAppQuit();
+                    } catch (Throwable t) {
+                        Log.w(TAG, "Native quit watchdog retry failed", t);
+                    }
+                } else {
+                    Log.i(TAG, "Native session stopped; waiting for SDLActivity to finish Emulator activity.");
                 }
-
-                nativeQuitRequested = false;
-                Log.w(TAG, "Native quit watchdog: session is still active; refusing unsafe Activity teardown.");
             }, NATIVE_QUIT_WATCHDOG_MS);
-        });
-    }
-
-    @Keep
-    public void onNativeSessionFinished(int exitCode) {
-        runOnUiThread(() -> {
-            nativeQuitRequested = false;
-            releaseControllerOverlayInputs();
-            setResult(exitCode == 0
-                    ? android.app.Activity.RESULT_OK
-                    : android.app.Activity.RESULT_CANCELED);
-
-            if (!isFinishing() && !isDestroyed()) {
-                finish();
-            }
         });
     }
 

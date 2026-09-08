@@ -42,7 +42,10 @@ struct SceGxmColorSurface {
         uint32_t disabled : 1;
         uint32_t downscale : 1;
         uint32_t gamma : 2;
-        uint32_t : 28;
+        uint32_t clip_enabled : 1;
+        uint32_t clip_x_min : 13;
+        uint32_t clip_y_min : 13;
+        uint32_t : 1;
     };
     uint32_t width;
     uint32_t height;
@@ -51,7 +54,12 @@ struct SceGxmColorSurface {
     SceGxmColorFormat colorFormat;
     SceGxmColorSurfaceType surfaceType;
     // opaque end
-    uint32_t outputRegisterSize;
+    struct {
+        uint32_t outputRegisterSize : 2;
+        uint32_t clip_x_max : 13;
+        uint32_t clip_y_max : 13;
+        uint32_t : 4;
+    };
     SceGxmTexture backgroundTex;
 };
 

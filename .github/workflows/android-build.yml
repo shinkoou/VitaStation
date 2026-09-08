@@ -8,7 +8,7 @@ on:
     paths:
       - 'android/**'
       - 'vita3k/**'
-      - 'external/lsfg-vk-android'
+      - 'external/lsfg-vk-android/**'
       - '.github/workflows/android-build.yml'
 
 permissions:
@@ -20,7 +20,7 @@ env:
 
 jobs:
   android-build:
-    name: Build VitaStation Phase04A-1 FIX1 Shader Pipeline Compatibility + Current Signing
+    name: Build VitaStation Phase04A-2 Critical Pipeline Fallback
     runs-on: ubuntu-latest
 
     steps:
@@ -30,12 +30,12 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Apply VitaStation v0.2.7 Phase04A-1 FIX1 Shader Pipeline Compatibility
+      - name: Apply VitaStation v0.2.8 Phase04A-2 Critical Pipeline Fallback
         shell: bash
         run: |
           set -euo pipefail
-          echo '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' | base64 -d | gzip -d > /tmp/vitastation-phase04a1-fix1.py
-          python3 /tmp/vitastation-phase04a1-fix1.py
+          echo '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' | base64 -d | gzip -d > /tmp/vitastation-phase04a2.py
+          python3 /tmp/vitastation-phase04a2.py
           git diff --check
 
       - name: Configure permanent VitaStation signing
@@ -56,7 +56,6 @@ jobs:
             fi
           done
           if [ "$missing" -ne 0 ]; then
-            echo "::error::Add the four VitaStation signing secrets in GitHub > Settings > Secrets and variables > Actions."
             exit 1
           fi
 
@@ -123,7 +122,7 @@ jobs:
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2.23
 
-      - name: Build VitaStation Phase04A-1 FIX1 APK
+      - name: Build VitaStation Phase04A-2 APK
         run: bash ./.ci/build-android.sh artifacts/vitastation-android
 
       - name: Verify permanent APK signature
@@ -151,19 +150,19 @@ jobs:
 
           echo "APK permanent signature verified."
 
-      - name: Persist Phase04A-1 FIX1 only after successful signed build
+      - name: Persist Phase04A-2 only after successful signed build
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "VitaStation Bot"
           git config user.email "actions@users.noreply.github.com"
 
-          git add android vita3k
+          git add             android/app/build.gradle             vita3k/renderer/include/renderer/vulkan/pipeline_cache.h             vita3k/renderer/src/vulkan/pipeline_cache.cpp             vita3k/renderer/src/vulkan/scene.cpp
 
           if git diff --cached --quiet; then
-            echo "Phase04A-1 FIX1 source already applied."
+            echo "Phase04A-2 source already applied."
           else
-            git commit -m "VitaStation v0.2.7 Phase04A-1 FIX1: shader pipeline synchronization, GL atomic compatibility, interlock compatibility, GPU HUD"
+            git commit -m "VitaStation v0.2.8 Phase04A-2: critical pipeline fallback [skip ci]"
             git push origin HEAD:main
           fi
 
@@ -172,12 +171,12 @@ jobs:
         run: |
           set -euo pipefail
           test -f artifacts/vitastation-android/app.apk
-          mv artifacts/vitastation-android/app.apk             artifacts/vitastation-android/VitaStation-v0.2.7-Phase04A1-FIX1-Shader-Pipeline-Compatibility-Signed.apk
+          mv artifacts/vitastation-android/app.apk             artifacts/vitastation-android/VitaStation-v0.2.8-Phase04A2-Critical-Pipeline-Fallback-Signed.apk
           ls -lh artifacts/vitastation-android/
 
-      - name: Upload VitaStation Phase04A-1 FIX1 APK
+      - name: Upload VitaStation Phase04A-2 APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.2.7-Phase04A1-FIX1-Shader-Pipeline-Compatibility-Signed-Android
-          path: artifacts/vitastation-android/VitaStation-v0.2.7-Phase04A1-FIX1-Shader-Pipeline-Compatibility-Signed.apk
+          name: VitaStation-v0.2.8-Phase04A2-Critical-Pipeline-Fallback-Signed-Android
+          path: artifacts/vitastation-android/VitaStation-v0.2.8-Phase04A2-Critical-Pipeline-Fallback-Signed.apk
           if-no-files-found: error

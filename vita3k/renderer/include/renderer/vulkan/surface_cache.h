@@ -64,6 +64,9 @@ struct Framebuffer {
 
 struct CastedTexture {
     vkutil::Image texture;
+    // Raw R32_UINT view used by VitaStation's narrow high-resolution
+    // typeless reinterpret compute path.
+    vk::ImageView reinterpret_view = nullptr;
     // only used if an image to image copy is not possible
     vkutil::Buffer transition_buffer;
     uint64_t scene_timestamp = 0;
@@ -108,6 +111,10 @@ struct ColorSurfaceCacheInfo : public SurfaceCacheInfo {
 
     // same image with a different view(swizzle) used for sampling
     vk::ImageView alternate_view = nullptr;
+
+    // Raw 64-bit store view. For the verified 8 Bpp -> 4 Bpp alias path
+    // this exposes each source texel as two 32-bit words.
+    vk::ImageView reinterpret_store_view = nullptr;
 
     // only used when upscaling is enabled, to downscale the image first
     std::unique_ptr<vkutil::Image> blit_image;
@@ -173,6 +180,16 @@ struct SurfaceRetrieveResult {
     vkutil::Image *base_image;
 };
 
+// Push constants for VitaStation HD Typeless 2.0.
+struct ReinterpretPushConstants {
+    uint32_t out_width;
+    uint32_t out_height;
+    uint32_t scaled_store_w;
+    uint32_t scaled_store_h;
+    uint32_t ratio;
+    uint32_t half_index;
+};
+
 class VKSurfaceCache {
 private:
     VKState &state;
@@ -199,6 +216,19 @@ private:
 
     VKRenderTarget *target = nullptr;
     ColorSurfaceCacheInfo *last_written_surface = nullptr;
+
+    // VitaStation HD Typeless 2.0 compute resources, created lazily only
+    // for the verified 64-bit store -> 32-bit requested alias case.
+    vk::ShaderModule reinterpret_shader = nullptr;
+    vk::DescriptorSetLayout reinterpret_desc_layout = nullptr;
+    vk::PipelineLayout reinterpret_pipeline_layout = nullptr;
+    vk::Pipeline reinterpret_pipeline = nullptr;
+    vk::DescriptorPool reinterpret_desc_pool = nullptr;
+    std::vector<vk::DescriptorSet> reinterpret_desc_sets;
+    uint32_t reinterpret_desc_idx = 0;
+    vk::Sampler reinterpret_sampler = nullptr;
+
+    void ensure_reinterpret_pipeline();
 
     // destroy all framebuffers using view as their color or depth-stencil
     void destroy_framebuffers(vk::ImageView view);

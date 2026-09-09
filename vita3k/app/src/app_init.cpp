@@ -459,48 +459,91 @@ bool init(EmuEnvState &state, Config &cfg, const Root &root_paths) {
 }
 
 void shutdown_app_runtime(EmuEnvState &state) {
+    LOG_INFO("[VS-EXIT-NATIVE] begin");
+
+    LOG_INFO("[VS-EXIT-NATIVE] audio stop ports begin");
     state.audio.stop_all_ports();
+    LOG_INFO("[VS-EXIT-NATIVE] audio stop ports done");
 
+    LOG_INFO("[VS-EXIT-NATIVE] gxm shutdown begin");
     gxm::shutdown(state);
+    LOG_INFO("[VS-EXIT-NATIVE] gxm shutdown done");
 
+    LOG_INFO("[VS-EXIT-NATIVE] net/http abort begin");
     state.net.abort_all();
     state.http.shutdown_connections();
+    LOG_INFO("[VS-EXIT-NATIVE] net/http abort done");
 
+    LOG_INFO("[VS-EXIT-NATIVE] kernel process_exit begin");
     state.kernel.process_exit();
+    LOG_INFO("[VS-EXIT-NATIVE] kernel process_exit done");
 
+    LOG_INFO("[VS-EXIT-NATIVE] motion reset begin");
     state.motion.reset_runtime();
+    LOG_INFO("[VS-EXIT-NATIVE] motion reset done");
 
+    LOG_INFO("[VS-EXIT-NATIVE] audio deinit begin");
     state.audio.deinit();
+    LOG_INFO("[VS-EXIT-NATIVE] audio deinit done");
 
+    LOG_INFO("[VS-EXIT-NATIVE] renderer preclose begin");
     state.renderer->preclose_action();
+    LOG_INFO("[VS-EXIT-NATIVE] renderer preclose done");
+
+    LOG_INFO("[VS-EXIT-NATIVE] render thread stop begin");
     renderer::stop_render_thread(*state.renderer);
+    LOG_INFO("[VS-EXIT-NATIVE] render thread stop done");
+
+    LOG_INFO("[VS-EXIT-NATIVE] gxm objects destroy begin");
     gxm::destroy_all_contexts(state, true);
     gxm::destroy_all_render_targets(state, true);
+    LOG_INFO("[VS-EXIT-NATIVE] gxm objects destroy done");
+
+    LOG_INFO("[VS-EXIT-NATIVE] gxm deinit begin");
     state.gxm.deinit();
+    LOG_INFO("[VS-EXIT-NATIVE] gxm deinit done");
+
+    LOG_INFO("[VS-EXIT-NATIVE] overlay reset begin");
     state.overlay_manager.reset();
+    LOG_INFO("[VS-EXIT-NATIVE] overlay reset done");
 
+    LOG_INFO("[VS-EXIT-NATIVE] display deinit begin");
     state.display.deinit();
+    LOG_INFO("[VS-EXIT-NATIVE] display deinit done");
 
+    LOG_INFO("[VS-EXIT-NATIVE] netctl deinit begin");
     state.netctl.deinit();
+    LOG_INFO("[VS-EXIT-NATIVE] netctl deinit done");
 
+    LOG_INFO("[VS-EXIT-NATIVE] ngs deinit begin");
     ngs::deinit(state.ngs, state.mem);
+    LOG_INFO("[VS-EXIT-NATIVE] ngs deinit done");
 
-    // trophy (maybe namespace this?)
+    LOG_INFO("[VS-EXIT-NATIVE] np deinit begin");
     deinit(state.np);
+    LOG_INFO("[VS-EXIT-NATIVE] np deinit done");
 
+    LOG_INFO("[VS-EXIT-NATIVE] http deinit begin");
     state.http.deinit();
+    LOG_INFO("[VS-EXIT-NATIVE] http deinit done");
 
+    LOG_INFO("[VS-EXIT-NATIVE] net deinit begin");
     state.net.deinit();
+    LOG_INFO("[VS-EXIT-NATIVE] net deinit done");
 
+    LOG_INFO("[VS-EXIT-NATIVE] io deinit begin");
     io_deinit(state.io);
+    LOG_INFO("[VS-EXIT-NATIVE] io deinit done");
 
+    LOG_INFO("[VS-EXIT-NATIVE] camera deinit begin");
     state.camera.deinit();
+    LOG_INFO("[VS-EXIT-NATIVE] camera deinit done");
 
+    LOG_INFO("[VS-EXIT-NATIVE] dialogs/ime/touch reset begin");
     state.common_dialog.deinit();
-
     state.ime.deinit();
-
     state.touch.reset_runtime();
+    LOG_INFO("[VS-EXIT-NATIVE] dialogs/ime/touch reset done");
 
     state.sfo_handle.header = {};
     state.sfo_handle.entries.clear();
@@ -515,12 +558,20 @@ void shutdown_app_runtime(EmuEnvState &state) {
     state.regmgr.reg_category_template.clear();
     state.regmgr.reg_template.clear();
 
+    LOG_INFO("[VS-EXIT-NATIVE] kernel deinit begin");
     state.kernel.deinit(state.mem);
+    LOG_INFO("[VS-EXIT-NATIVE] kernel deinit done");
 
+    LOG_INFO("[VS-EXIT-NATIVE] renderer cleanup begin");
     state.renderer->cleanup();
     state.renderer.reset();
+    LOG_INFO("[VS-EXIT-NATIVE] renderer cleanup done");
 
+    LOG_INFO("[VS-EXIT-NATIVE] memory deinit begin");
     deinit_mem(state.mem);
+    LOG_INFO("[VS-EXIT-NATIVE] memory deinit done");
+
+    LOG_INFO("[VS-EXIT-NATIVE] done");
 }
 
 void reset_app_state(EmuEnvState &state) {

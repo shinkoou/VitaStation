@@ -26,6 +26,7 @@
 #include <vulkan/vulkan_format_traits.hpp>
 
 #include <array>
+#include <stdexcept>
 
 #include <util/align.h>
 #include <util/log.h>
@@ -253,11 +254,13 @@ void VKSurfaceCache::destroy_surface(ColorSurfaceCacheInfo &info) {
     // don't forget to destroy in the right order
     for (auto &casted : info.casted_textures) {
         destroy_queue.add_buffer(casted.transition_buffer);
+        destroy_queue.add(casted.reinterpret_view);
         destroy_queue.add_image(casted.texture);
     }
     info.casted_textures.clear();
 
     destroy_queue.add(info.alternate_view);
+    destroy_queue.add(info.reinterpret_store_view);
 
     if (last_written_surface == &info)
         last_written_surface = nullptr;
@@ -299,6 +302,10 @@ void VKSurfaceCache::cleanup() {
         auto &info = item.content;
         for (auto &casted : info.casted_textures) {
             casted.transition_buffer.destroy();
+            if (casted.reinterpret_view) {
+                state.device.destroy(casted.reinterpret_view);
+                casted.reinterpret_view = nullptr;
+            }
             casted.texture.destroy();
         }
         info.casted_textures.clear();
@@ -306,6 +313,10 @@ void VKSurfaceCache::cleanup() {
         if (info.alternate_view) {
             state.device.destroy(info.alternate_view);
             info.alternate_view = nullptr;
+        }
+        if (info.reinterpret_store_view) {
+            state.device.destroy(info.reinterpret_store_view);
+            info.reinterpret_store_view = nullptr;
         }
 
         if (info.blit_image)
@@ -334,6 +345,25 @@ void VKSurfaceCache::cleanup() {
         }
 
         info.texture.destroy();
+    }
+
+    if (reinterpret_pipeline) {
+        state.device.destroy(reinterpret_pipeline);
+        state.device.destroy(reinterpret_pipeline_layout);
+        state.device.destroy(reinterpret_desc_layout);
+        state.device.destroy(reinterpret_desc_pool);
+        state.device.destroy(reinterpret_shader);
+        if (reinterpret_sampler)
+            state.device.destroy(reinterpret_sampler);
+
+        reinterpret_pipeline = nullptr;
+        reinterpret_pipeline_layout = nullptr;
+        reinterpret_desc_layout = nullptr;
+        reinterpret_desc_pool = nullptr;
+        reinterpret_shader = nullptr;
+        reinterpret_sampler = nullptr;
+        reinterpret_desc_sets.clear();
+        reinterpret_desc_idx = 0;
     }
 
     color_address_lookup.clear();
@@ -480,11 +510,17 @@ SurfaceRetrieveResult VKSurfaceCache::retrieve_color_surface_for_framebuffer(Mem
     image.format = vk_format;
     image.layout = vkutil::ImageLayout::Undefined;
 
-    // we might have to create a non-srgb/linear view later if this surface is used for presentation
-    const bool need_mutable = (vk_format == vk::Format::eR8G8B8A8Unorm || vk_format == vk::Format::eR8G8B8A8Srgb);
-    const vk::ImageCreateFlags image_create_flags = need_mutable ? vk::ImageCreateFlagBits::eMutableFormat : vk::ImageCreateFlags();
+    // Existing mutable RGBA8 supports sRGB/linear alternate views.
+    // 64-bit render targets are also mutable so HD Typeless 2.0 can expose
+    // the same bytes through an R32G32_UINT view before any scaling.
+    const bool need_mutable_rgba8 =
+        (vk_format == vk::Format::eR8G8B8A8Unorm || vk_format == vk::Format::eR8G8B8A8Srgb);
+    const bool need_mutable_raw64 = gxm::bits_per_pixel(base_format) == 64;
+    const bool need_mutable = need_mutable_rgba8 || need_mutable_raw64;
+    const vk::ImageCreateFlags image_create_flags =
+        need_mutable ? vk::ImageCreateFlagBits::eMutableFormat : vk::ImageCreateFlags();
     const void *image_info_pNext = nullptr;
-    if (support_image_format_specifier && need_mutable) {
+    if (support_image_format_specifier && need_mutable_rgba8) {
         static const vk::Format view_formats[] = { vk::Format::eR8G8B8A8Unorm, vk::Format::eR8G8B8A8Srgb };
         static const vk::ImageFormatListCreateInfoKHR image_info_formats{
             .viewFormatCount = 2,
@@ -665,6 +701,28 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
     uint32_t start_sourced_line = static_cast<uint32_t>((data_delta / stride_bytes) * state.res_multiplier);
     uint32_t start_x = static_cast<uint32_t>((data_delta % stride_bytes) / bytes_per_pixel_requested * state.res_multiplier);
 
+    // HD Typeless 2.0 preserves guest byte identity before reinterpretation.
+    // The precise +0/+4 aliases remain +0/+4 bytes regardless of 1.5x, 2x, etc.
+    const uint32_t guard_native_byte_offset = data_delta % stride_bytes;
+    const uint32_t guard_sub_texel_byte = bytes_per_pixel_in_store
+        ? (guard_native_byte_offset % bytes_per_pixel_in_store) : 0u;
+    const uint32_t guard_native_store_col = bytes_per_pixel_in_store
+        ? (guard_native_byte_offset / bytes_per_pixel_in_store) : 0u;
+    const uint32_t guard_ratio = bytes_per_pixel_requested
+        ? (bytes_per_pixel_in_store / bytes_per_pixel_requested) : 0u;
+
+    const bool use_compute_deinterleave =
+        state.res_multiplier != 1.0f
+        && info.tiling == SurfaceTiling::Linear
+        && bytes_per_pixel_in_store == 8
+        && bytes_per_pixel_requested == 4
+        && guard_ratio == 2
+        && guard_native_store_col == 0
+        && start_sourced_line == 0
+        && (guard_sub_texel_byte % bytes_per_pixel_requested) == 0
+        && info.original_width > 0
+        && info.original_height > 0;
+
     if (static_cast<uint16_t>(start_sourced_line + height) > info.height)
         LOG_WARN_ONCE("Trying to use texture partially in the surface cache");
 
@@ -691,7 +749,11 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
         info.height);
     const bool unresolved_scene_write = written_this_scene
         && has_pending_region_overlap(info.pending_write_regions, read_region);
-    const bool needs_late_resolve = unresolved_scene_write;
+
+    // Active framebuffer feedback must never be snapshotted in prerender_cmd.
+    // Even when region tracking says there is no pending overlap, same_image
+    // still aliases the attachment currently being produced.
+    const bool needs_late_resolve = is_same_image || unresolved_scene_write;
 
     const bool suspicious_surface_read = is_same_image || needs_late_resolve
         || ite->first != address
@@ -840,10 +902,26 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
             else
                 resulting_swizzle = swizzle;
 
-            casted->texture.init_image(vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst, resulting_swizzle);
-            casted->texture.transition_to(cmd_buffer, vkutil::ImageLayout::TransferDst);
+            if (use_compute_deinterleave) {
+                casted->texture.init_image(
+                    vk::ImageUsageFlagBits::eSampled
+                        | vk::ImageUsageFlagBits::eTransferDst
+                        | vk::ImageUsageFlagBits::eStorage,
+                    resulting_swizzle,
+                    vk::ImageCreateFlagBits::eMutableFormat);
+                casted->texture.transition_to(cmd_buffer, vkutil::ImageLayout::StorageImage);
+            } else {
+                casted->texture.init_image(
+                    vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst,
+                    resulting_swizzle);
+                casted->texture.transition_to(cmd_buffer, vkutil::ImageLayout::TransferDst);
+            }
         } else {
-            casted->texture.transition_to_discard(cmd_buffer, vkutil::ImageLayout::TransferDst);
+            casted->texture.transition_to_discard(
+                cmd_buffer,
+                use_compute_deinterleave
+                    ? vkutil::ImageLayout::StorageImage
+                    : vkutil::ImageLayout::TransferDst);
         }
 
         casted->scene_timestamp = scene_timestamp;
@@ -874,88 +952,216 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
             }
             LOG_INFO_ONCE("Game is doing typeless copies");
 
-            const vk::DeviceSize buffer_size =
-                static_cast<vk::DeviceSize>(stride_bytes)
-                    * static_cast<size_t>(state.res_multiplier * align(height, 4))
-                + static_cast<vk::DeviceSize>(start_x) * bytes_per_pixel_requested
-                + bytes_per_pixel_requested;
+            const uint32_t ratio =
+                bytes_per_pixel_in_store / bytes_per_pixel_requested;
+            const uint32_t native_byte_offset = data_delta % stride_bytes;
+            const uint32_t sub_texel_byte =
+                native_byte_offset % bytes_per_pixel_in_store;
 
-            if (!casted->transition_buffer.buffer
-                || casted->transition_buffer.size < buffer_size) {
-                state.frame().destroy_queue.add_buffer(casted->transition_buffer);
-                casted->transition_buffer = vkutil::Buffer(buffer_size);
-                casted->transition_buffer.init_buffer(
-                    vk::BufferUsageFlagBits::eTransferDst
-                    | vk::BufferUsageFlagBits::eTransferSrc);
-            }
+            if (use_compute_deinterleave) {
+                ensure_reinterpret_pipeline();
 
-            const uint32_t src_pixel_stride = static_cast<uint32_t>(
-                (info.stride_bytes / bytes_per_pixel_in_store)
-                * state.res_multiplier);
+                const uint32_t half_index =
+                    sub_texel_byte / bytes_per_pixel_requested;
 
-            vk::BufferImageCopy copy_image_buffer{
-                .bufferOffset = 0,
-                .bufferRowLength = src_pixel_stride,
-                .bufferImageHeight = height,
-                .imageSubresource = vkutil::color_subresource_layer,
-                .imageOffset = {
+                if (!casted->reinterpret_view) {
+                    vk::ImageViewCreateInfo reinterpret_view_info{
+                        .image = casted->texture.image,
+                        .viewType = vk::ImageViewType::e2D,
+                        .format = vk::Format::eR32Uint,
+                        .components = {},
+                        .subresourceRange = vkutil::color_subresource_range
+                    };
+                    casted->reinterpret_view =
+                        state.device.createImageView(reinterpret_view_info);
+                }
+
+                if (!info.reinterpret_store_view) {
+                    vk::ImageViewCreateInfo store_view_info{
+                        .image = info.texture.image,
+                        .viewType = vk::ImageViewType::e2D,
+                        .format = vk::Format::eR32G32Uint,
+                        .components = {},
+                        .subresourceRange = vkutil::color_subresource_range
+                    };
+                    info.reinterpret_store_view =
+                        state.device.createImageView(store_view_info);
+                }
+
+                vk::ImageMemoryBarrier store_to_compute{
+                    .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite
+                        | vk::AccessFlagBits::eShaderWrite,
+                    .dstAccessMask = vk::AccessFlagBits::eShaderRead,
+                    .oldLayout = vk::ImageLayout::eGeneral,
+                    .newLayout = vk::ImageLayout::eGeneral,
+                    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                    .image = info.texture.image,
+                    .subresourceRange = vkutil::color_subresource_range
+                };
+                cmd_buffer.pipelineBarrier(
+                    vk::PipelineStageFlagBits::eColorAttachmentOutput
+                        | vk::PipelineStageFlagBits::eFragmentShader,
+                    vk::PipelineStageFlagBits::eComputeShader,
+                    {}, {}, {}, store_to_compute);
+
+                vk::DescriptorSet descriptor =
+                    reinterpret_desc_sets[reinterpret_desc_idx];
+                reinterpret_desc_idx =
+                    (reinterpret_desc_idx + 1)
+                    % static_cast<uint32_t>(reinterpret_desc_sets.size());
+
+                vk::DescriptorImageInfo store_info{
+                    reinterpret_sampler,
+                    info.reinterpret_store_view,
+                    vk::ImageLayout::eGeneral
+                };
+                vk::DescriptorImageInfo cast_info{
+                    nullptr,
+                    casted->reinterpret_view,
+                    vk::ImageLayout::eGeneral
+                };
+
+                std::array<vk::WriteDescriptorSet, 2> writes;
+                writes[0] = vk::WriteDescriptorSet{
+                    .dstSet = descriptor,
+                    .dstBinding = 0,
+                    .dstArrayElement = 0,
+                    .descriptorType = vk::DescriptorType::eCombinedImageSampler
+                };
+                writes[0].setImageInfo(store_info);
+                writes[1] = vk::WriteDescriptorSet{
+                    .dstSet = descriptor,
+                    .dstBinding = 1,
+                    .dstArrayElement = 0,
+                    .descriptorType = vk::DescriptorType::eStorageImage
+                };
+                writes[1].setImageInfo(cast_info);
+                state.device.updateDescriptorSets(writes, {});
+
+                ReinterpretPushConstants pc{
+                    .out_width = width,
+                    .out_height = height,
+                    .scaled_store_w = info.texture.width,
+                    .scaled_store_h = info.texture.height,
+                    .ratio = ratio,
+                    .half_index = half_index
+                };
+                cmd_buffer.bindPipeline(
+                    vk::PipelineBindPoint::eCompute,
+                    reinterpret_pipeline);
+                cmd_buffer.bindDescriptorSets(
+                    vk::PipelineBindPoint::eCompute,
+                    reinterpret_pipeline_layout,
                     0,
-                    static_cast<int32_t>(start_sourced_line),
-                    0 },
-                .imageExtent = {
-                    std::min<uint32_t>(info.width, src_pixel_stride),
-                    std::min<uint32_t>(
+                    descriptor,
+                    {});
+                cmd_buffer.pushConstants(
+                    reinterpret_pipeline_layout,
+                    vk::ShaderStageFlagBits::eCompute,
+                    0,
+                    sizeof(pc),
+                    &pc);
+                cmd_buffer.dispatch(
+                    (width + 7u) / 8u,
+                    (height + 7u) / 8u,
+                    1);
+
+                static thread_local uint64_t hd_typeless_log_counter = 0;
+                if (((++hd_typeless_log_counter & 0xFFu) == 1u)) {
+                    LOG_INFO(
+                        "[VS-TYPELESS-HD] raw_offset={} half={} ratio={} size={}x{} scale={}",
+                        native_byte_offset,
+                        half_index,
+                        ratio,
+                        width,
                         height,
-                        info.height > start_sourced_line
-                            ? info.height - start_sourced_line
-                            : 0),
-                    1 }
-            };
+                        state.res_multiplier);
+                }
+            } else {
+                const vk::DeviceSize buffer_size =
+                    static_cast<vk::DeviceSize>(stride_bytes)
+                        * static_cast<size_t>(state.res_multiplier * align(height, 4))
+                    + static_cast<vk::DeviceSize>(start_x) * bytes_per_pixel_requested
+                    + bytes_per_pixel_requested;
 
-            if (copy_image_buffer.imageExtent.height == 0)
-                return std::nullopt;
+                if (!casted->transition_buffer.buffer
+                    || casted->transition_buffer.size < buffer_size) {
+                    state.frame().destroy_queue.add_buffer(casted->transition_buffer);
+                    casted->transition_buffer = vkutil::Buffer(buffer_size);
+                    casted->transition_buffer.init_buffer(
+                        vk::BufferUsageFlagBits::eTransferDst
+                        | vk::BufferUsageFlagBits::eTransferSrc);
+                }
 
-            cmd_buffer.copyImageToBuffer(
-                info.texture.image,
-                vk::ImageLayout::eGeneral,
-                casted->transition_buffer.buffer,
-                copy_image_buffer);
+                const uint32_t src_pixel_stride = static_cast<uint32_t>(
+                    (info.stride_bytes / bytes_per_pixel_in_store)
+                    * state.res_multiplier);
 
-            vk::BufferMemoryBarrier transition_buffer_barrier{
-                .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
-                .dstAccessMask = vk::AccessFlagBits::eTransferRead,
-                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .buffer = casted->transition_buffer.buffer,
-                .offset = 0,
-                .size = VK_WHOLE_SIZE
-            };
-            cmd_buffer.pipelineBarrier(
-                vk::PipelineStageFlagBits::eTransfer,
-                vk::PipelineStageFlagBits::eTransfer,
-                vk::DependencyFlags{}, {}, transition_buffer_barrier, {});
+                vk::BufferImageCopy copy_image_buffer{
+                    .bufferOffset = 0,
+                    .bufferRowLength = src_pixel_stride,
+                    .bufferImageHeight = height,
+                    .imageSubresource = vkutil::color_subresource_layer,
+                    .imageOffset = {
+                        0,
+                        static_cast<int32_t>(start_sourced_line),
+                        0 },
+                    .imageExtent = {
+                        std::min<uint32_t>(info.width, src_pixel_stride),
+                        std::min<uint32_t>(
+                            height,
+                            info.height > start_sourced_line
+                                ? info.height - start_sourced_line
+                                : 0),
+                        1 }
+                };
 
-            const uint32_t dst_pixel_stride = static_cast<uint32_t>(
-                (stride_bytes / bytes_per_pixel_requested)
-                * state.res_multiplier);
+                if (copy_image_buffer.imageExtent.height == 0)
+                    return std::nullopt;
 
-            copy_image_buffer
-                .setBufferOffset(
-                    static_cast<vk::DeviceSize>(start_x)
-                    * bytes_per_pixel_requested)
-                .setBufferRowLength(dst_pixel_stride)
-                .setBufferImageHeight(copy_image_buffer.imageExtent.height)
-                .setImageOffset({ 0, 0, 0 })
-                .setImageExtent({
-                    std::min<uint32_t>(width, dst_pixel_stride),
-                    copy_image_buffer.imageExtent.height,
-                    1 });
+                cmd_buffer.copyImageToBuffer(
+                    info.texture.image,
+                    vk::ImageLayout::eGeneral,
+                    casted->transition_buffer.buffer,
+                    copy_image_buffer);
 
-            cmd_buffer.copyBufferToImage(
-                casted->transition_buffer.buffer,
-                casted->texture.image,
-                vk::ImageLayout::eTransferDstOptimal,
-                copy_image_buffer);
+                vk::BufferMemoryBarrier transition_buffer_barrier{
+                    .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
+                    .dstAccessMask = vk::AccessFlagBits::eTransferRead,
+                    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                    .buffer = casted->transition_buffer.buffer,
+                    .offset = 0,
+                    .size = VK_WHOLE_SIZE
+                };
+                cmd_buffer.pipelineBarrier(
+                    vk::PipelineStageFlagBits::eTransfer,
+                    vk::PipelineStageFlagBits::eTransfer,
+                    vk::DependencyFlags{}, {}, transition_buffer_barrier, {});
+
+                const uint32_t dst_pixel_stride = static_cast<uint32_t>(
+                    (stride_bytes / bytes_per_pixel_requested)
+                    * state.res_multiplier);
+
+                copy_image_buffer
+                    .setBufferOffset(
+                        static_cast<vk::DeviceSize>(start_x)
+                        * bytes_per_pixel_requested)
+                    .setBufferRowLength(dst_pixel_stride)
+                    .setBufferImageHeight(copy_image_buffer.imageExtent.height)
+                    .setImageOffset({ 0, 0, 0 })
+                    .setImageExtent({
+                        std::min<uint32_t>(width, dst_pixel_stride),
+                        copy_image_buffer.imageExtent.height,
+                        1 });
+
+                cmd_buffer.copyBufferToImage(
+                    casted->transition_buffer.buffer,
+                    casted->texture.image,
+                    vk::ImageLayout::eTransferDstOptimal,
+                    copy_image_buffer);
+            }
         }
         casted->texture.transition_to(
             cmd_buffer, vkutil::ImageLayout::ColorAttachmentReadWrite);
@@ -1028,6 +1234,101 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
             vk_format
         };
     }
+}
+
+void VKSurfaceCache::ensure_reinterpret_pipeline() {
+    if (reinterpret_pipeline)
+        return;
+
+    const fs::path shader_path =
+        state.static_assets / "shaders-builtin/vulkan"
+        / "surface_cast_reinterpret.comp.spv";
+    reinterpret_shader = vkutil::load_shader(state.device, shader_path);
+
+    vk::SamplerCreateInfo sampler_info{
+        .magFilter = vk::Filter::eNearest,
+        .minFilter = vk::Filter::eNearest,
+        .mipmapMode = vk::SamplerMipmapMode::eNearest,
+        .addressModeU = vk::SamplerAddressMode::eClampToEdge,
+        .addressModeV = vk::SamplerAddressMode::eClampToEdge,
+        .addressModeW = vk::SamplerAddressMode::eClampToEdge
+    };
+    reinterpret_sampler = state.device.createSampler(sampler_info);
+
+    std::array<vk::DescriptorSetLayoutBinding, 2> bindings{};
+    bindings[0] = vk::DescriptorSetLayoutBinding{
+        .binding = 0,
+        .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+        .descriptorCount = 1,
+        .stageFlags = vk::ShaderStageFlagBits::eCompute
+    };
+    bindings[1] = vk::DescriptorSetLayoutBinding{
+        .binding = 1,
+        .descriptorType = vk::DescriptorType::eStorageImage,
+        .descriptorCount = 1,
+        .stageFlags = vk::ShaderStageFlagBits::eCompute
+    };
+
+    vk::DescriptorSetLayoutCreateInfo descriptor_layout_info{};
+    descriptor_layout_info.setBindings(bindings);
+    reinterpret_desc_layout =
+        state.device.createDescriptorSetLayout(descriptor_layout_info);
+
+    vk::PushConstantRange push_range{
+        .stageFlags = vk::ShaderStageFlagBits::eCompute,
+        .offset = 0,
+        .size = sizeof(ReinterpretPushConstants)
+    };
+    vk::PipelineLayoutCreateInfo pipeline_layout_info{};
+    pipeline_layout_info.setSetLayouts(reinterpret_desc_layout);
+    pipeline_layout_info.setPushConstantRanges(push_range);
+    reinterpret_pipeline_layout =
+        state.device.createPipelineLayout(pipeline_layout_info);
+
+    vk::PipelineShaderStageCreateInfo stage{
+        .stage = vk::ShaderStageFlagBits::eCompute,
+        .module = reinterpret_shader,
+        .pName = "main"
+    };
+    vk::ComputePipelineCreateInfo pipeline_info{
+        .stage = stage,
+        .layout = reinterpret_pipeline_layout
+    };
+    const auto pipeline_result =
+        state.device.createComputePipeline(nullptr, pipeline_info);
+    if (pipeline_result.result != vk::Result::eSuccess)
+        throw std::runtime_error("VitaStation typeless compute pipeline creation failed");
+    reinterpret_pipeline = pipeline_result.value;
+
+    // Large rotation prevents descriptor rewrites from colliding with
+    // commands from the small number of frames that can be in flight.
+    constexpr uint32_t kDescriptorSets = 512;
+    std::array<vk::DescriptorPoolSize, 2> pool_sizes{
+        vk::DescriptorPoolSize{
+            vk::DescriptorType::eCombinedImageSampler,
+            kDescriptorSets },
+        vk::DescriptorPoolSize{
+            vk::DescriptorType::eStorageImage,
+            kDescriptorSets }
+    };
+    vk::DescriptorPoolCreateInfo pool_info{
+        .maxSets = kDescriptorSets
+    };
+    pool_info.setPoolSizes(pool_sizes);
+    reinterpret_desc_pool = state.device.createDescriptorPool(pool_info);
+
+    std::vector<vk::DescriptorSetLayout> layouts(
+        kDescriptorSets,
+        reinterpret_desc_layout);
+    vk::DescriptorSetAllocateInfo alloc_info{
+        .descriptorPool = reinterpret_desc_pool
+    };
+    alloc_info.setSetLayouts(layouts);
+    reinterpret_desc_sets =
+        state.device.allocateDescriptorSets(alloc_info);
+    reinterpret_desc_idx = 0;
+
+    LOG_INFO("[VS-TYPELESS-HD] compute reinterpret pipeline ready");
 }
 
 SurfaceRetrieveResult VKSurfaceCache::retrieve_depth_stencil_for_framebuffer(SceGxmDepthStencilSurface *depth_stencil, const uint32_t width, const uint32_t height) {

@@ -552,11 +552,16 @@ struct FrameGenerationPresenter::Impl {
     uint64_t frame_index = 0;
     uint64_t lsfg_frame_index = 0;
     uint32_t generation_miss_streak = 0;
+    uint32_t static_frame_streak = 0;
+    bool static_guard_active = false;
     FrameTimingHistory timing;
     std::string library_cache_dir;
 
     static constexpr uint64_t kWarmupFrames = 60;
     static constexpr uint32_t kMissesBeforeHudPause = 2;
+    static constexpr uint32_t kStaticFramesBeforePause = 3;
+    static constexpr float kStaticMeanDelta = 0.012f;
+    static constexpr float kStaticChangedFraction = 0.02f;
 
     bool scene_probe_supported = true;
     bool scene_probe_warned = false;
@@ -1154,6 +1159,29 @@ struct FrameGenerationPresenter::Impl {
         set_last_error(reason);
     }
 
+    void reset_lsfg_context(const char* reason) {
+        set_active(false);
+        input_primed = false;
+        lsfg_frame_index = 0;
+        generation_miss_streak = 0;
+
+        if (context_id >= 0) {
+            LSFG_3_1P::waitIdle();
+            LSFG_3_1P::deleteContext(context_id);
+            context_id = -1;
+        }
+
+        std::vector<AHardwareBuffer*> outputs{ output_0.ahb };
+        context_id = LSFG_3_1P::createContextFromAHB(
+            input_0.ahb,
+            input_1.ahb,
+            outputs,
+            fg_extent,
+            VK_FORMAT_R16G16B16A16_SFLOAT);
+
+        LOG_INFO("[VS-FG-RESET] reason={} -> context recreated", reason);
+    }
+
     void release_swapchain() {
         set_active(false);
         session_active = false;
@@ -1162,6 +1190,8 @@ struct FrameGenerationPresenter::Impl {
         frame_index = 0;
         lsfg_frame_index = 0;
         generation_miss_streak = 0;
+        static_frame_streak = 0;
+        static_guard_active = false;
         timing.reset();
         scene_probe_supported = true;
         scene_probe_warned = false;
@@ -1298,6 +1328,8 @@ struct FrameGenerationPresenter::Impl {
             frame_index = 0;
             lsfg_frame_index = 0;
             generation_miss_streak = 0;
+            static_frame_streak = 0;
+            static_guard_active = false;
             timing.reset();
             set_last_error("");
             // Runtime-active stays false during the startup warm-up. This keeps
@@ -1384,18 +1416,60 @@ struct FrameGenerationPresenter::Impl {
 
             if (is_scene_cut(signature_delta)) {
                 timing.note_scene_cut();
-                input_primed = false;
-                generation_miss_streak = 0;
-                set_active(false);
+                static_frame_streak = 0;
+                static_guard_active = false;
+                reset_lsfg_context("SCENE_CUT");
                 ++frame_index;
 
                 LOG_INFO(
-                    "[VS-FG-SCENE] cut detected: mean_delta={:.3f} changed={:.1f}% cuts={} -> history reset",
+                    "[VS-FG-SCENE] cut detected: mean_delta={:.3f} changed={:.1f}% cuts={} -> hard reset",
                     signature_delta.mean_delta,
                     signature_delta.changed_fraction * 100.0f,
                     timing.scene_cuts);
 
                 return queue_present(real_image_index);
+            }
+
+            const bool visually_static =
+                current_signature.valid
+                && previous_signature.valid
+                && signature_delta.mean_delta <= kStaticMeanDelta
+                && signature_delta.changed_fraction <= kStaticChangedFraction;
+
+            if (visually_static) {
+                static_frame_streak = std::min<uint32_t>(
+                    static_frame_streak + 1,
+                    kStaticFramesBeforePause + 8);
+
+                if (static_frame_streak >= kStaticFramesBeforePause) {
+                    if (!static_guard_active) {
+                        static_guard_active = true;
+                        ++timing.scene_guard_skips;
+                        LOG_INFO(
+                            "[VS-FG-STATIC] mean_delta={:.4f} changed={:.2f}% -> real frames only",
+                            signature_delta.mean_delta,
+                            signature_delta.changed_fraction * 100.0f);
+                    }
+
+                    set_active(false);
+                    ++frame_index;
+                    return queue_present(real_image_index);
+                }
+            } else {
+                static_frame_streak = 0;
+
+                if (static_guard_active) {
+                    static_guard_active = false;
+                    reset_lsfg_context("STATIC_TO_MOTION");
+                    ++frame_index;
+
+                    LOG_INFO(
+                        "[VS-FG-REPRIME] mean_delta={:.4f} changed={:.2f}% -> real frame prime",
+                        signature_delta.mean_delta,
+                        signature_delta.changed_fraction * 100.0f);
+
+                    return queue_present(real_image_index);
+                }
             }
 
             // AHardwareBuffer is shared with LSFG's own Vulkan device. We still

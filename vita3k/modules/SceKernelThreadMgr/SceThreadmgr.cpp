@@ -797,14 +797,40 @@ EXPORT(int, _sceKernelWaitExceptionCB) {
 EXPORT(int, _sceKernelWaitLwCond, Ptr<SceKernelLwCondWork> workarea, SceUInt32 *timeout) {
     TRACY_FUNC(_sceKernelWaitLwCond, workarea, timeout);
     const auto cond_id = workarea.get(emuenv.mem)->uid;
-    return condvar_wait(emuenv.kernel, emuenv.mem, export_name, thread_id, cond_id, timeout, SyncWeight::Light);
+    const uint32_t timeout_before = timeout ? *timeout : 0;
+    const int result = condvar_wait(
+        emuenv.kernel, emuenv.mem, export_name, thread_id,
+        cond_id, timeout, SyncWeight::Light);
+    if (result != 0) {
+        LOG_DEBUG(
+            "[VS-KERNEL-SYNC] op=WaitLwCond tid={} cond={} timeout_before={} timeout_after={} result={}",
+            thread_id,
+            cond_id,
+            timeout_before,
+            timeout ? *timeout : 0,
+            result);
+    }
+    return result;
 }
 
 EXPORT(SceInt32, _sceKernelWaitLwCondCB, Ptr<SceKernelLwCondWork> pWork, SceUInt32 *pTimeout) {
     TRACY_FUNC(_sceKernelWaitLwCondCB, pWork, pTimeout);
     process_callbacks(emuenv.kernel, thread_id);
     const auto cond_id = pWork.get(emuenv.mem)->uid;
-    return condvar_wait(emuenv.kernel, emuenv.mem, export_name, thread_id, cond_id, pTimeout, SyncWeight::Light);
+    const uint32_t timeout_before = pTimeout ? *pTimeout : 0;
+    const int result = condvar_wait(
+        emuenv.kernel, emuenv.mem, export_name, thread_id,
+        cond_id, pTimeout, SyncWeight::Light);
+    if (result != 0) {
+        LOG_DEBUG(
+            "[VS-KERNEL-SYNC] op=WaitLwCondCB tid={} cond={} timeout_before={} timeout_after={} result={}",
+            thread_id,
+            cond_id,
+            timeout_before,
+            pTimeout ? *pTimeout : 0,
+            result);
+    }
+    return result;
 }
 
 EXPORT(int, _sceKernelWaitMultipleEvents) {

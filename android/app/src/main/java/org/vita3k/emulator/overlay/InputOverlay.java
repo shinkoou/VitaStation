@@ -38,8 +38,12 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
   private final static int OVERLAY_MASK_UTILITY =
           OVERLAY_MASK_TOUCH_SCREEN_SWITCH | OVERLAY_MASK_HIDE_TOGGLE;
 
-  // wait 10 seconds without inputs before hiding
+  // VitaStation Touch UI 2.0 fades controls before the existing auto-hide.
+  private final static int OVERLAY_TIME_BEFORE_DIM_MS = 1500;
   private final static int OVERLAY_TIME_BEFORE_HIDE = 10;
+  private final static float OVERLAY_ACTIVE_ALPHA = 0.82f;
+  private final static float OVERLAY_IDLE_ALPHA = 0.38f;
+  private final static int OVERLAY_HIT_SLOP_DP = 12;
 
   private final Set<InputOverlayDrawableButton> overlayButtons = new HashSet<>();
   private final Set<InputOverlayDrawableDpad> overlayDpads = new HashSet<>();
@@ -48,7 +52,7 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     @Override
     public void run() {
       tick();
-      postDelayed(this, 1000);
+      postDelayed(this, 250);
     }
   };
 
@@ -62,6 +66,7 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
   private InputOverlayDrawableJoystick mJoystickBeingConfigured;
   private float mScale = 1.0f;
   private int mOpacity = 100;
+  private boolean mOverlayDimmed = false;
   private OverlayLayout mLayout;
 
   // last Time the screen was touched
@@ -129,7 +134,7 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
 
   private void startHideTimer() {
     removeCallbacks(mHideOverlayTicker);
-    postDelayed(mHideOverlayTicker, 1000);
+    postDelayed(mHideOverlayTicker, 250);
   }
 
   private void stopHideTimer() {
@@ -151,12 +156,44 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     super.onDetachedFromWindow();
   }
 
+  private int resolvedVisualOpacity(boolean dimmed) {
+    final float configured = Math.max(0f, Math.min(1f, mOpacity / 100f));
+    final float factor = isInEditMode()
+            ? 1.0f
+            : (dimmed ? OVERLAY_IDLE_ALPHA : OVERLAY_ACTIVE_ALPHA);
+    return Math.max(0, Math.min(255, Math.round(255f * configured * factor)));
+  }
+
+  private void applyVisualOpacity(boolean dimmed) {
+    mOverlayDimmed = dimmed;
+    final int alpha = resolvedVisualOpacity(dimmed);
+
+    for (InputOverlayDrawableButton button : overlayButtons)
+      button.setOpacity(alpha);
+    for (InputOverlayDrawableDpad dpad : overlayDpads)
+      dpad.setOpacity(alpha);
+    for (InputOverlayDrawableJoystick joystick : overlayJoysticks)
+      joystick.setOpacity(alpha);
+
+    invalidate();
+  }
+
+  private boolean hitContains(Rect visualBounds, float x, float y) {
+    Rect hitBounds = new Rect(visualBounds);
+    final int slop = Math.round(
+            OVERLAY_HIT_SLOP_DP * getResources().getDisplayMetrics().density);
+    hitBounds.inset(-slop, -slop);
+    return hitBounds.contains((int)x, (int)y);
+  }
+
   private void resetHideTimer(){
     if(!mShowingOverlay)
       invalidate();
 
     mShowingOverlay = true;
     mlastTouchTime = System.currentTimeMillis();
+    if (mOverlayDimmed)
+      applyVisualOpacity(false);
   }
 
   public void tick(){
@@ -164,7 +201,12 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
       return;
 
     long current_time = System.currentTimeMillis();
-    if (current_time - mlastTouchTime >= OVERLAY_TIME_BEFORE_HIDE * 1000) {
+    long idle_ms = current_time - mlastTouchTime;
+
+    if (!mOverlayDimmed && idle_ms >= OVERLAY_TIME_BEFORE_DIM_MS)
+      applyVisualOpacity(true);
+
+    if (idle_ms >= OVERLAY_TIME_BEFORE_HIDE * 1000L) {
       mShowingOverlay = false;
       invalidate();
     }
@@ -285,8 +327,10 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
         case MotionEvent.ACTION_DOWN:
         case MotionEvent.ACTION_POINTER_DOWN:
           // If a pointer enters the bounds of a button, press that button.
-          if (button.getBounds()
-                  .contains((int) event.getX(pointerIndex), (int) event.getY(pointerIndex)))
+          if (hitContains(
+                  button.getBounds(),
+                  event.getX(pointerIndex),
+                  event.getY(pointerIndex)))
           {
             button.setPressedState(true);
             button.setTrackId(event.getPointerId(pointerIndex));
@@ -328,8 +372,10 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
           case MotionEvent.ACTION_DOWN:
           case MotionEvent.ACTION_POINTER_DOWN:
             // If a pointer enters the bounds of a button, press that button.
-            if (dpad.getBounds()
-                    .contains((int) event.getX(pointerIndex), (int) event.getY(pointerIndex)))
+            if (hitContains(
+                    dpad.getBounds(),
+                    event.getX(pointerIndex),
+                    event.getY(pointerIndex)))
             {
               dpad.setTrackId(event.getPointerId(pointerIndex));
               concerned = true;
@@ -647,7 +693,12 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     LayoutBounds layoutBounds = resolveLayoutBounds();
     addVitaOverlayControls(layoutBounds, mLayout);
 
-    invalidate();
+    final int joystickHitSlop = Math.round(
+            OVERLAY_HIT_SLOP_DP * getResources().getDisplayMetrics().density);
+    for (InputOverlayDrawableJoystick joystick : overlayJoysticks)
+      joystick.setHitSlop(joystickHitSlop);
+
+    applyVisualOpacity(mOverlayDimmed);
   }
 
   public void resetButtonPlacement()
@@ -665,7 +716,7 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
   public void setOpacity(int opacity){
     if (opacity != mOpacity){
       mOpacity = opacity;
-      refreshControls();
+      applyVisualOpacity(mOverlayDimmed);
     }
   }
 
@@ -877,6 +928,10 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     if (mIsInEditMode) {
       mHideOverlayButtons = false;
       mShowingOverlay = true;
+      applyVisualOpacity(false);
+    } else {
+      resetHideTimer();
+      applyVisualOpacity(false);
     }
   }
 

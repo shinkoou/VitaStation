@@ -32,6 +32,7 @@ public final class InputOverlayDrawableJoystick
   private Rect mVirtBounds;
   private Rect mOrigBounds;
   private int mOpacity;
+  private int mHitSlop = 0;
   private final BitmapDrawable mOuterBitmap;
   private final BitmapDrawable mDefaultStateInnerBitmap;
   private final BitmapDrawable mPressedStateInnerBitmap;
@@ -106,7 +107,9 @@ public final class InputOverlayDrawableJoystick
     {
       case MotionEvent.ACTION_DOWN:
       case MotionEvent.ACTION_POINTER_DOWN:
-        if (getBounds().contains((int) event.getX(pointerIndex), (int) event.getY(pointerIndex)))
+        Rect hitBounds = new Rect(getBounds());
+        hitBounds.inset(-mHitSlop, -mHitSlop);
+        if (hitBounds.contains((int) event.getX(pointerIndex), (int) event.getY(pointerIndex)))
         {
           concerned = true;
           mPressedState = true;
@@ -276,6 +279,11 @@ public final class InputOverlayDrawableJoystick
   public void setBounds(Rect bounds)
   {
     mOuterBitmap.setBounds(bounds);
+  }
+
+  public void setHitSlop(int hitSlop)
+  {
+    mHitSlop = Math.max(0, hitSlop);
   }
 
   public void setOpacity(int value)

@@ -56,8 +56,9 @@ internal fun OverlayEditorPalette(
 
         Surface(
             modifier = Modifier
-                .align(Alignment.Center)
+                .align(Alignment.BottomCenter)
                 .offset { IntOffset(offsetX, offsetY) }
+                .padding(bottom = 18.dp)
                 .widthIn(min = 220.dp, max = 280.dp)
                 .onSizeChanged { panelSize = it }
                 .pointerInput(maxOffsetX, maxOffsetY) {

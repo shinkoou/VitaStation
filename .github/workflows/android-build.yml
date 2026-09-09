@@ -1,4 +1,4 @@
-name: VitaStation Android APK - Alpha 4 FIX2 R1
+name: VitaStation Android APK - Alpha 4 FIX3 Stage A
 
 on:
   workflow_dispatch:
@@ -17,7 +17,7 @@ env:
 
 jobs:
   android-build:
-    name: Build VitaStation v0.3.0 Alpha 4 FIX2 R1
+    name: Build VitaStation v0.3.0 Alpha 4 FIX3 Stage A
     runs-on: ubuntu-latest
 
     steps:
@@ -27,104 +27,176 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Apply Alpha 4 FIX2 payload + repair Gamepad Kotlin
+      - name: Apply FIX3 Stage A - stable FrameGen, GPU HUD and Touch UI
         shell: bash
         run: |
           set -euo pipefail
 
-          # Recover the exact FIX2 payload from the immutable Run #36 commit.
-          # fetch-depth: 0 above guarantees the commit is available locally.
-          ORIGINAL_FIX2_COMMIT="54a03697bb76f86fb7e1f1debe2c36b77fbb857f"
-          git cat-file -e "${ORIGINAL_FIX2_COMMIT}^{commit}"
-          git show "${ORIGINAL_FIX2_COMMIT}:.github/workflows/android-build.yml" \
-            > /tmp/vs-original-fix2-workflow.yml
+          STABLE_FG_COMMIT="1198f481ed25c932d269ad97525d2217c511bd9a"
+          FG_PATH="vita3k/renderer/src/vulkan/frame_generation.cpp"
+
+          git cat-file -e "${STABLE_FG_COMMIT}^{commit}"
+          git show "${STABLE_FG_COMMIT}:${FG_PATH}" > "${FG_PATH}"
 
           python3 - <<'PY'
-          import base64
-          import gzip
+          from pathlib import Path
           import re
-          from pathlib import Path
 
-          source_workflow = Path("/tmp/vs-original-fix2-workflow.yml")
-          text = source_workflow.read_text(encoding="utf-8")
-          match = re.search(
-              r"printf '%s' '([A-Za-z0-9+/=]+)' "
-              r"\| base64 --decode \| gzip --decompress "
-              r"> /tmp/vs-alpha4-fix2\.py",
-              text,
-          )
-          if not match:
-              raise SystemExit(
-                  "::error::Could not locate the embedded Alpha 4 FIX2 payload "
-                  "inside android-build.yml."
-              )
+          gradle = Path('android/app/build.gradle')
+          text = gradle.read_text(encoding='utf-8')
+          text, n1 = re.subn(r'versionCode = \d+', 'versionCode = 42', text, count=1)
+          text, n2 = re.subn(r'versionName = "[^"]+"', 'versionName = "0.3.0-alpha4-fix3a"', text, count=1)
+          if n1 != 1 or n2 != 1:
+              raise SystemExit('::error::Could not update FIX3 Stage A version metadata')
+          gradle.write_text(text, encoding='utf-8')
 
-          payload = base64.b64decode(match.group(1), validate=True)
-          script = gzip.decompress(payload)
-          Path("/tmp/vs-alpha4-fix2.py").write_bytes(script)
+          hud = Path('android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/PerformanceHudView.java')
+          text = hud.read_text(encoding='utf-8')
+          pattern = re.compile(r'    private Float readGpuUsage\(\) \{.*?\n    \}\n\n    private void logGpuMetric', re.S)
+          replacement = r'''    private Float readGpuUsage() {
+              Float zeroCandidate = null;
+              String zeroSource = null;
 
-          print(f"Recovered FIX2 payload: {len(script)} bytes")
-          PY
+              // VitaStation FIX3: query Qualcomm KGSL gpubusy first.
+              try {
+                  final String source = "/sys/class/kgsl/kgsl-3d0/gpubusy";
+                  String text = readText(source);
+                  if (text != null) {
+                      String[] parts = text.trim().split("\\s+");
+                      if (parts.length >= 2) {
+                          float busy = Float.parseFloat(parts[0]);
+                          float total = Float.parseFloat(parts[1]);
+                          if (total > 0f) {
+                              float value = clamp((busy / total) * 100f);
+                              if (value > 0.1f) {
+                                  logGpuMetric(source, "OK", value);
+                                  return value;
+                              }
+                              zeroCandidate = value;
+                              zeroSource = source;
+                          }
+                      }
+                  }
+              } catch (Throwable ignored) {
+              }
 
-          python3 -m py_compile /tmp/vs-alpha4-fix2.py
-          python3 /tmp/vs-alpha4-fix2.py
+              for (String path : new String[]{
+                      "/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage",
+                      "/sys/class/kgsl/kgsl-3d0/devfreq/gpu_load",
+                      "/sys/class/kgsl/kgsl-3d0/devfreq/load",
+                      "/sys/class/kgsl/kgsl-3d0/devfreq/utilization",
+                      "/sys/class/kgsl/kgsl-3d0/devfreq/busy_percent"}) {
+                  Float value = readSinglePercent(path);
+                  if (value != null) {
+                      if (value > 0.1f) {
+                          logGpuMetric(path, "OK", value);
+                          return value;
+                      }
+                      if (zeroCandidate == null) {
+                          zeroCandidate = value;
+                          zeroSource = path;
+                      }
+                  }
+              }
 
-          # FIX2-R1:
-          # The payload generated invalid Kotlin:
-          #   name="${device.name.orEmpty()}"
-          # inside a normal quoted Kotlin string.
-          # Remove only those inner quotes and leave the rest of the FIX2 intact.
-          python3 - <<'PY'
-          from pathlib import Path
+              try {
+                  File devfreq = new File("/sys/class/devfreq");
+                  File[] devices = devfreq.listFiles();
+                  if (devices != null) {
+                      for (File device : devices) {
+                          String descriptor = device.getName().toLowerCase(Locale.ROOT);
+                          try {
+                              descriptor += " " + device.getCanonicalPath().toLowerCase(Locale.ROOT);
+                          } catch (Throwable ignored) {
+                          }
 
-          path = Path(
-              "android/app/src/main/java/org/vita3k/emulator/InputDeviceUtils.kt"
-          )
-          text = path.read_text(encoding="utf-8")
+                          if (!descriptor.contains("gpu")
+                                  && !descriptor.contains("mali")
+                                  && !descriptor.contains("kgsl")
+                                  && !descriptor.contains("3d0")) {
+                              continue;
+                          }
 
-          broken = 'name="${device.name.orEmpty()}" '
-          fixed = 'name=${device.name.orEmpty()} '
+                          for (String leaf : new String[]{"load", "utilization", "busy_percent", "gpu_load"}) {
+                              String path = new File(device, leaf).getAbsolutePath();
+                              Float value = readSinglePercent(path);
+                              if (value != null) {
+                                  if (value > 0.1f) {
+                                      logGpuMetric(path, "OK", value);
+                                      return value;
+                                  }
+                                  if (zeroCandidate == null) {
+                                      zeroCandidate = value;
+                                      zeroSource = path;
+                                  }
+                              }
+                          }
+                      }
+                  }
+              } catch (Throwable ignored) {
+              }
 
-          count = text.count(broken)
+              if (zeroCandidate != null) {
+                  logGpuMetric(zeroSource == null ? "zero-candidate" : zeroSource, "ZERO", zeroCandidate);
+                  return zeroCandidate;
+              }
+
+              logGpuMetric("none", "UNAVAILABLE", null);
+              return null;
+          }
+
+          private void logGpuMetric'''
+          text, count = pattern.subn(replacement, text, count=1)
           if count != 1:
-              raise SystemExit(
-                  f"::error::Expected exactly one malformed VS-PAD name field, "
-                  f"found {count}. Payload/source may have changed."
-              )
+              raise SystemExit('::error::Could not patch PerformanceHudView.readGpuUsage')
+          hud.write_text(text, encoding='utf-8')
 
-          text = text.replace(broken, fixed, 1)
-          path.write_text(text, encoding="utf-8")
+          overlay = Path('android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java')
+          text = overlay.read_text(encoding='utf-8')
+          text = text.replace('VitaStation Touch UI 2.1: smaller art, generous hitboxes and a neon',
+                              'VitaStation Touch UI 3.0 Stage A: compact electric-blue art, generous hitboxes and a')
+          text = text.replace('private final static float OVERLAY_ACTIVE_ALPHA = 0.72f;',
+                              'private final static float OVERLAY_ACTIVE_ALPHA = 0.64f; // [VS-TOUCH-UI3]')
+          text = text.replace('private final static float OVERLAY_IDLE_ALPHA = 0.24f;',
+                              'private final static float OVERLAY_IDLE_ALPHA = 0.18f;')
+          text = text.replace('private final static int OVERLAY_HIT_SLOP_DP = 16;',
+                              'private final static int OVERLAY_HIT_SLOP_DP = 20;')
+          text = text.replace('private final static int VITASTATION_CYAN = Color.rgb(61, 220, 255);',
+                              'private final static int VITASTATION_CYAN = Color.rgb(41, 182, 255);')
 
-          print("FIX2-R1: repaired InputDeviceUtils.kt VS-PAD diagnostic string.")
+          tint_pattern = re.compile(r'  private static int tintForControl\(int legacyId\)\n  \{.*?\n  \}\n\n  private static Bitmap tintBitmap', re.S)
+          tint_replacement = '''  private static int tintForControl(int legacyId)
+          {
+            // Touch UI 3.0 Stage A uses one electric-blue accent.
+            return VITASTATION_CYAN;
+          }
+
+          private static Bitmap tintBitmap'''
+          text, tint_count = tint_pattern.subn(tint_replacement, text, count=1)
+          if tint_count != 1:
+              raise SystemExit('::error::Could not patch Touch UI tint policy')
+
+          text = text.replace('float scale = 0.13f;', 'float scale = 0.115f;', 1)
+          text = text.replace('scale = 0.20f;', 'scale = 0.17f;', 1)
+          text = text.replace('scale = 0.09f;', 'scale = 0.075f;', 1)
+          text = text.replace('float scale = 0.29f;', 'float scale = 0.245f;', 1)
+          text = text.replace('float scale = 0.235f;', 'float scale = 0.205f;', 1)
+          overlay.write_text(text, encoding='utf-8')
           PY
-
-          # Fail early if the exact syntax bug is still present.
-          grep -Fq 'name=${device.name.orEmpty()}' \
-            android/app/src/main/java/org/vita3k/emulator/InputDeviceUtils.kt
-
-          if grep -Fq 'name="${device.name.orEmpty()}"' \
-            android/app/src/main/java/org/vita3k/emulator/InputDeviceUtils.kt; then
-            echo "::error::Broken VS-PAD Kotlin quoting is still present."
-            exit 1
-          fi
 
           git diff --check
-          grep -q 'versionCode = 41' android/app/build.gradle
-          grep -q 'versionName = "0.3.0-alpha4"' android/app/build.gradle
-          grep -q '\[VS-TYPELESS-HD-DEFERRED\]' vita3k/renderer/src/vulkan/surface_cache.cpp
-          grep -q 'kEnableHdTypelessExperimental = false' vita3k/renderer/src/vulkan/surface_cache.cpp
-          grep -q 'is_same_image || unresolved_scene_write' vita3k/renderer/src/vulkan/surface_cache.cpp
-          grep -q '\[VS-FG-SOFT-RESET\]' vita3k/renderer/src/vulkan/frame_generation.cpp
-          grep -q '\[VS-FG-TRANSITION\]' vita3k/renderer/src/vulkan/frame_generation.cpp
-          grep -q '\[VS-FG-FPS-GATE\]' vita3k/renderer/src/vulkan/frame_generation.cpp
-          ! grep -q 'reset_lsfg_context' vita3k/renderer/src/vulkan/frame_generation.cpp
+
+          grep -q 'versionCode = 42' android/app/build.gradle
+          grep -q 'versionName = "0.3.0-alpha4-fix3a"' android/app/build.gradle
+          grep -q '#include <lsfg_3_1p.hpp>' vita3k/renderer/src/vulkan/frame_generation.cpp
+          grep -q 'kWarmupFrames = 60' vita3k/renderer/src/vulkan/frame_generation.cpp
+          ! grep -q '\[VS-FG-TRANSITION\]' vita3k/renderer/src/vulkan/frame_generation.cpp
+          ! grep -q '\[VS-FG-FPS-GATE\]' vita3k/renderer/src/vulkan/frame_generation.cpp
           grep -q '\[VS-KERNEL-SYNC-FIX\]' vita3k/kernel/src/sync_primitives.cpp
           grep -q 'condvar->uid = uid' vita3k/kernel/src/sync_primitives.cpp
-          grep -q 'VitaStation Touch UI 2.1' android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java
-          grep -q 'VITASTATION_CYAN' android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java
-          grep -q '\[VS-PAD\]' android/app/src/main/java/org/vita3k/emulator/InputDeviceUtils.kt
-          grep -q '\[VS-PAD-AXIS\]' android/app/src/main/java/org/vita3k/emulator/Emulator.java
-          grep -q '\[VS-PAD-KEY\]' android/app/src/main/java/org/vita3k/emulator/Emulator.java
+          grep -q 'kEnableHdTypelessExperimental = false' vita3k/renderer/src/vulkan/surface_cache.cpp
+          grep -q '\[VS-TOUCH-UI3\]' android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java
+          grep -q 'source = "/sys/class/kgsl/kgsl-3d0/gpubusy"' android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/PerformanceHudView.java
 
       - name: Set up Java 17
         uses: actions/setup-java@v5
@@ -144,7 +216,7 @@ jobs:
         shell: bash
         run: bash ./.ci/setup-android.sh
 
-      - name: Release resource and Kotlin preflight
+      - name: Release resource and JVM preflight
         shell: bash
         run: |
           set -euo pipefail
@@ -167,7 +239,6 @@ jobs:
           KEY_PASSWORD: ${{ secrets.VITASTATION_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-
           for name in KEYSTORE_B64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
             if [ -z "${!name:-}" ]; then
               echo "::error::Missing permanent signing secret: $name"
@@ -191,18 +262,14 @@ jobs:
               | tr -d ':' \
               | tr '[:upper:]' '[:lower:]'
           )"
-
-          if [ "$actual_fingerprint" != "$VITASTATION_SIGNING_CERT_SHA256" ]; then
-            echo "::error::Permanent signing certificate fingerprint mismatch."
-            exit 1
-          fi
+          test "$actual_fingerprint" = "$VITASTATION_SIGNING_CERT_SHA256"
 
           echo "SIGNING_STORE_PATH=$SIGNING_FILE" >> "$GITHUB_ENV"
           echo "SIGNING_STORE_PASSWORD=$STORE_PASSWORD" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build VitaStation v0.3.0 Alpha 4 FIX2 R1 signed APK
+      - name: Build signed VitaStation FIX3 Stage A APK
         shell: bash
         run: |
           set -euo pipefail
@@ -214,10 +281,7 @@ jobs:
           set -euo pipefail
           APK="artifacts/vitastation-android/app.apk"
           test -f "$APK"
-
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
-          test -x "$APKSIGNER"
-
           "$APKSIGNER" verify --verbose --print-certs "$APK" \
             | tee "$RUNNER_TEMP/vitastation-apksigner.txt"
 
@@ -227,34 +291,25 @@ jobs:
               | tr -d ':' \
               | tr '[:upper:]' '[:lower:]'
           )"
+          test "$actual" = "$VITASTATION_SIGNING_CERT_SHA256"
 
-          if [ "$actual" != "$VITASTATION_SIGNING_CERT_SHA256" ]; then
-            echo "::error::APK permanent signature mismatch."
-            exit 1
-          fi
-
-      - name: Persist Alpha 4 FIX2 R1 source only after green signed build
+      - name: Persist FIX3 Stage A source only after green signed build
         shell: bash
         run: |
           set -euo pipefail
-
           git config user.name "VitaStation Bot"
           git config user.email "actions@users.noreply.github.com"
 
           git add \
             android/app/build.gradle \
-            android/app/src/main/java/org/vita3k/emulator/Emulator.java \
-            android/app/src/main/java/org/vita3k/emulator/InputDeviceUtils.kt \
             android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java \
-            android/app/src/main/res/values/integers.xml \
-            vita3k/kernel/src/sync_primitives.cpp \
-            vita3k/renderer/src/vulkan/frame_generation.cpp \
-            vita3k/renderer/src/vulkan/surface_cache.cpp
+            android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/PerformanceHudView.java \
+            vita3k/renderer/src/vulkan/frame_generation.cpp
 
           if git diff --cached --quiet; then
-            echo "Alpha 4 FIX2 R1 source already persisted."
+            echo "FIX3 Stage A source already persisted."
           else
-            git commit -m "VitaStation v0.3.0 Alpha 4 FIX2 R1: repair pad diagnostics [skip ci]"
+            git commit -m "VitaStation v0.3.0 Alpha4 FIX3 Stage A: stable FrameGen baseline [skip ci]"
             git push origin HEAD:main
           fi
 
@@ -263,14 +318,14 @@ jobs:
         run: |
           set -euo pipefail
           SRC="artifacts/vitastation-android/app.apk"
-          DST="artifacts/vitastation-android/VitaStation-v0.3.0-Alpha4-FIX2-R1-Recovery-FG221-Kernel-TouchUI21-PadDiag-Signed.apk"
+          DST="artifacts/vitastation-android/VitaStation-v0.3.0-Alpha4-FIX3A-StableFrameGen-GPUHUD-TouchUI3-Signed.apk"
           test -f "$SRC"
           mv "$SRC" "$DST"
           ls -lh "$DST"
 
-      - name: Upload VitaStation v0.3.0 Alpha 4 FIX2 R1 APK
+      - name: Upload VitaStation FIX3 Stage A APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.3.0-Alpha4-FIX2-R1-Recovery-FG221-Kernel-TouchUI21-PadDiag-Signed-Android
-          path: artifacts/vitastation-android/VitaStation-v0.3.0-Alpha4-FIX2-R1-Recovery-FG221-Kernel-TouchUI21-PadDiag-Signed.apk
+          name: VitaStation-v0.3.0-Alpha4-FIX3A-StableFrameGen-GPUHUD-TouchUI3-Signed-Android
+          path: artifacts/vitastation-android/VitaStation-v0.3.0-Alpha4-FIX3A-StableFrameGen-GPUHUD-TouchUI3-Signed.apk
           if-no-files-found: error

@@ -153,81 +153,98 @@ public final class PerformanceHudView extends View {
     }
 
     private Float readGpuUsage() {
-        for (String path : new String[]{
-                "/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage",
-                "/sys/class/kgsl/kgsl-3d0/devfreq/gpu_load",
-                "/sys/class/kgsl/kgsl-3d0/devfreq/load",
-                "/sys/class/kgsl/kgsl-3d0/devfreq/utilization",
-                "/sys/class/kgsl/kgsl-3d0/devfreq/busy_percent"}) {
-            Float value = readSinglePercent(path);
-            if (value != null) {
+    Float zeroCandidate = null;
+    String zeroSource = null;
+
+    // VitaStation FIX3: query Qualcomm KGSL gpubusy first.
+    try {
+        final String source = "/sys/class/kgsl/kgsl-3d0/gpubusy";
+        String text = readText(source);
+        if (text != null) {
+            String[] parts = text.trim().split("\s+");
+            if (parts.length >= 2) {
+                float busy = Float.parseFloat(parts[0]);
+                float total = Float.parseFloat(parts[1]);
+                if (total > 0f) {
+                    float value = clamp((busy / total) * 100f);
+                    if (value > 0.1f) {
+                        logGpuMetric(source, "OK", value);
+                        return value;
+                    }
+                    zeroCandidate = value;
+                    zeroSource = source;
+                }
+            }
+        }
+    } catch (Throwable ignored) {
+    }
+
+    for (String path : new String[]{
+            "/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage",
+            "/sys/class/kgsl/kgsl-3d0/devfreq/gpu_load",
+            "/sys/class/kgsl/kgsl-3d0/devfreq/load",
+            "/sys/class/kgsl/kgsl-3d0/devfreq/utilization",
+            "/sys/class/kgsl/kgsl-3d0/devfreq/busy_percent"}) {
+        Float value = readSinglePercent(path);
+        if (value != null) {
+            if (value > 0.1f) {
                 logGpuMetric(path, "OK", value);
                 return value;
             }
-        }
-
-        try {
-            String text = readText("/sys/class/kgsl/kgsl-3d0/gpubusy");
-            if (text != null) {
-                String[] parts = text.trim().split("\s+");
-                if (parts.length >= 2) {
-                    float busy = Float.parseFloat(parts[0]);
-                    float total = Float.parseFloat(parts[1]);
-                    if (total > 0f) {
-                        float value = clamp((busy / total) * 100f);
-                        logGpuMetric(
-                                "/sys/class/kgsl/kgsl-3d0/gpubusy",
-                                "OK",
-                                value);
-                        return value;
-                    }
-                }
+            if (zeroCandidate == null) {
+                zeroCandidate = value;
+                zeroSource = path;
             }
-        } catch (Throwable ignored) {
         }
+    }
 
-        try {
-            File devfreq = new File("/sys/class/devfreq");
-            File[] devices = devfreq.listFiles();
-            if (devices != null) {
-                for (File device : devices) {
-                    String descriptor = device.getName().toLowerCase(Locale.ROOT);
-                    try {
-                        descriptor += " "
-                                + device.getCanonicalPath()
-                                .toLowerCase(Locale.ROOT);
-                    } catch (Throwable ignored) {
-                    }
+    try {
+        File devfreq = new File("/sys/class/devfreq");
+        File[] devices = devfreq.listFiles();
+        if (devices != null) {
+            for (File device : devices) {
+                String descriptor = device.getName().toLowerCase(Locale.ROOT);
+                try {
+                    descriptor += " " + device.getCanonicalPath().toLowerCase(Locale.ROOT);
+                } catch (Throwable ignored) {
+                }
 
-                    if (!descriptor.contains("gpu")
-                            && !descriptor.contains("mali")
-                            && !descriptor.contains("kgsl")
-                            && !descriptor.contains("3d0")) {
-                        continue;
-                    }
+                if (!descriptor.contains("gpu")
+                        && !descriptor.contains("mali")
+                        && !descriptor.contains("kgsl")
+                        && !descriptor.contains("3d0")) {
+                    continue;
+                }
 
-                    for (String leaf : new String[]{
-                            "load",
-                            "utilization",
-                            "busy_percent",
-                            "gpu_load"}) {
-                        String path = new File(device, leaf).getAbsolutePath();
-                        Float value = readSinglePercent(path);
-                        if (value != null) {
+                for (String leaf : new String[]{"load", "utilization", "busy_percent", "gpu_load"}) {
+                    String path = new File(device, leaf).getAbsolutePath();
+                    Float value = readSinglePercent(path);
+                    if (value != null) {
+                        if (value > 0.1f) {
                             logGpuMetric(path, "OK", value);
                             return value;
+                        }
+                        if (zeroCandidate == null) {
+                            zeroCandidate = value;
+                            zeroSource = path;
                         }
                     }
                 }
             }
-        } catch (Throwable ignored) {
         }
-
-        logGpuMetric("none", "UNAVAILABLE", null);
-        return null;
+    } catch (Throwable ignored) {
     }
 
-    private void logGpuMetric(String source, String status, Float value) {
+    if (zeroCandidate != null) {
+        logGpuMetric(zeroSource == null ? "zero-candidate" : zeroSource, "ZERO", zeroCandidate);
+        return zeroCandidate;
+    }
+
+    logGpuMetric("none", "UNAVAILABLE", null);
+    return null;
+}
+
+private void logGpuMetric(String source, String status, Float value) {
         long now = SystemClock.elapsedRealtime();
         String key = source + "|" + status;
         if (!key.equals(lastGpuDiagnosticKey)

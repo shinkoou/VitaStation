@@ -42,14 +42,14 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
   private final static int OVERLAY_MASK_UTILITY =
           OVERLAY_MASK_TOUCH_SCREEN_SWITCH | OVERLAY_MASK_HIDE_TOGGLE;
 
-  // VitaStation Touch UI 2.1: smaller art, generous hitboxes and a neon
+  // VitaStation Touch UI 3.0 Stage A: compact electric-blue art, generous hitboxes and a
   // accent that fades away when the player is looking at the game.
   private final static int OVERLAY_TIME_BEFORE_DIM_MS = 1500;
   private final static int OVERLAY_TIME_BEFORE_HIDE = 10;
-  private final static float OVERLAY_ACTIVE_ALPHA = 0.72f;
-  private final static float OVERLAY_IDLE_ALPHA = 0.24f;
-  private final static int OVERLAY_HIT_SLOP_DP = 16;
-  private final static int VITASTATION_CYAN = Color.rgb(61, 220, 255);
+  private final static float OVERLAY_ACTIVE_ALPHA = 0.64f; // [VS-TOUCH-UI3]
+  private final static float OVERLAY_IDLE_ALPHA = 0.18f;
+  private final static int OVERLAY_HIT_SLOP_DP = 20;
+  private final static int VITASTATION_CYAN = Color.rgb(41, 182, 255);
   private final static int VITASTATION_VIOLET = Color.rgb(124, 92, 255);
   private final static int VITASTATION_NEUTRAL = Color.rgb(220, 235, 255);
 
@@ -106,34 +106,12 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
   }
 
   private static int tintForControl(int legacyId)
-  {
-    switch (legacyId)
-    {
-      case ButtonType.DPAD_UP:
-      case ButtonType.STICK_LEFT:
-      case ButtonType.TRIGGER_L:
-      case ButtonType.TRIGGER_L2:
-      case ButtonType.TRIGGER_L3:
-      case ButtonType.BUTTON_SELECT:
-        return VITASTATION_CYAN;
+{
+  // Touch UI 3.0 Stage A uses one electric-blue accent.
+  return VITASTATION_CYAN;
+}
 
-      case ButtonType.STICK_RIGHT:
-      case ButtonType.TRIGGER_R:
-      case ButtonType.TRIGGER_R2:
-      case ButtonType.TRIGGER_R3:
-      case ButtonType.BUTTON_START:
-      case ButtonType.BUTTON_CROSS:
-      case ButtonType.BUTTON_CIRCLE:
-      case ButtonType.BUTTON_SQUARE:
-      case ButtonType.BUTTON_TRIANGLE:
-        return VITASTATION_VIOLET;
-
-      default:
-        return VITASTATION_NEUTRAL;
-    }
-  }
-
-  private static Bitmap tintBitmap(Bitmap source, int tint)
+private static Bitmap tintBitmap(Bitmap source, int tint)
   {
     if (source == null)
       return null;
@@ -802,7 +780,7 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     final Resources res = context.getResources();
 
     // Decide scale based on button ID and user preference
-    float scale = 0.13f;
+    float scale = 0.115f;
 
     if(legacyId == ButtonType.TRIGGER_L
             || legacyId == ButtonType.TRIGGER_R
@@ -810,11 +788,11 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
             || legacyId == ButtonType.TRIGGER_R2
             || legacyId == ButtonType.BUTTON_START
             || legacyId == ButtonType.BUTTON_SELECT)
-      scale = 0.20f;
+      scale = 0.17f;
     else if(legacyId == ButtonType.BUTTON_TOUCH_SWITCH
             || legacyId == ButtonType.BUTTON_PS
             || legacyId == ButtonType.BUTTON_TOUCH_HIDE)
-      scale = 0.09f;
+      scale = 0.075f;
 
     scale *= globalScale;
 
@@ -880,7 +858,7 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     final Resources res = context.getResources();
 
     // Decide scale based on button ID and user preference
-    float scale = 0.29f;
+    float scale = 0.245f;
 
     scale *= globalScale;
 
@@ -940,7 +918,7 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     final Resources res = context.getResources();
 
     // Decide scale based on user preference
-    float scale = 0.235f;
+    float scale = 0.205f;
     scale *= globalScale;
 
     // Initialize the InputOverlayDrawableJoystick.

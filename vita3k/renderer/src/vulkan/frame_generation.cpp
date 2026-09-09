@@ -11,11 +11,9 @@
 #include <vulkan/vulkan_android.h>
 
 #include <algorithm>
-#include <array>
 #include <atomic>
 #include <cstdint>
 #include <chrono>
-#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -46,188 +44,6 @@ std::atomic<bool> g_active{ false };
 std::atomic<int> g_active_multiplier{ 1 };
 std::mutex g_error_mutex;
 std::string g_last_error;
-
-// VitaStation FrameGen 2.0 scheduler.
-// This is intentionally independent from LSFG internals: the emulator owns the
-// real-frame cadence and can decide when interpolation is safe before invoking
-// the backend.
-struct FrameTimingHistory {
-    static constexpr size_t kCapacity = 120;
-    static constexpr size_t kMinimumSamples = 12;
-    static constexpr double kMinimumRealFps = 18.0;
-    static constexpr double kMaximumRelativeJitter = 0.30;
-
-    std::vector<double> intervals_ms;
-    std::chrono::steady_clock::time_point last_real_frame{};
-    double generation_ema_ms = 0.0;
-    uint32_t cooldown_frames = 0;
-    uint64_t queue_misses = 0;
-    uint64_t generated_frames = 0;
-    uint64_t scene_cuts = 0;
-    uint64_t scene_guard_skips = 0;
-
-    void reset() {
-        intervals_ms.clear();
-        last_real_frame = {};
-        generation_ema_ms = 0.0;
-        cooldown_frames = 0;
-        queue_misses = 0;
-        generated_frames = 0;
-        scene_cuts = 0;
-        scene_guard_skips = 0;
-    }
-
-    double observe_real_frame() {
-        const auto now = std::chrono::steady_clock::now();
-        if (last_real_frame.time_since_epoch().count() == 0) {
-            last_real_frame = now;
-            return 0.0;
-        }
-
-        const double delta_ms = std::chrono::duration<double, std::milli>(now - last_real_frame).count();
-        last_real_frame = now;
-
-        const double avg = average_ms();
-        const bool discontinuity = delta_ms > 250.0
-            || (avg > 0.0 && delta_ms > std::max(80.0, avg * 2.25));
-        if (discontinuity) {
-            intervals_ms.clear();
-            cooldown_frames = std::max<uint32_t>(cooldown_frames, 8);
-            return delta_ms;
-        }
-
-        if (delta_ms >= 2.0 && delta_ms <= 250.0) {
-            intervals_ms.push_back(delta_ms);
-            if (intervals_ms.size() > kCapacity)
-                intervals_ms.erase(intervals_ms.begin());
-        }
-        return delta_ms;
-    }
-
-    double average_ms() const {
-        if (intervals_ms.empty())
-            return 0.0;
-        double sum = 0.0;
-        for (const double value : intervals_ms)
-            sum += value;
-        return sum / static_cast<double>(intervals_ms.size());
-    }
-
-    double jitter_ratio() const {
-        if (intervals_ms.size() < 2)
-            return 1.0;
-        const double avg = average_ms();
-        if (avg <= 0.0)
-            return 1.0;
-        double variance = 0.0;
-        for (const double value : intervals_ms) {
-            const double d = value - avg;
-            variance += d * d;
-        }
-        variance /= static_cast<double>(intervals_ms.size());
-        return std::sqrt(variance) / avg;
-    }
-
-    double real_fps() const {
-        const double avg = average_ms();
-        return avg > 0.0 ? 1000.0 / avg : 0.0;
-    }
-
-    bool eligible() {
-        if (cooldown_frames > 0) {
-            --cooldown_frames;
-            return false;
-        }
-        if (intervals_ms.size() < kMinimumSamples)
-            return false;
-        return real_fps() >= kMinimumRealFps
-            && jitter_ratio() <= kMaximumRelativeJitter;
-    }
-
-    void note_generation(const double generation_ms) {
-        if (generation_ema_ms <= 0.0)
-            generation_ema_ms = generation_ms;
-        else
-            generation_ema_ms = generation_ema_ms * 0.90 + generation_ms * 0.10;
-        ++generated_frames;
-    }
-
-    void note_queue_miss() {
-        ++queue_misses;
-        cooldown_frames = std::max<uint32_t>(cooldown_frames, 2);
-    }
-
-    void note_scene_cut() {
-        ++scene_cuts;
-        ++scene_guard_skips;
-        intervals_ms.clear();
-        cooldown_frames = std::max<uint32_t>(cooldown_frames, 6);
-    }
-};
-
-struct FrameSignature {
-    static constexpr size_t kColumns = 12;
-    static constexpr size_t kRows = 6;
-    std::array<float, kColumns * kRows> luma{};
-    bool valid = false;
-};
-
-struct FrameSignatureDelta {
-    float mean_delta = 0.0f;
-    float changed_fraction = 0.0f;
-};
-
-static float half_to_float(const uint16_t value) {
-    const uint32_t sign = (value >> 15) & 1u;
-    const uint32_t exponent = (value >> 10) & 0x1Fu;
-    const uint32_t fraction = value & 0x3FFu;
-    const float direction = sign ? -1.0f : 1.0f;
-
-    if (exponent == 0) {
-        if (fraction == 0)
-            return sign ? -0.0f : 0.0f;
-        return direction * std::ldexp(static_cast<float>(fraction) / 1024.0f, -14);
-    }
-    if (exponent == 0x1Fu)
-        return 0.0f;
-
-    return direction * std::ldexp(
-        1.0f + static_cast<float>(fraction) / 1024.0f,
-        static_cast<int>(exponent) - 15);
-}
-
-static FrameSignatureDelta compare_signatures(
-    const FrameSignature& current,
-    const FrameSignature& previous) {
-    FrameSignatureDelta delta{};
-    if (!current.valid || !previous.valid)
-        return delta;
-
-    size_t changed = 0;
-    float total = 0.0f;
-    for (size_t i = 0; i < current.luma.size(); ++i) {
-        const float d = std::abs(current.luma[i] - previous.luma[i]);
-        total += d;
-        if (d >= 0.20f)
-            ++changed;
-    }
-    delta.mean_delta = total / static_cast<float>(current.luma.size());
-    delta.changed_fraction = static_cast<float>(changed)
-        / static_cast<float>(current.luma.size());
-    return delta;
-}
-
-static bool is_scene_cut(const FrameSignatureDelta& delta) {
-    return (delta.mean_delta >= 0.24f && delta.changed_fraction >= 0.46f)
-        || (delta.mean_delta >= 0.34f);
-}
-
-static bool is_transition(const FrameSignatureDelta& delta) {
-    // Menus, fades, logos and large UI changes often sit below the hard scene
-    // cut threshold but are still unsafe for optical-flow interpolation.
-    return (delta.mean_delta >= 0.10f && delta.changed_fraction >= 0.22f)
-        || (delta.mean_delta >= 0.18f);
-}
 
 RuntimeSettings runtime_snapshot() {
     std::lock_guard<std::mutex> lock(g_runtime_mutex);
@@ -559,79 +375,10 @@ struct FrameGenerationPresenter::Impl {
     uint64_t frame_index = 0;
     uint64_t lsfg_frame_index = 0;
     uint32_t generation_miss_streak = 0;
-    uint32_t static_frame_streak = 0;
-    bool static_guard_active = false;
-    bool high_fps_guard_active = false;
-    FrameTimingHistory timing;
     std::string library_cache_dir;
 
     static constexpr uint64_t kWarmupFrames = 60;
     static constexpr uint32_t kMissesBeforeHudPause = 2;
-    static constexpr uint32_t kStaticFramesBeforePause = 3;
-    static constexpr double kTemporaryHighRealFpsGate = 55.0;
-    static constexpr float kStaticMeanDelta = 0.012f;
-    static constexpr float kStaticChangedFraction = 0.02f;
-
-    bool scene_probe_supported = true;
-    bool scene_probe_warned = false;
-
-    FrameSignature capture_signature(AhbImage& image) {
-        FrameSignature signature{};
-        if (!scene_probe_supported || !image.ahb)
-            return signature;
-
-        AHardwareBuffer_Desc desc{};
-        AHardwareBuffer_describe(image.ahb, &desc);
-        if (desc.format != AHARDWAREBUFFER_FORMAT_R16G16B16A16_FLOAT
-            || desc.width == 0 || desc.height == 0 || desc.stride == 0) {
-            scene_probe_supported = false;
-            return signature;
-        }
-
-        void* mapped = nullptr;
-        const int lock_result = AHardwareBuffer_lock(
-            image.ahb,
-            AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
-            -1,
-            nullptr,
-            &mapped);
-        if (lock_result != 0 || !mapped) {
-            scene_probe_supported = false;
-            if (!scene_probe_warned) {
-                scene_probe_warned = true;
-                LOG_WARN("[VS-FG] visual scene-cut probe unavailable; keeping timing-only guard");
-            }
-            return signature;
-        }
-
-        const auto* pixels = static_cast<const uint16_t*>(mapped);
-        size_t sample_index = 0;
-        for (size_t row = 0; row < FrameSignature::kRows; ++row) {
-            const uint32_t y = std::min<uint32_t>(
-                desc.height - 1,
-                static_cast<uint32_t>(((row + 1) * desc.height)
-                    / (FrameSignature::kRows + 1)));
-            for (size_t col = 0; col < FrameSignature::kColumns; ++col) {
-                const uint32_t x = std::min<uint32_t>(
-                    desc.width - 1,
-                    static_cast<uint32_t>(((col + 1) * desc.width)
-                        / (FrameSignature::kColumns + 1)));
-                const size_t pixel_offset =
-                    (static_cast<size_t>(y) * desc.stride + x) * 4u;
-
-                const float r = std::max(0.0f, half_to_float(pixels[pixel_offset + 0]));
-                const float g = std::max(0.0f, half_to_float(pixels[pixel_offset + 1]));
-                const float b = std::max(0.0f, half_to_float(pixels[pixel_offset + 2]));
-                const float linear_luma = 0.2126f * r + 0.7152f * g + 0.0722f * b;
-                signature.luma[sample_index++] =
-                    linear_luma / (1.0f + linear_luma);
-            }
-        }
-
-        AHardwareBuffer_unlock(image.ahb, nullptr);
-        signature.valid = sample_index == signature.luma.size();
-        return signature;
-    }
 
     VkDevice device() const {
         return static_cast<VkDevice>(state.device);
@@ -1168,22 +915,6 @@ struct FrameGenerationPresenter::Impl {
         set_last_error(reason);
     }
 
-    void soft_reprime_history(const char* reason, const uint32_t cooldown_frames) {
-        // Do not destroy/recreate LSFG while a game is running. The Alpha4 hard
-        // reset happened on the presentation path and correlated with the
-        // Uncharted boot regression. Instead invalidate VitaStation's input
-        // history, present real frames, then prime LSFG again with fresh input.
-        set_active(false);
-        input_primed = false;
-        lsfg_frame_index = 0;
-        generation_miss_streak = 0;
-        timing.cooldown_frames = std::max(timing.cooldown_frames, cooldown_frames);
-        LOG_INFO(
-            "[VS-FG-SOFT-RESET] reason={} cooldown={} context_preserved=1",
-            reason,
-            cooldown_frames);
-    }
-
     void release_swapchain() {
         set_active(false);
         session_active = false;
@@ -1192,12 +923,6 @@ struct FrameGenerationPresenter::Impl {
         frame_index = 0;
         lsfg_frame_index = 0;
         generation_miss_streak = 0;
-        static_frame_streak = 0;
-        static_guard_active = false;
-        high_fps_guard_active = false;
-        timing.reset();
-        scene_probe_supported = true;
-        scene_probe_warned = false;
 
         if (swapchain == VK_NULL_HANDLE
             && context_id < 0
@@ -1331,10 +1056,6 @@ struct FrameGenerationPresenter::Impl {
             frame_index = 0;
             lsfg_frame_index = 0;
             generation_miss_streak = 0;
-            static_frame_streak = 0;
-            static_guard_active = false;
-            high_fps_guard_active = false;
-            timing.reset();
             set_last_error("");
             // Runtime-active stays false during the startup warm-up. This keeps
             // the HUD from advertising doubled FPS before a generated frame is
@@ -1367,45 +1088,12 @@ struct FrameGenerationPresenter::Impl {
         bool render_ready_consumed = false;
 
         try {
-            timing.observe_real_frame();
-
             // Do not put LSFG in the game's startup path. Shader precompile,
             // DLC/network checks and first-scene boot are timing-sensitive on
             // several Vita titles. During warm-up, present the real frame using
             // the renderer semaphore exactly like the normal Vita3K path.
             if (frame_index + 1 < kWarmupFrames) {
                 set_active(false);
-                ++frame_index;
-                return queue_present(real_image_index, render_ready);
-            }
-
-            // Adaptive 2x: only interpolate when the real-frame cadence is
-            // healthy enough. Loading screens, severe stutter and low base FPS
-            // stay on real frames and re-prime after stability returns.
-            if (!timing.eligible()) {
-                set_active(false);
-                input_primed = false;
-                ++frame_index;
-                return queue_present(real_image_index, render_ready);
-            }
-
-            const double effective_real_fps = timing.real_fps();
-            if (effective_real_fps >= kTemporaryHighRealFpsGate) {
-                if (!high_fps_guard_active) {
-                    high_fps_guard_active = true;
-                    LOG_INFO(
-                        "[VS-FG-FPS-GATE] real_fps={:.1f} threshold={:.1f} -> FG paused until display-aware pacing",
-                        effective_real_fps,
-                        kTemporaryHighRealFpsGate);
-                }
-                set_active(false);
-                input_primed = false;
-                ++frame_index;
-                return queue_present(real_image_index, render_ready);
-            }
-            if (high_fps_guard_active) {
-                high_fps_guard_active = false;
-                soft_reprime_history("HIGH_FPS_EXIT", 2);
                 ++frame_index;
                 return queue_present(real_image_index, render_ready);
             }
@@ -1432,84 +1120,6 @@ struct FrameGenerationPresenter::Impl {
             submit_copy_and_wait(render_ready);
             render_ready_consumed = true;
 
-            AhbImage& previous_input =
-                (lsfg_frame_index % 2 == 0) ? input_1 : input_0;
-            const FrameSignature current_signature = capture_signature(current_input);
-            const FrameSignature previous_signature = capture_signature(previous_input);
-            const FrameSignatureDelta signature_delta =
-                compare_signatures(current_signature, previous_signature);
-
-            if (is_scene_cut(signature_delta)) {
-                timing.note_scene_cut();
-                static_frame_streak = 0;
-                static_guard_active = false;
-                soft_reprime_history("SCENE_CUT", 6);
-                ++frame_index;
-
-                LOG_INFO(
-                    "[VS-FG-SCENE] cut detected: mean_delta={:.3f} changed={:.1f}% cuts={} -> soft re-prime",
-                    signature_delta.mean_delta,
-                    signature_delta.changed_fraction * 100.0f,
-                    timing.scene_cuts);
-
-                return queue_present(real_image_index);
-            }
-
-            if (is_transition(signature_delta)) {
-                ++timing.scene_guard_skips;
-                soft_reprime_history("TRANSITION", 3);
-                ++frame_index;
-                LOG_INFO(
-                    "[VS-FG-TRANSITION] mean_delta={:.3f} changed={:.1f}% -> real frames + re-prime",
-                    signature_delta.mean_delta,
-                    signature_delta.changed_fraction * 100.0f);
-                return queue_present(real_image_index);
-            }
-
-            const bool visually_static =
-                current_signature.valid
-                && previous_signature.valid
-                && signature_delta.mean_delta <= kStaticMeanDelta
-                && signature_delta.changed_fraction <= kStaticChangedFraction;
-
-            if (visually_static) {
-                static_frame_streak = std::min<uint32_t>(
-                    static_frame_streak + 1,
-                    kStaticFramesBeforePause + 8);
-
-                if (static_frame_streak >= kStaticFramesBeforePause) {
-                    if (!static_guard_active) {
-                        static_guard_active = true;
-                        ++timing.scene_guard_skips;
-                        LOG_INFO(
-                            "[VS-FG-STATIC] mean_delta={:.4f} changed={:.2f}% -> real frames only",
-                            signature_delta.mean_delta,
-                            signature_delta.changed_fraction * 100.0f);
-                    }
-
-                    set_active(false);
-                    input_primed = false;
-                    timing.cooldown_frames = std::max<uint32_t>(timing.cooldown_frames, 2);
-                    ++frame_index;
-                    return queue_present(real_image_index);
-                }
-            } else {
-                static_frame_streak = 0;
-
-                if (static_guard_active) {
-                    static_guard_active = false;
-                    soft_reprime_history("STATIC_TO_MOTION", 2);
-                    ++frame_index;
-
-                    LOG_INFO(
-                        "[VS-FG-REPRIME] mean_delta={:.4f} changed={:.2f}% -> real frame prime",
-                        signature_delta.mean_delta,
-                        signature_delta.changed_fraction * 100.0f);
-
-                    return queue_present(real_image_index);
-                }
-            }
-
             // AHardwareBuffer is shared with LSFG's own Vulkan device. We still
             // need the LSFG-side waitIdle for cross-device visibility, but the
             // VitaStation queue itself is no longer stalled with queueWaitIdle.
@@ -1519,7 +1129,6 @@ struct FrameGenerationPresenter::Impl {
             const auto generation_end = std::chrono::steady_clock::now();
             const auto generation_us = std::chrono::duration_cast<std::chrono::microseconds>(
                 generation_end - generation_begin).count();
-            timing.note_generation(static_cast<double>(generation_us) / 1000.0);
 
             ++lsfg_frame_index;
 
@@ -1539,7 +1148,6 @@ struct FrameGenerationPresenter::Impl {
 
             if (acquire_result == VK_NOT_READY || acquire_result == VK_TIMEOUT) {
                 ++generation_miss_streak;
-                timing.note_queue_miss();
                 if (generation_miss_streak >= kMissesBeforeHudPause)
                     set_active(false);
                 ++frame_index;
@@ -1568,13 +1176,8 @@ struct FrameGenerationPresenter::Impl {
 
             if ((frame_index % 120u) == 0u) {
                 LOG_INFO(
-                    "[VS-FG] LSFG 3.1P adaptive-2x: real_fps={:.1f} jitter={:.3f} generation_ema={:.2f}ms queue_misses={} scene_cuts={} guard_skips={} output={}x{} internal={}x{}",
-                    timing.real_fps(),
-                    timing.jitter_ratio(),
-                    timing.generation_ema_ms,
-                    timing.queue_misses,
-                    timing.scene_cuts,
-                    timing.scene_guard_skips,
+                    "VitaStation LSFG 3.1P: generation {} us, output {}x{}, internal {}x{}",
+                    generation_us,
                     extent.width,
                     extent.height,
                     fg_extent.width,

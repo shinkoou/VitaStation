@@ -11,6 +11,7 @@
 #include <vulkan/vulkan_android.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <chrono>
@@ -62,6 +63,8 @@ struct FrameTimingHistory {
     uint32_t cooldown_frames = 0;
     uint64_t queue_misses = 0;
     uint64_t generated_frames = 0;
+    uint64_t scene_cuts = 0;
+    uint64_t scene_guard_skips = 0;
 
     void reset() {
         intervals_ms.clear();
@@ -70,6 +73,8 @@ struct FrameTimingHistory {
         cooldown_frames = 0;
         queue_misses = 0;
         generated_frames = 0;
+        scene_cuts = 0;
+        scene_guard_skips = 0;
     }
 
     double observe_real_frame() {
@@ -151,7 +156,71 @@ struct FrameTimingHistory {
         ++queue_misses;
         cooldown_frames = std::max<uint32_t>(cooldown_frames, 2);
     }
+
+    void note_scene_cut() {
+        ++scene_cuts;
+        ++scene_guard_skips;
+        intervals_ms.clear();
+        cooldown_frames = std::max<uint32_t>(cooldown_frames, 6);
+    }
 };
+
+struct FrameSignature {
+    static constexpr size_t kColumns = 12;
+    static constexpr size_t kRows = 6;
+    std::array<float, kColumns * kRows> luma{};
+    bool valid = false;
+};
+
+struct FrameSignatureDelta {
+    float mean_delta = 0.0f;
+    float changed_fraction = 0.0f;
+};
+
+static float half_to_float(const uint16_t value) {
+    const uint32_t sign = (value >> 15) & 1u;
+    const uint32_t exponent = (value >> 10) & 0x1Fu;
+    const uint32_t fraction = value & 0x3FFu;
+    const float direction = sign ? -1.0f : 1.0f;
+
+    if (exponent == 0) {
+        if (fraction == 0)
+            return sign ? -0.0f : 0.0f;
+        return direction * std::ldexp(static_cast<float>(fraction) / 1024.0f, -14);
+    }
+    if (exponent == 0x1Fu)
+        return 0.0f;
+
+    return direction * std::ldexp(
+        1.0f + static_cast<float>(fraction) / 1024.0f,
+        static_cast<int>(exponent) - 15);
+}
+
+static FrameSignatureDelta compare_signatures(
+    const FrameSignature& current,
+    const FrameSignature& previous) {
+    FrameSignatureDelta delta{};
+    if (!current.valid || !previous.valid)
+        return delta;
+
+    size_t changed = 0;
+    float total = 0.0f;
+    for (size_t i = 0; i < current.luma.size(); ++i) {
+        const float d = std::abs(current.luma[i] - previous.luma[i]);
+        total += d;
+        if (d >= 0.20f)
+            ++changed;
+    }
+    delta.mean_delta = total / static_cast<float>(current.luma.size());
+    delta.changed_fraction = static_cast<float>(changed)
+        / static_cast<float>(current.luma.size());
+    return delta;
+}
+
+static bool is_scene_cut(const FrameSignatureDelta& delta) {
+    return (delta.mean_delta >= 0.24f && delta.changed_fraction >= 0.46f)
+        || (delta.mean_delta >= 0.34f);
+}
 
 RuntimeSettings runtime_snapshot() {
     std::lock_guard<std::mutex> lock(g_runtime_mutex);
@@ -488,6 +557,67 @@ struct FrameGenerationPresenter::Impl {
 
     static constexpr uint64_t kWarmupFrames = 60;
     static constexpr uint32_t kMissesBeforeHudPause = 2;
+
+    bool scene_probe_supported = true;
+    bool scene_probe_warned = false;
+
+    FrameSignature capture_signature(AhbImage& image) {
+        FrameSignature signature{};
+        if (!scene_probe_supported || !image.ahb)
+            return signature;
+
+        AHardwareBuffer_Desc desc{};
+        AHardwareBuffer_describe(image.ahb, &desc);
+        if (desc.format != AHARDWAREBUFFER_FORMAT_R16G16B16A16_FLOAT
+            || desc.width == 0 || desc.height == 0 || desc.stride == 0) {
+            scene_probe_supported = false;
+            return signature;
+        }
+
+        void* mapped = nullptr;
+        const int lock_result = AHardwareBuffer_lock(
+            image.ahb,
+            AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
+            -1,
+            nullptr,
+            &mapped);
+        if (lock_result != 0 || !mapped) {
+            scene_probe_supported = false;
+            if (!scene_probe_warned) {
+                scene_probe_warned = true;
+                LOG_WARN("[VS-FG] visual scene-cut probe unavailable; keeping timing-only guard");
+            }
+            return signature;
+        }
+
+        const auto* pixels = static_cast<const uint16_t*>(mapped);
+        size_t sample_index = 0;
+        for (size_t row = 0; row < FrameSignature::kRows; ++row) {
+            const uint32_t y = std::min<uint32_t>(
+                desc.height - 1,
+                static_cast<uint32_t>(((row + 1) * desc.height)
+                    / (FrameSignature::kRows + 1)));
+            for (size_t col = 0; col < FrameSignature::kColumns; ++col) {
+                const uint32_t x = std::min<uint32_t>(
+                    desc.width - 1,
+                    static_cast<uint32_t>(((col + 1) * desc.width)
+                        / (FrameSignature::kColumns + 1)));
+                const size_t pixel_offset =
+                    (static_cast<size_t>(y) * desc.stride + x) * 4u;
+
+                const float r = std::max(0.0f, half_to_float(pixels[pixel_offset + 0]));
+                const float g = std::max(0.0f, half_to_float(pixels[pixel_offset + 1]));
+                const float b = std::max(0.0f, half_to_float(pixels[pixel_offset + 2]));
+                const float linear_luma = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+                signature.luma[sample_index++] =
+                    linear_luma / (1.0f + linear_luma);
+            }
+        }
+
+        AHardwareBuffer_unlock(image.ahb, nullptr);
+        signature.valid = sample_index == signature.luma.size();
+        return signature;
+    }
 
     VkDevice device() const {
         return static_cast<VkDevice>(state.device);
@@ -1033,6 +1163,8 @@ struct FrameGenerationPresenter::Impl {
         lsfg_frame_index = 0;
         generation_miss_streak = 0;
         timing.reset();
+        scene_probe_supported = true;
+        scene_probe_warned = false;
 
         if (swapchain == VK_NULL_HANDLE
             && context_id < 0
@@ -1243,6 +1375,29 @@ struct FrameGenerationPresenter::Impl {
             submit_copy_and_wait(render_ready);
             render_ready_consumed = true;
 
+            AhbImage& previous_input =
+                (lsfg_frame_index % 2 == 0) ? input_1 : input_0;
+            const FrameSignature current_signature = capture_signature(current_input);
+            const FrameSignature previous_signature = capture_signature(previous_input);
+            const FrameSignatureDelta signature_delta =
+                compare_signatures(current_signature, previous_signature);
+
+            if (is_scene_cut(signature_delta)) {
+                timing.note_scene_cut();
+                input_primed = false;
+                generation_miss_streak = 0;
+                set_active(false);
+                ++frame_index;
+
+                LOG_INFO(
+                    "[VS-FG-SCENE] cut detected: mean_delta={:.3f} changed={:.1f}% cuts={} -> history reset",
+                    signature_delta.mean_delta,
+                    signature_delta.changed_fraction * 100.0f,
+                    timing.scene_cuts);
+
+                return queue_present(real_image_index);
+            }
+
             // AHardwareBuffer is shared with LSFG's own Vulkan device. We still
             // need the LSFG-side waitIdle for cross-device visibility, but the
             // VitaStation queue itself is no longer stalled with queueWaitIdle.
@@ -1301,11 +1456,13 @@ struct FrameGenerationPresenter::Impl {
 
             if ((frame_index % 120u) == 0u) {
                 LOG_INFO(
-                    "[VS-FG] LSFG 3.1P adaptive-2x: real_fps={:.1f} jitter={:.3f} generation_ema={:.2f}ms queue_misses={} output={}x{} internal={}x{}",
+                    "[VS-FG] LSFG 3.1P adaptive-2x: real_fps={:.1f} jitter={:.3f} generation_ema={:.2f}ms queue_misses={} scene_cuts={} guard_skips={} output={}x{} internal={}x{}",
                     timing.real_fps(),
                     timing.jitter_ratio(),
                     timing.generation_ema_ms,
                     timing.queue_misses,
+                    timing.scene_cuts,
+                    timing.scene_guard_skips,
                     extent.width,
                     extent.height,
                     fg_extent.width,

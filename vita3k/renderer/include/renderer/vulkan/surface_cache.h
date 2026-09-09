@@ -64,6 +64,12 @@ struct Framebuffer {
 
 struct CastedTexture {
     vkutil::Image texture;
+    // Native-resolution staging used by typeless aliases when resolution
+    // scaling is active. Reinterpret the guest byte layout first, then scale
+    // the resulting texture. This avoids fractional byte/pixel offsets at
+    // multipliers such as 1.5x.
+    vkutil::Image native_store_texture;
+    vkutil::Image native_cast_texture;
     // only used if an image to image copy is not possible
     vkutil::Buffer transition_buffer;
     uint64_t scene_timestamp = 0;
@@ -250,6 +256,11 @@ public:
     void set_render_target(VKRenderTarget *new_target) {
         target = new_target;
     }
+
+    // Called only after a draw was actually recorded. Framebuffer binding is
+    // not a write: tracking real producer draws prevents false RAW dependencies
+    // and stale/early resolves.
+    void notify_color_surface_draw(uint64_t scene_timestamp, uint64_t draw_timestamp);
 
     void clear_surfaces_changed() {
         cpu_surfaces_changed.clear();

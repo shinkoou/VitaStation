@@ -517,6 +517,8 @@ void draw(VKContext &context, SceGxmPrimitiveType type, SceGxmIndexFormat format
     bind_vertex_streams(context, mem, instance_count, max_index);
 
     context.render_cmd.drawIndexed(count, instance_count, 0, 0, 0);
+    context.state.surface_cache.notify_color_surface_draw(
+        context.scene_timestamp, context.draw_timestamp);
     ++context.draw_timestamp;
 
     context.vertex_uniform_storage_allocated = false;

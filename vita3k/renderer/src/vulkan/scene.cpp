@@ -518,7 +518,9 @@ void draw(VKContext &context, SceGxmPrimitiveType type, SceGxmIndexFormat format
 
     context.render_cmd.drawIndexed(count, instance_count, 0, 0, 0);
     context.state.surface_cache.notify_color_surface_draw(
-        context.scene_timestamp, context.draw_timestamp);
+        context.scene_timestamp,
+        context.draw_timestamp,
+        context.scissor);
     ++context.draw_timestamp;
 
     context.vertex_uniform_storage_allocated = false;

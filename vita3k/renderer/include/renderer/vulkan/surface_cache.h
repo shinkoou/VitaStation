@@ -64,12 +64,6 @@ struct Framebuffer {
 
 struct CastedTexture {
     vkutil::Image texture;
-    // Native-resolution staging used by typeless aliases when resolution
-    // scaling is active. Reinterpret the guest byte layout first, then scale
-    // the resulting texture. This avoids fractional byte/pixel offsets at
-    // multipliers such as 1.5x.
-    vkutil::Image native_store_texture;
-    vkutil::Image native_cast_texture;
     // only used if an image to image copy is not possible
     vkutil::Buffer transition_buffer;
     uint64_t scene_timestamp = 0;
@@ -98,6 +92,12 @@ struct ColorSurfaceCacheInfo : public SurfaceCacheInfo {
     uint64_t last_write_draw = 0;
     uint64_t last_resolve_scene = 0;
     uint64_t last_resolve_generation = 0;
+
+    // VitaStation Surface Dependency Tracker 2.2.
+    // Keep unresolved write rectangles instead of dirtying the whole surface.
+    // This matters for atlas-style render targets such as Uncharted's bloom
+    // chain, where one tile can be rendered while another tile is sampled.
+    std::vector<vk::Rect2D> pending_write_regions;
 
     SceGxmColorBaseFormat format;
     vk::ComponentMapping swizzle;
@@ -260,7 +260,10 @@ public:
     // Called only after a draw was actually recorded. Framebuffer binding is
     // not a write: tracking real producer draws prevents false RAW dependencies
     // and stale/early resolves.
-    void notify_color_surface_draw(uint64_t scene_timestamp, uint64_t draw_timestamp);
+    void notify_color_surface_draw(
+        uint64_t scene_timestamp,
+        uint64_t draw_timestamp,
+        const vk::Rect2D &write_region);
 
     void clear_surfaces_changed() {
         cpu_surfaces_changed.clear();

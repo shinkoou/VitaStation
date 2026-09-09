@@ -72,6 +72,7 @@ public class Emulator extends SDLActivity
     private static final String TAG = "Vita3K";
     private static final long IME_RESTORE_DELAY_MS = 250L;
     private static final long NATIVE_QUIT_WATCHDOG_MS = 8000L;
+    private static final long NATIVE_QUIT_POLL_MS = 250L;
     public static final String EXTRA_TITLE_ID = "title_id";
     public static final String EXTRA_GAME_TITLE = "game_title";
     private static final String APP_RESTART_PARAMETERS = "AppStartParameters";
@@ -108,6 +109,46 @@ public class Emulator extends SDLActivity
     private ImagePathResultCallback pendingImagePathCallback;
     private boolean nativeQuitRequested;
     private boolean libraryReturnRequested;
+    private long nativeQuitStartedAtMs;
+
+    private final Runnable nativeQuitMonitor = new Runnable() {
+        @Override
+        public void run() {
+            if (!nativeQuitRequested || isDestroyed() || isFinishing()) {
+                return;
+            }
+
+            boolean stillRunning = true;
+            try {
+                stillRunning = NativeLib.INSTANCE.isAppRunning();
+            } catch (Throwable t) {
+                Log.w(TAG, "[VS-EXIT-ANDROID] isAppRunning check failed", t);
+            }
+
+            if (!stillRunning) {
+                Log.i(TAG,
+                        "[VS-EXIT-ANDROID] native session is Idle; finishing Emulator Activity");
+                returnToLibrary();
+                return;
+            }
+
+            long now = SystemClock.elapsedRealtime();
+            if (nativeQuitStartedAtMs > 0L
+                    && now - nativeQuitStartedAtMs >= NATIVE_QUIT_WATCHDOG_MS) {
+                Log.w(TAG,
+                        "[VS-EXIT-ANDROID] native quit watchdog retry; Activity teardown remains blocked until native is Idle");
+                try {
+                    NativeLib.INSTANCE.requestAppQuit();
+                } catch (Throwable t) {
+                    Log.w(TAG, "[VS-EXIT-ANDROID] native quit retry failed", t);
+                }
+                nativeQuitStartedAtMs = now;
+            }
+
+            View decorView = getWindow().getDecorView();
+            decorView.postDelayed(this, NATIVE_QUIT_POLL_MS);
+        }
+    };
 
     @Override
     protected void attachBaseContext(Context newBase) {
@@ -301,6 +342,10 @@ public class Emulator extends SDLActivity
 
     @Override
     protected void onDestroy() {
+        try {
+            getWindow().getDecorView().removeCallbacks(nativeQuitMonitor);
+        } catch (Throwable ignored) {
+        }
         if (inputManager != null) {
             inputManager.unregisterInputDeviceListener(this);
         }
@@ -490,6 +535,8 @@ public class Emulator extends SDLActivity
             }
 
             nativeQuitRequested = true;
+            libraryReturnRequested = false;
+            nativeQuitStartedAtMs = SystemClock.elapsedRealtime();
             releaseControllerOverlayInputs();
             setResult(android.app.Activity.RESULT_OK);
 
@@ -497,51 +544,57 @@ public class Emulator extends SDLActivity
             try {
                 queued = NativeLib.INSTANCE.requestAppQuit();
             } catch (Throwable t) {
-                Log.w(TAG, "Unable to queue native app quit", t);
+                Log.w(TAG, "[VS-EXIT-ANDROID] unable to queue native app quit", t);
             }
 
             if (!queued) {
                 nativeQuitRequested = false;
-                Log.w(TAG, "Native quit request was not queued; SDLActivity remains owner of Activity teardown.");
+                nativeQuitStartedAtMs = 0L;
+                Log.w(TAG,
+                        "[VS-EXIT-ANDROID] native quit request was not queued; keeping Activity alive");
                 return;
             }
 
-            // SDLActivity finishes this Activity after SDL_main returns.
-            // Never call finish() here: doing so races native renderer/SDL
-            // teardown and can enter SDL's process-level lifecycle fallback.
+            Log.i(TAG,
+                    "[VS-EXIT-ANDROID] quit queued; waiting for native Idle before Activity.finish()");
+
             final View decorView = getWindow().getDecorView();
-            decorView.postDelayed(() -> {
-                if (isFinishing() || isDestroyed()) {
-                    return;
-                }
-
-                boolean stillRunning = true;
-                try {
-                    stillRunning = NativeLib.INSTANCE.isAppRunning();
-                } catch (Throwable ignored) {
-                }
-
-                if (stillRunning) {
-                    Log.w(TAG, "Native quit watchdog: session still active; retrying SDL quit without Activity teardown.");
-                    try {
-                        NativeLib.INSTANCE.requestAppQuit();
-                    } catch (Throwable t) {
-                        Log.w(TAG, "Native quit watchdog retry failed", t);
-                    }
-                } else {
-                    Log.i(TAG, "Native session stopped; returning to VitaStation library.");
-                    returnToLibrary();
-                }
-            }, NATIVE_QUIT_WATCHDOG_MS);
+            decorView.removeCallbacks(nativeQuitMonitor);
+            decorView.postDelayed(nativeQuitMonitor, NATIVE_QUIT_POLL_MS);
         });
     }
 
     private void returnToLibrary() {
-        if (libraryReturnRequested || isDestroyed()) return;
+        if (libraryReturnRequested || isDestroyed()) {
+            return;
+        }
+
         libraryReturnRequested = true;
+        nativeQuitRequested = false;
+        nativeQuitStartedAtMs = 0L;
+
+        try {
+            getWindow().getDecorView().removeCallbacks(nativeQuitMonitor);
+        } catch (Throwable ignored) {
+        }
+
+        setResult(android.app.Activity.RESULT_OK);
+
+        if (!isTaskRoot()) {
+            Log.i(TAG,
+                    "[VS-EXIT-ANDROID] returning to existing MainActivity via Activity.finish()");
+            finish();
+            return;
+        }
+
+        Log.i(TAG,
+                "[VS-EXIT-ANDROID] Emulator is task root; creating MainActivity fallback");
         Intent libraryIntent = new Intent(this, MainActivity.class);
-        libraryIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        libraryIntent.addFlags(
+                Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         startActivity(libraryIntent);
+        finish();
     }
 
     public void ensurePauseMenuOnTop() {

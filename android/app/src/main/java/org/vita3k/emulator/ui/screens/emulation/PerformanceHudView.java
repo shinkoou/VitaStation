@@ -11,6 +11,7 @@ import android.os.BatteryManager;
 import android.os.Debug;
 import android.os.Process;
 import android.os.SystemClock;
+import android.util.Log;
 import android.view.View;
 
 import org.vita3k.emulator.NativeLib;
@@ -24,8 +25,10 @@ import java.util.List;
 import java.util.Locale;
 
 public final class PerformanceHudView extends View {
+    private static final String TAG = "VitaStationHud";
     private static final long FAST_UPDATE_MS = 500L;
     private static final long SLOW_UPDATE_MS = 2000L;
+    private static final long GPU_DIAGNOSTIC_MS = 10_000L;
 
     private final Paint panelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -47,6 +50,8 @@ public final class PerformanceHudView extends View {
     private long previousCpuMs;
     private long previousWallMs;
     private long lastSlowUpdateMs;
+    private long lastGpuDiagnosticMs;
+    private String lastGpuDiagnosticKey = "";
 
     private final Runnable updater = new Runnable() {
         @Override public void run() {
@@ -148,17 +153,17 @@ public final class PerformanceHudView extends View {
     }
 
     private Float readGpuUsage() {
-        boolean sawReadableZero = false;
-
         for (String path : new String[]{
                 "/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage",
                 "/sys/class/kgsl/kgsl-3d0/devfreq/gpu_load",
                 "/sys/class/kgsl/kgsl-3d0/devfreq/load",
-                "/sys/class/kgsl/kgsl-3d0/devfreq/utilization"}) {
+                "/sys/class/kgsl/kgsl-3d0/devfreq/utilization",
+                "/sys/class/kgsl/kgsl-3d0/devfreq/busy_percent"}) {
             Float value = readSinglePercent(path);
-            if (value == null) continue;
-            if (value > 0f || fps <= 0) return value;
-            sawReadableZero = true;
+            if (value != null) {
+                logGpuMetric(path, "OK", value);
+                return value;
+            }
         }
 
         try {
@@ -170,12 +175,16 @@ public final class PerformanceHudView extends View {
                     float total = Float.parseFloat(parts[1]);
                     if (total > 0f) {
                         float value = clamp((busy / total) * 100f);
-                        if (value > 0f || fps <= 0) return value;
-                        sawReadableZero = true;
+                        logGpuMetric(
+                                "/sys/class/kgsl/kgsl-3d0/gpubusy",
+                                "OK",
+                                value);
+                        return value;
                     }
                 }
             }
-        } catch (Throwable ignored) {}
+        } catch (Throwable ignored) {
+        }
 
         try {
             File devfreq = new File("/sys/class/devfreq");
@@ -184,8 +193,11 @@ public final class PerformanceHudView extends View {
                 for (File device : devices) {
                     String descriptor = device.getName().toLowerCase(Locale.ROOT);
                     try {
-                        descriptor += " " + device.getCanonicalPath().toLowerCase(Locale.ROOT);
-                    } catch (Throwable ignored) {}
+                        descriptor += " "
+                                + device.getCanonicalPath()
+                                .toLowerCase(Locale.ROOT);
+                    } catch (Throwable ignored) {
+                    }
 
                     if (!descriptor.contains("gpu")
                             && !descriptor.contains("mali")
@@ -195,19 +207,44 @@ public final class PerformanceHudView extends View {
                     }
 
                     for (String leaf : new String[]{
-                            "load", "utilization", "busy_percent", "gpu_load"}) {
-                        Float value = readSinglePercent(new File(device, leaf).getAbsolutePath());
-                        if (value == null) continue;
-                        if (value > 0f || fps <= 0) return value;
-                        sawReadableZero = true;
+                            "load",
+                            "utilization",
+                            "busy_percent",
+                            "gpu_load"}) {
+                        String path = new File(device, leaf).getAbsolutePath();
+                        Float value = readSinglePercent(path);
+                        if (value != null) {
+                            logGpuMetric(path, "OK", value);
+                            return value;
+                        }
                     }
                 }
             }
-        } catch (Throwable ignored) {}
+        } catch (Throwable ignored) {
+        }
 
-        // Do not lie with a permanent 0% while a game is visibly rendering.
-        // If SELinux blocks reliable counters, the HUD shows "—".
-        return sawReadableZero && fps <= 0 ? 0f : null;
+        logGpuMetric("none", "UNAVAILABLE", null);
+        return null;
+    }
+
+    private void logGpuMetric(String source, String status, Float value) {
+        long now = SystemClock.elapsedRealtime();
+        String key = source + "|" + status;
+        if (!key.equals(lastGpuDiagnosticKey)
+                || now - lastGpuDiagnosticMs >= GPU_DIAGNOSTIC_MS) {
+            lastGpuDiagnosticKey = key;
+            lastGpuDiagnosticMs = now;
+            Log.i(TAG,
+                    "[VS-GPU-METRIC] source=" + source
+                            + " status=" + status
+                            + (value == null
+                                    ? ""
+                                    : " usage="
+                                            + String.format(
+                                                    Locale.US,
+                                                    "%.1f",
+                                                    value)));
+        }
     }
 
     private Float readSinglePercent(String path) {

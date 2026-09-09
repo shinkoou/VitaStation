@@ -1,4 +1,4 @@
-name: VitaStation Android APK - Alpha 4 FIX3 Stage A
+name: VitaStation Android APK - Alpha 4 FIX3 Stage B1
 
 on:
   workflow_dispatch:
@@ -17,7 +17,7 @@ env:
 
 jobs:
   android-build:
-    name: Build VitaStation v0.3.0 Alpha 4 FIX3 Stage A
+    name: Build VitaStation v0.3.0 Alpha 4 FIX3 Stage B1
     runs-on: ubuntu-latest
 
     steps:
@@ -27,167 +27,430 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Apply FIX3 Stage A - stable FrameGen, GPU HUD and Touch UI
+      - name: Apply FIX3 Stage B1 - stable FrameGen, KGSL delta HUD and vector Touch UI
         shell: bash
         run: |
           set -euo pipefail
-
+          
+          # Protect the proven FrameGen baseline. Stage B1 does not experiment with LSFG.
           STABLE_FG_COMMIT="1198f481ed25c932d269ad97525d2217c511bd9a"
           FG_PATH="vita3k/renderer/src/vulkan/frame_generation.cpp"
-
           git cat-file -e "${STABLE_FG_COMMIT}^{commit}"
           git show "${STABLE_FG_COMMIT}:${FG_PATH}" > "${FG_PATH}"
-
+          
           python3 - <<'PY'
           from pathlib import Path
           import re
-
+          
           gradle = Path('android/app/build.gradle')
           text = gradle.read_text(encoding='utf-8')
-          text, n1 = re.subn(r'versionCode = \d+', 'versionCode = 42', text, count=1)
-          text, n2 = re.subn(r'versionName = "[^"]+"', 'versionName = "0.3.0-alpha4-fix3a"', text, count=1)
+          text, n1 = re.subn(r'versionCode = \d+', 'versionCode = 43', text, count=1)
+          text, n2 = re.subn(r'versionName = "[^"]+"', 'versionName = "0.3.0-alpha4-fix3b1"', text, count=1)
           if n1 != 1 or n2 != 1:
-              raise SystemExit('::error::Could not update FIX3 Stage A version metadata')
+              raise SystemExit('::error::Could not update FIX3 Stage B1 version metadata')
           gradle.write_text(text, encoding='utf-8')
-
+          
+          # GPU HUD 2.0: direct KGSL counters -> gpubusy delta -> honest zero/unavailable.
           hud = Path('android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/PerformanceHudView.java')
           text = hud.read_text(encoding='utf-8')
-          pattern = re.compile(r'    private Float readGpuUsage\(\) \{.*?\n    \}\n\n    private void logGpuMetric', re.S)
+          
+          field_anchor = '    private long previousWallMs;\n'
+          field_patch = (
+              field_anchor
+              + '    private long previousGpuBusy;\n'
+              + '    private long previousGpuTotal;\n'
+              + '    private boolean hasPreviousGpuBusy;\n'
+          )
+          if 'private long previousGpuBusy;' not in text:
+              if text.count(field_anchor) != 1:
+                  raise SystemExit('::error::PerformanceHudView GPU state anchor mismatch')
+              text = text.replace(field_anchor, field_patch, 1)
+          
+          pattern = re.compile(
+              r'    private Float readGpuUsage\(\) \{.*?\n    \}\n\n'
+              r'private void logGpuMetric',
+              re.S
+          )
           replacement = r'''    private Float readGpuUsage() {
-              Float zeroCandidate = null;
-              String zeroSource = null;
-
-              // VitaStation FIX3: query Qualcomm KGSL gpubusy first.
-              try {
-                  final String source = "/sys/class/kgsl/kgsl-3d0/gpubusy";
-                  String text = readText(source);
-                  if (text != null) {
-                      String[] parts = text.trim().split("\\s+");
-                      if (parts.length >= 2) {
-                          float busy = Float.parseFloat(parts[0]);
-                          float total = Float.parseFloat(parts[1]);
-                          if (total > 0f) {
-                              float value = clamp((busy / total) * 100f);
-                              if (value > 0.1f) {
-                                  logGpuMetric(source, "OK", value);
-                                  return value;
-                              }
+                  Float zeroCandidate = null;
+                  String zeroSource = null;
+          
+                  // [VS-GPU-HUD2] Direct Qualcomm/KGSL percentage counters first.
+                  for (String path : new String[]{
+                          "/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage",
+                          "/sys/class/kgsl/kgsl-3d0/devfreq/gpu_load",
+                          "/sys/class/kgsl/kgsl-3d0/devfreq/load",
+                          "/sys/class/kgsl/kgsl-3d0/devfreq/utilization",
+                          "/sys/class/kgsl/kgsl-3d0/devfreq/busy_percent"}) {
+                      Float value = readSinglePercent(path);
+                      if (value != null) {
+                          if (value > 0.1f) {
+                              logGpuMetric(path, "DIRECT", value);
+                              return value;
+                          }
+                          if (zeroCandidate == null) {
                               zeroCandidate = value;
-                              zeroSource = source;
+                              zeroSource = path;
                           }
                       }
                   }
-              } catch (Throwable ignored) {
-              }
-
-              for (String path : new String[]{
-                      "/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage",
-                      "/sys/class/kgsl/kgsl-3d0/devfreq/gpu_load",
-                      "/sys/class/kgsl/kgsl-3d0/devfreq/load",
-                      "/sys/class/kgsl/kgsl-3d0/devfreq/utilization",
-                      "/sys/class/kgsl/kgsl-3d0/devfreq/busy_percent"}) {
-                  Float value = readSinglePercent(path);
-                  if (value != null) {
-                      if (value > 0.1f) {
-                          logGpuMetric(path, "OK", value);
-                          return value;
+          
+                  try {
+                      File devfreq = new File("/sys/class/devfreq");
+                      File[] devices = devfreq.listFiles();
+                      if (devices != null) {
+                          for (File device : devices) {
+                              String descriptor = device.getName().toLowerCase(Locale.ROOT);
+                              try {
+                                  descriptor += " " + device.getCanonicalPath().toLowerCase(Locale.ROOT);
+                              } catch (Throwable ignored) {
+                              }
+          
+                              if (!descriptor.contains("gpu")
+                                      && !descriptor.contains("mali")
+                                      && !descriptor.contains("kgsl")
+                                      && !descriptor.contains("3d0")) {
+                                  continue;
+                              }
+          
+                              for (String leaf : new String[]{
+                                      "load", "utilization", "busy_percent",
+                                      "gpu_load", "gpu_busy_percentage"}) {
+                                  String path = new File(device, leaf).getAbsolutePath();
+                                  Float value = readSinglePercent(path);
+                                  if (value != null) {
+                                      if (value > 0.1f) {
+                                          logGpuMetric(path, "DEVFREQ", value);
+                                          return value;
+                                      }
+                                      if (zeroCandidate == null) {
+                                          zeroCandidate = value;
+                                          zeroSource = path;
+                                      }
+                                  }
+                              }
+                          }
+                      }
+                  } catch (Throwable ignored) {
+                  }
+          
+                  // [VS-GPU-HUD2] gpubusy is commonly cumulative. "Now" is deltaBusy/deltaTotal.
+                  Float busyDelta = readGpuBusyDeltaPercent();
+                  if (busyDelta != null) {
+                      if (busyDelta > 0.1f) {
+                          logGpuMetric("/sys/class/kgsl/kgsl-3d0/gpubusy", "GPU_DELTA", busyDelta);
+                          return busyDelta;
                       }
                       if (zeroCandidate == null) {
-                          zeroCandidate = value;
-                          zeroSource = path;
+                          zeroCandidate = busyDelta;
+                          zeroSource = "/sys/class/kgsl/kgsl-3d0/gpubusy";
                       }
                   }
-              }
-
-              try {
-                  File devfreq = new File("/sys/class/devfreq");
-                  File[] devices = devfreq.listFiles();
-                  if (devices != null) {
-                      for (File device : devices) {
-                          String descriptor = device.getName().toLowerCase(Locale.ROOT);
-                          try {
-                              descriptor += " " + device.getCanonicalPath().toLowerCase(Locale.ROOT);
-                          } catch (Throwable ignored) {
-                          }
-
-                          if (!descriptor.contains("gpu")
-                                  && !descriptor.contains("mali")
-                                  && !descriptor.contains("kgsl")
-                                  && !descriptor.contains("3d0")) {
-                              continue;
-                          }
-
-                          for (String leaf : new String[]{"load", "utilization", "busy_percent", "gpu_load"}) {
-                              String path = new File(device, leaf).getAbsolutePath();
-                              Float value = readSinglePercent(path);
-                              if (value != null) {
-                                  if (value > 0.1f) {
-                                      logGpuMetric(path, "OK", value);
-                                      return value;
-                                  }
-                                  if (zeroCandidate == null) {
-                                      zeroCandidate = value;
-                                      zeroSource = path;
-                                  }
-                              }
-                          }
-                      }
+          
+                  if (zeroCandidate != null) {
+                      logGpuMetric(zeroSource == null ? "zero-candidate" : zeroSource, "ZERO", zeroCandidate);
+                      return zeroCandidate;
                   }
-              } catch (Throwable ignored) {
+          
+                  logGpuMetric("none", "UNAVAILABLE", null);
+                  return null;
               }
-
-              if (zeroCandidate != null) {
-                  logGpuMetric(zeroSource == null ? "zero-candidate" : zeroSource, "ZERO", zeroCandidate);
-                  return zeroCandidate;
+          
+              private Float readGpuBusyDeltaPercent() {
+                  final String source = "/sys/class/kgsl/kgsl-3d0/gpubusy";
+                  try {
+                      String raw = readText(source);
+                      if (raw == null) return null;
+          
+                      String[] parts = raw.trim().split("\\s+");
+                      if (parts.length < 2) return null;
+          
+                      long busy = Long.parseLong(parts[0]);
+                      long total = Long.parseLong(parts[1]);
+                      if (busy < 0L || total <= 0L) return null;
+          
+                      if (!hasPreviousGpuBusy) {
+                          previousGpuBusy = busy;
+                          previousGpuTotal = total;
+                          hasPreviousGpuBusy = true;
+                          logGpuMetric(source, "PRIMED", null);
+                          return null;
+                      }
+          
+                      long busyDelta = busy - previousGpuBusy;
+                      long totalDelta = total - previousGpuTotal;
+                      previousGpuBusy = busy;
+                      previousGpuTotal = total;
+          
+                      if (busyDelta >= 0L && totalDelta > 0L) {
+                          return clamp((busyDelta * 100f) / totalDelta);
+                      }
+          
+                      if (busy <= total) {
+                          return clamp((busy * 100f) / total);
+                      }
+          
+                      hasPreviousGpuBusy = false;
+                      return null;
+                  } catch (Throwable ignored) {
+                      hasPreviousGpuBusy = false;
+                      return null;
+                  }
               }
-
-              logGpuMetric("none", "UNAVAILABLE", null);
-              return null;
-          }
-
-          private void logGpuMetric'''
+          
+              private void logGpuMetric'''
           text, count = pattern.subn(replacement, text, count=1)
           if count != 1:
-              raise SystemExit('::error::Could not patch PerformanceHudView.readGpuUsage')
+              raise SystemExit('::error::Could not install GPU HUD 2.0')
+          
+          # FIX3A left a double-escaped regex in readSinglePercent on some generated trees.
+          text = text.replace('text.trim().split("\\\\\\\\s+")[0]', 'text.trim().split("\\\\s+")[0]')
           hud.write_text(text, encoding='utf-8')
-
+          
+          # Touch UI 3.1 REAL: keep input backend, discard old PNG appearance.
           overlay = Path('android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java')
           text = overlay.read_text(encoding='utf-8')
-          text = text.replace('VitaStation Touch UI 2.1: smaller art, generous hitboxes and a neon',
-                              'VitaStation Touch UI 3.0 Stage A: compact electric-blue art, generous hitboxes and a')
-          text = text.replace('private final static float OVERLAY_ACTIVE_ALPHA = 0.72f;',
-                              'private final static float OVERLAY_ACTIVE_ALPHA = 0.64f; // [VS-TOUCH-UI3]')
-          text = text.replace('private final static float OVERLAY_IDLE_ALPHA = 0.24f;',
-                              'private final static float OVERLAY_IDLE_ALPHA = 0.18f;')
-          text = text.replace('private final static int OVERLAY_HIT_SLOP_DP = 16;',
-                              'private final static int OVERLAY_HIT_SLOP_DP = 20;')
-          text = text.replace('private final static int VITASTATION_CYAN = Color.rgb(61, 220, 255);',
-                              'private final static int VITASTATION_CYAN = Color.rgb(41, 182, 255);')
-
-          tint_pattern = re.compile(r'  private static int tintForControl\(int legacyId\)\n  \{.*?\n  \}\n\n  private static Bitmap tintBitmap', re.S)
-          tint_replacement = '''  private static int tintForControl(int legacyId)
-          {
-            // Touch UI 3.0 Stage A uses one electric-blue accent.
-            return VITASTATION_CYAN;
-          }
-
-          private static Bitmap tintBitmap'''
-          text, tint_count = tint_pattern.subn(tint_replacement, text, count=1)
-          if tint_count != 1:
-              raise SystemExit('::error::Could not patch Touch UI tint policy')
-
-          text = text.replace('float scale = 0.13f;', 'float scale = 0.115f;', 1)
-          text = text.replace('scale = 0.20f;', 'scale = 0.17f;', 1)
-          text = text.replace('scale = 0.09f;', 'scale = 0.075f;', 1)
-          text = text.replace('float scale = 0.29f;', 'float scale = 0.245f;', 1)
-          text = text.replace('float scale = 0.235f;', 'float scale = 0.205f;', 1)
+          
+          if 'import android.graphics.Path;\n' not in text:
+              text = text.replace('import android.graphics.Paint;\n',
+                                  'import android.graphics.Paint;\nimport android.graphics.Path;\n', 1)
+          if 'import android.graphics.RectF;\n' not in text:
+              text = text.replace('import android.graphics.Rect;\n',
+                                  'import android.graphics.Rect;\nimport android.graphics.RectF;\n', 1)
+          
+          paint_anchor = '  private final Set<InputOverlayDrawableJoystick> overlayJoysticks = new HashSet<>();\n'
+          paint_patch = paint_anchor + r'''  // [VS-TOUCH-VECTOR] VitaStation Touch UI 3.1 vector skin.
+            // Legacy bitmap objects remain only as geometry/input carriers.
+            private final Paint mVsTouchGlow = new Paint(Paint.ANTI_ALIAS_FLAG);
+            private final Paint mVsTouchStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
+            private final Paint mVsTouchFill = new Paint(Paint.ANTI_ALIAS_FLAG);
+            private final Paint mVsTouchText = new Paint(Paint.ANTI_ALIAS_FLAG);
+            private final Path mVsTouchPath = new Path();
+          '''
+          if '[VS-TOUCH-VECTOR]' not in text:
+              if text.count(paint_anchor) != 1:
+                  raise SystemExit('::error::Touch vector paint anchor mismatch')
+              text = text.replace(paint_anchor, paint_patch, 1)
+          
+          draw_anchor = '''  public void draw(Canvas canvas)
+            {
+              super.draw(canvas);
+          '''
+          helpers = r'''  private float visualAlpha(boolean pressed) {
+              float base = resolvedVisualOpacity(mOverlayDimmed) / 255f;
+              if (pressed)
+                base = Math.min(1f, base * 1.45f);
+              return base;
+            }
+          
+            private void prepareVectorPaints(float alpha, boolean pressed) {
+              int strokeAlpha = Math.max(0, Math.min(255, Math.round(255f * alpha)));
+              int glowAlpha = Math.max(0, Math.min(255, Math.round(72f * alpha)));
+              int fillAlpha = Math.max(0, Math.min(255, Math.round((pressed ? 74f : 28f) * alpha)));
+          
+              mVsTouchGlow.setStyle(Paint.Style.STROKE);
+              mVsTouchGlow.setStrokeCap(Paint.Cap.ROUND);
+              mVsTouchGlow.setStrokeJoin(Paint.Join.ROUND);
+              mVsTouchGlow.setStrokeWidth(Math.max(2f, 5.0f * getResources().getDisplayMetrics().density));
+              mVsTouchGlow.setColor(VITASTATION_CYAN);
+              mVsTouchGlow.setAlpha(glowAlpha);
+          
+              mVsTouchStroke.setStyle(Paint.Style.STROKE);
+              mVsTouchStroke.setStrokeCap(Paint.Cap.ROUND);
+              mVsTouchStroke.setStrokeJoin(Paint.Join.ROUND);
+              mVsTouchStroke.setStrokeWidth(Math.max(1.4f, 1.8f * getResources().getDisplayMetrics().density));
+              mVsTouchStroke.setColor(VITASTATION_CYAN);
+              mVsTouchStroke.setAlpha(strokeAlpha);
+          
+              mVsTouchFill.setStyle(Paint.Style.FILL);
+              mVsTouchFill.setColor(VITASTATION_CYAN);
+              mVsTouchFill.setAlpha(fillAlpha);
+          
+              mVsTouchText.setStyle(Paint.Style.FILL);
+              mVsTouchText.setColor(VITASTATION_NEUTRAL);
+              mVsTouchText.setAlpha(strokeAlpha);
+              mVsTouchText.setTextAlign(Paint.Align.CENTER);
+              mVsTouchText.setTypeface(android.graphics.Typeface.create(
+                      "sans-serif-medium", android.graphics.Typeface.BOLD));
+            }
+          
+            private RectF compactArtRect(Rect bounds, float insetFraction) {
+              RectF rect = new RectF(bounds);
+              float inset = Math.min(rect.width(), rect.height()) * insetFraction;
+              rect.inset(inset, inset);
+              return rect;
+            }
+          
+            private void drawVectorOutline(Canvas canvas, RectF rect, float radius) {
+              canvas.drawRoundRect(rect, radius, radius, mVsTouchGlow);
+              canvas.drawRoundRect(rect, radius, radius, mVsTouchFill);
+              canvas.drawRoundRect(rect, radius, radius, mVsTouchStroke);
+            }
+          
+            private void drawCenteredLabel(Canvas canvas, String label, RectF rect, float fraction) {
+              mVsTouchText.setTextSize(Math.max(10f, Math.min(rect.width(), rect.height()) * fraction));
+              Paint.FontMetrics fm = mVsTouchText.getFontMetrics();
+              float baseline = rect.centerY() - (fm.ascent + fm.descent) / 2f;
+              canvas.drawText(label, rect.centerX(), baseline, mVsTouchText);
+            }
+          
+            private void drawFaceSymbol(Canvas canvas, int legacyId, RectF rect) {
+              float cx = rect.centerX();
+              float cy = rect.centerY();
+              float r = Math.min(rect.width(), rect.height()) * 0.21f;
+          
+              if (legacyId == ButtonType.BUTTON_CIRCLE) {
+                canvas.drawCircle(cx, cy, r, mVsTouchStroke);
+                return;
+              }
+          
+              if (legacyId == ButtonType.BUTTON_SQUARE) {
+                RectF symbol = new RectF(cx - r, cy - r, cx + r, cy + r);
+                canvas.drawRoundRect(symbol, r * 0.08f, r * 0.08f, mVsTouchStroke);
+                return;
+              }
+          
+              mVsTouchPath.reset();
+              if (legacyId == ButtonType.BUTTON_TRIANGLE) {
+                float h = r * 1.12f;
+                mVsTouchPath.moveTo(cx, cy - h);
+                mVsTouchPath.lineTo(cx - r, cy + h * 0.72f);
+                mVsTouchPath.lineTo(cx + r, cy + h * 0.72f);
+                mVsTouchPath.close();
+                canvas.drawPath(mVsTouchPath, mVsTouchStroke);
+                return;
+              }
+          
+              if (legacyId == ButtonType.BUTTON_CROSS) {
+                canvas.drawLine(cx - r * 0.78f, cy - r * 0.78f,
+                        cx + r * 0.78f, cy + r * 0.78f, mVsTouchStroke);
+                canvas.drawLine(cx + r * 0.78f, cy - r * 0.78f,
+                        cx - r * 0.78f, cy + r * 0.78f, mVsTouchStroke);
+              }
+            }
+          
+            private void drawVitaStationButton(Canvas canvas, InputOverlayDrawableButton button) {
+              int legacyId = button.getLegacyId();
+              boolean pressed = button.getPressed();
+              prepareVectorPaints(visualAlpha(pressed), pressed);
+          
+              RectF rect = compactArtRect(button.getBounds(),
+                      legacyId == ButtonType.BUTTON_CROSS
+                              || legacyId == ButtonType.BUTTON_CIRCLE
+                              || legacyId == ButtonType.BUTTON_SQUARE
+                              || legacyId == ButtonType.BUTTON_TRIANGLE ? 0.13f : 0.08f);
+          
+              if (legacyId == ButtonType.BUTTON_CROSS
+                      || legacyId == ButtonType.BUTTON_CIRCLE
+                      || legacyId == ButtonType.BUTTON_SQUARE
+                      || legacyId == ButtonType.BUTTON_TRIANGLE) {
+                float radius = Math.min(rect.width(), rect.height()) * 0.44f;
+                canvas.drawCircle(rect.centerX(), rect.centerY(), radius, mVsTouchGlow);
+                canvas.drawCircle(rect.centerX(), rect.centerY(), radius, mVsTouchFill);
+                canvas.drawCircle(rect.centerX(), rect.centerY(), radius, mVsTouchStroke);
+                drawFaceSymbol(canvas, legacyId, rect);
+                return;
+              }
+          
+              if (legacyId == ButtonType.BUTTON_PS) {
+                float radius = Math.min(rect.width(), rect.height()) * 0.43f;
+                canvas.drawCircle(rect.centerX(), rect.centerY(), radius, mVsTouchGlow);
+                canvas.drawCircle(rect.centerX(), rect.centerY(), radius, mVsTouchFill);
+                canvas.drawCircle(rect.centerX(), rect.centerY(), radius, mVsTouchStroke);
+                drawCenteredLabel(canvas, "PS", rect, 0.28f);
+                return;
+              }
+          
+              String label;
+              switch (legacyId) {
+                case ButtonType.TRIGGER_L: label = "L"; break;
+                case ButtonType.TRIGGER_R: label = "R"; break;
+                case ButtonType.TRIGGER_L2: label = "L2"; break;
+                case ButtonType.TRIGGER_R2: label = "R2"; break;
+                case ButtonType.TRIGGER_L3: label = "L3"; break;
+                case ButtonType.TRIGGER_R3: label = "R3"; break;
+                case ButtonType.BUTTON_SELECT: label = "SELECT"; break;
+                case ButtonType.BUTTON_START: label = "START"; break;
+                case ButtonType.BUTTON_TOUCH_SWITCH: label = button.getPressed() ? "BACK" : "FRONT"; break;
+                case ButtonType.BUTTON_TOUCH_HIDE: label = "HIDE"; break;
+                default: label = ""; break;
+              }
+          
+              float radius = Math.min(rect.height() * 0.34f, rect.width() * 0.16f);
+              drawVectorOutline(canvas, rect, radius);
+              drawCenteredLabel(canvas, label, rect,
+                      (legacyId == ButtonType.BUTTON_SELECT || legacyId == ButtonType.BUTTON_START) ? 0.24f : 0.34f);
+            }
+          
+            private void drawVitaStationDpad(Canvas canvas, InputOverlayDrawableDpad dpad) {
+              boolean pressed = dpad.getTrackId() != -1;
+              prepareVectorPaints(visualAlpha(pressed), pressed);
+          
+              RectF rect = compactArtRect(dpad.getBounds(), 0.16f);
+              float cx = rect.centerX();
+              float cy = rect.centerY();
+              float radius = Math.min(rect.width(), rect.height()) * 0.46f;
+              float half = radius * 0.28f;
+          
+              mVsTouchPath.reset();
+              mVsTouchPath.moveTo(cx - half, cy - radius);
+              mVsTouchPath.lineTo(cx + half, cy - radius);
+              mVsTouchPath.lineTo(cx + half, cy - half);
+              mVsTouchPath.lineTo(cx + radius, cy - half);
+              mVsTouchPath.lineTo(cx + radius, cy + half);
+              mVsTouchPath.lineTo(cx + half, cy + half);
+              mVsTouchPath.lineTo(cx + half, cy + radius);
+              mVsTouchPath.lineTo(cx - half, cy + radius);
+              mVsTouchPath.lineTo(cx - half, cy + half);
+              mVsTouchPath.lineTo(cx - radius, cy + half);
+              mVsTouchPath.lineTo(cx - radius, cy - half);
+              mVsTouchPath.lineTo(cx - half, cy - half);
+              mVsTouchPath.close();
+          
+              canvas.drawPath(mVsTouchPath, mVsTouchGlow);
+              canvas.drawPath(mVsTouchPath, mVsTouchFill);
+              canvas.drawPath(mVsTouchPath, mVsTouchStroke);
+            }
+          
+            private void drawVitaStationJoystick(Canvas canvas, InputOverlayDrawableJoystick joystick) {
+              boolean pressed = joystick.getTrackId() != -1;
+              prepareVectorPaints(visualAlpha(pressed), pressed);
+          
+              RectF rect = compactArtRect(joystick.getBounds(), 0.12f);
+              float cx = rect.centerX();
+              float cy = rect.centerY();
+              float radius = Math.min(rect.width(), rect.height()) * 0.46f;
+          
+              canvas.drawCircle(cx, cy, radius, mVsTouchGlow);
+              canvas.drawCircle(cx, cy, radius, mVsTouchStroke);
+          
+              float knobRadius = radius * 0.48f;
+              float travel = radius * 0.34f;
+              float knobX = cx + Math.max(-1f, Math.min(1f, joystick.getX())) * travel;
+              float knobY = cy + Math.max(-1f, Math.min(1f, joystick.getY())) * travel;
+          
+              canvas.drawCircle(knobX, knobY, knobRadius, mVsTouchFill);
+              canvas.drawCircle(knobX, knobY, knobRadius, mVsTouchStroke);
+            }
+          
+          '''
+          if 'private void drawVitaStationButton' not in text:
+              if text.count(draw_anchor) != 1:
+                  raise SystemExit('::error::Touch vector draw anchor mismatch')
+              text = text.replace(draw_anchor, helpers + draw_anchor, 1)
+          
+          text = text.replace('      button.draw(canvas);\n', '      drawVitaStationButton(canvas, button);\n')
+          text = text.replace('        dpad.draw(canvas);\n', '        drawVitaStationDpad(canvas, dpad);\n')
+          text = text.replace('        joystick.draw(canvas);\n', '        drawVitaStationJoystick(canvas, joystick);\n')
+          
           overlay.write_text(text, encoding='utf-8')
           PY
-
+          
           git diff --check
-
-          grep -q 'versionCode = 42' android/app/build.gradle
-          grep -q 'versionName = "0.3.0-alpha4-fix3a"' android/app/build.gradle
+          
+          grep -q 'versionCode = 43' android/app/build.gradle
+          grep -q 'versionName = "0.3.0-alpha4-fix3b1"' android/app/build.gradle
+          
           grep -q '#include <lsfg_3_1p.hpp>' vita3k/renderer/src/vulkan/frame_generation.cpp
           grep -q 'kWarmupFrames = 60' vita3k/renderer/src/vulkan/frame_generation.cpp
           ! grep -q '\[VS-FG-TRANSITION\]' vita3k/renderer/src/vulkan/frame_generation.cpp
@@ -195,8 +458,14 @@ jobs:
           grep -q '\[VS-KERNEL-SYNC-FIX\]' vita3k/kernel/src/sync_primitives.cpp
           grep -q 'condvar->uid = uid' vita3k/kernel/src/sync_primitives.cpp
           grep -q 'kEnableHdTypelessExperimental = false' vita3k/renderer/src/vulkan/surface_cache.cpp
-          grep -q '\[VS-TOUCH-UI3\]' android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java
-          grep -q 'source = "/sys/class/kgsl/kgsl-3d0/gpubusy"' android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/PerformanceHudView.java
+          
+          grep -q '\[VS-GPU-HUD2\]' android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/PerformanceHudView.java
+          grep -q 'previousGpuBusy' android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/PerformanceHudView.java
+          grep -q '"GPU_DELTA"' android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/PerformanceHudView.java
+          grep -q '\[VS-TOUCH-VECTOR\]' android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java
+          grep -q 'drawVitaStationButton' android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java
+          grep -q 'drawVitaStationDpad' android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java
+          grep -q 'drawVitaStationJoystick' android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java
 
       - name: Set up Java 17
         uses: actions/setup-java@v5
@@ -269,7 +538,7 @@ jobs:
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build signed VitaStation FIX3 Stage A APK
+      - name: Build signed VitaStation FIX3 Stage B1 APK
         shell: bash
         run: |
           set -euo pipefail
@@ -293,7 +562,7 @@ jobs:
           )"
           test "$actual" = "$VITASTATION_SIGNING_CERT_SHA256"
 
-      - name: Persist FIX3 Stage A source only after green signed build
+      - name: Persist FIX3 Stage B1 source only after green signed build
         shell: bash
         run: |
           set -euo pipefail
@@ -307,9 +576,9 @@ jobs:
             vita3k/renderer/src/vulkan/frame_generation.cpp
 
           if git diff --cached --quiet; then
-            echo "FIX3 Stage A source already persisted."
+            echo "FIX3 Stage B1 source already persisted."
           else
-            git commit -m "VitaStation v0.3.0 Alpha4 FIX3 Stage A: stable FrameGen baseline [skip ci]"
+            git commit -m "VitaStation v0.3.0 Alpha4 FIX3B1: vector touch + KGSL delta HUD [skip ci]"
             git push origin HEAD:main
           fi
 
@@ -318,14 +587,14 @@ jobs:
         run: |
           set -euo pipefail
           SRC="artifacts/vitastation-android/app.apk"
-          DST="artifacts/vitastation-android/VitaStation-v0.3.0-Alpha4-FIX3A-StableFrameGen-GPUHUD-TouchUI3-Signed.apk"
+          DST="artifacts/vitastation-android/VitaStation-v0.3.0-Alpha4-FIX3B1-VectorTouch-KGSLDeltaHUD-StableFG-Signed.apk"
           test -f "$SRC"
           mv "$SRC" "$DST"
           ls -lh "$DST"
 
-      - name: Upload VitaStation FIX3 Stage A APK
+      - name: Upload VitaStation FIX3 Stage B1 APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.3.0-Alpha4-FIX3A-StableFrameGen-GPUHUD-TouchUI3-Signed-Android
-          path: artifacts/vitastation-android/VitaStation-v0.3.0-Alpha4-FIX3A-StableFrameGen-GPUHUD-TouchUI3-Signed.apk
+          name: VitaStation-v0.3.0-Alpha4-FIX3B1-VectorTouch-KGSLDeltaHUD-StableFG-Signed-Android
+          path: artifacts/vitastation-android/VitaStation-v0.3.0-Alpha4-FIX3B1-VectorTouch-KGSLDeltaHUD-StableFG-Signed.apk
           if-no-files-found: error

@@ -144,6 +144,15 @@ public final class InputOverlayDrawableButton
     return mHeight;
   }
 
+  // [VS-TOUCH-ENGINE4] Geometry is independent from legacy PNG size.
+  public void setSize(int width, int height)
+  {
+    mWidth = Math.max(1, width);
+    mHeight = Math.max(1, height);
+    setBounds(mControlPositionX, mControlPositionY,
+            mControlPositionX + mWidth, mControlPositionY + mHeight);
+  }
+
   public void setPressedState(boolean isPressed)
   {
     if(mRole == InputOverlay.OVERLAY_MASK_TOUCH_SCREEN_SWITCH){

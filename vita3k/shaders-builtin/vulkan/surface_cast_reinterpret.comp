@@ -1,0 +1,38 @@
+#version 450
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(binding = 0) uniform usampler2D store_img;
+layout(binding = 1, r32ui) uniform writeonly uimage2D out_img;
+layout(push_constant) uniform ReinterpretPush {
+    uint out_width;
+    uint out_height;
+    uint scaled_store_w;
+    uint scaled_store_h;
+    uint ratio;
+    uint start_word;
+} pc;
+
+void main() {
+    uvec2 dst = gl_GlobalInvocationID.xy;
+    if (dst.x >= pc.out_width || dst.y >= pc.out_height)
+        return;
+
+    uint words_per_row = pc.scaled_store_w * pc.ratio;
+    if (words_per_row == 0u || pc.scaled_store_h == 0u) {
+        imageStore(out_img, ivec2(dst), uvec4(0u));
+        return;
+    }
+
+    uint global_word = pc.start_word + dst.y * words_per_row + dst.x;
+    uint source_row = global_word / words_per_row;
+    uint word_in_row = global_word % words_per_row;
+    if (source_row >= pc.scaled_store_h) {
+        imageStore(out_img, ivec2(dst), uvec4(0u));
+        return;
+    }
+
+    uint source_x = word_in_row / pc.ratio;
+    uint lane = word_in_row % pc.ratio;
+    uvec2 raw = texelFetch(store_img, ivec2(source_x, source_row), 0).xy;
+    uint value = lane == 0u ? raw.x : raw.y;
+    imageStore(out_img, ivec2(dst), uvec4(value, 0u, 0u, 0u));
+}

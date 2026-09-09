@@ -978,6 +978,55 @@ private static Bitmap tintBitmap(Bitmap source, int tint)
    * @param control      Control identifier for the button the InputOverlayDrawableButton represents.
    * @return An {@link InputOverlayDrawableButton} with the correct drawing bounds set.
    */
+  // [VS-TOUCH-ENGINE4] Compact VitaStation geometry.
+  private static int vsShortEdge(LayoutBounds bounds)
+  {
+    return Math.max(1, Math.min(bounds.width, bounds.height));
+  }
+
+  private static int vsButtonWidth(int legacyId, LayoutBounds bounds, float globalScale)
+  {
+    float fraction = 0.105f;
+    if (legacyId == ButtonType.TRIGGER_L || legacyId == ButtonType.TRIGGER_R)
+      fraction = 0.18f;
+    else if (legacyId == ButtonType.TRIGGER_L2 || legacyId == ButtonType.TRIGGER_R2)
+      fraction = 0.13f;
+    else if (legacyId == ButtonType.BUTTON_START || legacyId == ButtonType.BUTTON_SELECT)
+      fraction = 0.12f;
+    else if (legacyId == ButtonType.BUTTON_PS
+            || legacyId == ButtonType.TRIGGER_L3 || legacyId == ButtonType.TRIGGER_R3
+            || legacyId == ButtonType.BUTTON_TOUCH_SWITCH
+            || legacyId == ButtonType.BUTTON_TOUCH_HIDE)
+      fraction = 0.075f;
+    return Math.max(24, Math.round(vsShortEdge(bounds) * fraction * globalScale));
+  }
+
+  private static int vsButtonHeight(int legacyId, LayoutBounds bounds, float globalScale)
+  {
+    float fraction = 0.105f;
+    if (legacyId == ButtonType.TRIGGER_L || legacyId == ButtonType.TRIGGER_R)
+      fraction = 0.070f;
+    else if (legacyId == ButtonType.TRIGGER_L2 || legacyId == ButtonType.TRIGGER_R2
+            || legacyId == ButtonType.BUTTON_START || legacyId == ButtonType.BUTTON_SELECT)
+      fraction = 0.055f;
+    else if (legacyId == ButtonType.BUTTON_PS
+            || legacyId == ButtonType.TRIGGER_L3 || legacyId == ButtonType.TRIGGER_R3
+            || legacyId == ButtonType.BUTTON_TOUCH_SWITCH
+            || legacyId == ButtonType.BUTTON_TOUCH_HIDE)
+      fraction = 0.075f;
+    return Math.max(24, Math.round(vsShortEdge(bounds) * fraction * globalScale));
+  }
+
+  private static int vsDpadSize(LayoutBounds bounds, float globalScale)
+  {
+    return Math.max(48, Math.round(vsShortEdge(bounds) * 0.19f * globalScale));
+  }
+
+  private static int vsJoystickSize(LayoutBounds bounds, float globalScale)
+  {
+    return Math.max(48, Math.round(vsShortEdge(bounds) * 0.18f * globalScale));
+  }
+
   private static InputOverlayDrawableButton initializeOverlayButton(Context context,
           int defaultResId, int pressedResId, int legacyId, int control, int role,
           OverlayLayout layout, LayoutBounds layoutBounds, float globalScale, int globalOpacity)
@@ -1011,6 +1060,9 @@ private static Bitmap tintBitmap(Bitmap source, int tint)
     final InputOverlayDrawableButton overlayDrawable =
             new InputOverlayDrawableButton(res, defaultStateBitmap, pressedStateBitmap, legacyId,
                     control, role);
+    overlayDrawable.setSize(
+            vsButtonWidth(legacyId, layoutBounds, globalScale),
+            vsButtonHeight(legacyId, layoutBounds, globalScale));
 
     OverlayPosition position = layout.positionFor(legacyId);
     if (position == null)
@@ -1082,6 +1134,8 @@ private static Bitmap tintBitmap(Bitmap source, int tint)
             new InputOverlayDrawableDpad(res, defaultStateBitmap,
                     pressedOneDirectionStateBitmap, pressedTwoDirectionsStateBitmap,
                     legacyId, upControl, downControl, leftControl, rightControl);
+    final int dpadSize = vsDpadSize(layoutBounds, globalScale);
+    overlayDrawable.setSize(dpadSize, dpadSize);
 
     OverlayPosition position = layout.positionFor(legacyId);
     if (position == null)
@@ -1147,7 +1201,7 @@ private static Bitmap tintBitmap(Bitmap source, int tint)
 
     // Now set the bounds for the InputOverlayDrawableJoystick.
     // This will dictate where on the screen (and the what the size) the InputOverlayDrawableJoystick will be.
-    int outerSize = bitmapOuter.getWidth();
+    int outerSize = vsJoystickSize(layoutBounds, globalScale);
     Rect outerRect = new Rect(drawableX, drawableY, drawableX + outerSize, drawableY + outerSize);
     Rect innerRect = new Rect(0, 0, (int) (outerSize / innerScale), (int) (outerSize / innerScale));
 

@@ -204,6 +204,15 @@ public final class InputOverlayDrawableDpad
     return mHeight;
   }
 
+  // [VS-TOUCH-ENGINE4] Geometry is independent from legacy PNG size.
+  public void setSize(int width, int height)
+  {
+    mWidth = Math.max(1, width);
+    mHeight = Math.max(1, height);
+    setBounds(mControlPositionX, mControlPositionY,
+            mControlPositionX + mWidth, mControlPositionY + mHeight);
+  }
+
   public void setState(int pressState)
   {
     mPressState = pressState;

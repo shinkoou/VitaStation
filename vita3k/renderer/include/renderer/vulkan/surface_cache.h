@@ -112,9 +112,10 @@ struct ColorSurfaceCacheInfo : public SurfaceCacheInfo {
     // same image with a different view(swizzle) used for sampling
     vk::ImageView alternate_view = nullptr;
 
-    // Raw 64-bit store view. For the verified 8 Bpp -> 4 Bpp alias path
-    // this exposes each source texel as two 32-bit words.
-    vk::ImageView reinterpret_store_view = nullptr;
+    // [VS-TYPELESS-STAGING] Isolated raw 64-bit snapshot.
+    // The framebuffer image itself stays non-mutable.
+    std::unique_ptr<vkutil::Buffer> reinterpret_staging_buffer;
+    std::unique_ptr<vkutil::Image> reinterpret_staging_image;
 
     // only used when upscaling is enabled, to downscale the image first
     std::unique_ptr<vkutil::Image> blit_image;
@@ -187,7 +188,7 @@ struct ReinterpretPushConstants {
     uint32_t scaled_store_w;
     uint32_t scaled_store_h;
     uint32_t ratio;
-    uint32_t half_index;
+    uint32_t start_word;
 };
 
 class VKSurfaceCache {

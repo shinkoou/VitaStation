@@ -668,7 +668,30 @@ inline static int mutex_lock_impl(KernelState &kernel, MemState &mem, const char
         const auto data_it = mutex->waiting_threads->push(data);
         thread_lock.unlock();
 
-        int res = handle_timeout(kernel, thread, thread_lock, mutex_lock, mutex->waiting_threads, data_it, export_name, timeout);
+        int res;
+        uint32_t ownership_rewaits = 0;
+        while (true) {
+            res = handle_timeout(
+                kernel, thread, thread_lock, mutex_lock,
+                mutex->waiting_threads, data_it, export_name, timeout);
+
+            if (res != SCE_KERNEL_OK || mutex->owner == thread)
+                break;
+
+            // [VS-KERNEL-OWNERSHIP-WAIT] A status wake alone is not ownership.
+            if (((++ownership_rewaits & 0xFFu) == 1u)) {
+                LOG_DEBUG(
+                    "[VS-KERNEL-OWNERSHIP-WAIT] mutex={} tid={} owner={} rewaits={}",
+                    mutex->uid,
+                    thread_id,
+                    mutex->owner ? mutex->owner->id : 0,
+                    ownership_rewaits);
+            }
+
+            thread_lock.lock();
+            thread->update_status(ThreadStatus::wait, ThreadStatus::run);
+            thread_lock.unlock();
+        }
 
         if (weight == SyncWeight::Light) {
             mutex->workarea.get(mem)->lockCount = mutex->lock_count;

@@ -27,8 +27,8 @@ public final class InputOverlayDrawableJoystick
   private final int mJoystickYControl;
   private int mControlPositionX, mControlPositionY;
   private int mPreviousTouchX, mPreviousTouchY;
-  private final int mWidth;
-  private final int mHeight;
+  private int mWidth;
+  private int mHeight;
   private Rect mVirtBounds;
   private Rect mOrigBounds;
   private int mOpacity;
@@ -64,8 +64,8 @@ public final class InputOverlayDrawableJoystick
     mDefaultStateInnerBitmap = new BitmapDrawable(res, bitmapInnerDefault);
     mPressedStateInnerBitmap = new BitmapDrawable(res, bitmapInnerPressed);
     mBoundsBoxBitmap = new BitmapDrawable(res, bitmapOuter);
-    mWidth = bitmapOuter.getWidth();
-    mHeight = bitmapOuter.getHeight();
+    mWidth = rectOuter.width();
+    mHeight = rectOuter.height();
 
     setBounds(rectOuter);
     mDefaultStateInnerBitmap.setBounds(rectInner);
@@ -183,15 +183,15 @@ public final class InputOverlayDrawableJoystick
         mControlPositionX += deltaX;
         mControlPositionY += deltaY;
         setBounds(new Rect(mControlPositionX, mControlPositionY,
-                mOuterBitmap.getIntrinsicWidth() + mControlPositionX,
-                mOuterBitmap.getIntrinsicHeight() + mControlPositionY));
+                mWidth + mControlPositionX,
+                mHeight + mControlPositionY));
         setVirtBounds(new Rect(mControlPositionX, mControlPositionY,
-                mOuterBitmap.getIntrinsicWidth() + mControlPositionX,
-                mOuterBitmap.getIntrinsicHeight() + mControlPositionY));
+                mWidth + mControlPositionX,
+                mHeight + mControlPositionY));
         SetInnerBounds();
         setOrigBounds(new Rect(new Rect(mControlPositionX, mControlPositionY,
-                mOuterBitmap.getIntrinsicWidth() + mControlPositionX,
-                mOuterBitmap.getIntrinsicHeight() + mControlPositionY)));
+                mWidth + mControlPositionX,
+                mHeight + mControlPositionY)));
         mPreviousTouchX = (int) event.getX();
         mPreviousTouchY = (int) event.getY();
         break;

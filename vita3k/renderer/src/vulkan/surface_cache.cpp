@@ -260,7 +260,15 @@ void VKSurfaceCache::destroy_surface(ColorSurfaceCacheInfo &info) {
     info.casted_textures.clear();
 
     destroy_queue.add(info.alternate_view);
-    destroy_queue.add(info.reinterpret_store_view);
+
+    if (info.reinterpret_staging_image) {
+        destroy_queue.add_image(*info.reinterpret_staging_image);
+        info.reinterpret_staging_image.reset();
+    }
+    if (info.reinterpret_staging_buffer) {
+        destroy_queue.add_buffer(*info.reinterpret_staging_buffer);
+        info.reinterpret_staging_buffer.reset();
+    }
 
     if (last_written_surface == &info)
         last_written_surface = nullptr;
@@ -314,9 +322,13 @@ void VKSurfaceCache::cleanup() {
             state.device.destroy(info.alternate_view);
             info.alternate_view = nullptr;
         }
-        if (info.reinterpret_store_view) {
-            state.device.destroy(info.reinterpret_store_view);
-            info.reinterpret_store_view = nullptr;
+        if (info.reinterpret_staging_image) {
+            info.reinterpret_staging_image->destroy();
+            info.reinterpret_staging_image.reset();
+        }
+        if (info.reinterpret_staging_buffer) {
+            info.reinterpret_staging_buffer->destroy();
+            info.reinterpret_staging_buffer.reset();
         }
 
         if (info.blit_image)
@@ -719,22 +731,21 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
         && guard_ratio == 2
         && guard_native_store_col == 0
         && start_sourced_line == 0
+        && (guard_native_byte_offset == 0u || guard_native_byte_offset == 4u)
         && (guard_sub_texel_byte % bytes_per_pixel_requested) == 0
         && info.original_width > 0
         && info.original_height > 0;
 
-    // The Alpha4 compute experiment changed global 64-bit image creation and
-    // correlated with Uncharted no longer reaching gameplay. Keep detection
-    // and diagnostics, but route candidates through the conservative fallback
-    // until the raw staging implementation is isolated from framebuffer images.
-    constexpr bool kEnableHdTypelessExperimental = false;
+    // FIX4 is narrow by construction: only the verified +0/+4 8->4 alias.
+    // The framebuffer stays non-mutable; raw reinterpretation happens in staging.
+    constexpr bool kEnableHdTypelessExperimental = true;
     const bool use_compute_deinterleave =
         kEnableHdTypelessExperimental && hd_typeless_candidate;
-    if (hd_typeless_candidate && !kEnableHdTypelessExperimental) {
-        static thread_local uint64_t deferred_typeless_counter = 0;
-        if (((++deferred_typeless_counter & 0x3FFu) == 1u)) {
+    if (hd_typeless_candidate) {
+        static thread_local uint64_t staging_typeless_counter = 0;
+        if (((++staging_typeless_counter & 0x3FFu) == 1u)) {
             LOG_INFO(
-                "[VS-TYPELESS-HD-DEFERRED] raw_offset={} store_bpp={} req_bpp={} scale={} -> conservative path",
+                "[VS-TYPELESS-HD-STAGING] raw_offset={} store_bpp={} req_bpp={} scale={} source_mutable=0",
                 guard_native_byte_offset,
                 bytes_per_pixel_in_store,
                 bytes_per_pixel_requested,
@@ -995,34 +1006,81 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
                         state.device.createImageView(reinterpret_view_info);
                 }
 
-                if (!info.reinterpret_store_view) {
-                    vk::ImageViewCreateInfo store_view_info{
-                        .image = info.texture.image,
-                        .viewType = vk::ImageViewType::e2D,
-                        .format = vk::Format::eR32G32Uint,
-                        .components = {},
-                        .subresourceRange = vkutil::color_subresource_range
-                    };
-                    info.reinterpret_store_view =
-                        state.device.createImageView(store_view_info);
+                const vk::DeviceSize staging_bytes =
+                    static_cast<vk::DeviceSize>(info.texture.width)
+                    * static_cast<vk::DeviceSize>(info.texture.height)
+                    * 8u;
+                const bool staging_needs_rebuild =
+                    !info.reinterpret_staging_buffer
+                    || !info.reinterpret_staging_image
+                    || info.reinterpret_staging_buffer->size < staging_bytes
+                    || info.reinterpret_staging_image->width != info.texture.width
+                    || info.reinterpret_staging_image->height != info.texture.height;
+
+                if (staging_needs_rebuild) {
+                    if (info.reinterpret_staging_buffer) {
+                        state.frame().destroy_queue.add_buffer(*info.reinterpret_staging_buffer);
+                        info.reinterpret_staging_buffer.reset();
+                    }
+                    if (info.reinterpret_staging_image) {
+                        state.frame().destroy_queue.add_image(*info.reinterpret_staging_image);
+                        info.reinterpret_staging_image.reset();
+                    }
+
+                    info.reinterpret_staging_buffer =
+                        std::make_unique<vkutil::Buffer>(staging_bytes);
+                    info.reinterpret_staging_buffer->init_buffer(
+                        vk::BufferUsageFlagBits::eTransferDst
+                        | vk::BufferUsageFlagBits::eTransferSrc);
+
+                    info.reinterpret_staging_image =
+                        std::make_unique<vkutil::Image>(
+                            info.texture.width,
+                            info.texture.height,
+                            vk::Format::eR32G32Uint);
+                    info.reinterpret_staging_image->init_image(
+                        vk::ImageUsageFlagBits::eTransferDst
+                        | vk::ImageUsageFlagBits::eSampled);
                 }
 
-                vk::ImageMemoryBarrier store_to_compute{
-                    .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite
-                        | vk::AccessFlagBits::eShaderWrite,
-                    .dstAccessMask = vk::AccessFlagBits::eShaderRead,
-                    .oldLayout = vk::ImageLayout::eGeneral,
-                    .newLayout = vk::ImageLayout::eGeneral,
+                vk::BufferImageCopy raw_copy{
+                    .bufferOffset = 0,
+                    .bufferRowLength = info.texture.width,
+                    .bufferImageHeight = info.texture.height,
+                    .imageSubresource = vkutil::color_subresource_layer,
+                    .imageOffset = { 0, 0, 0 },
+                    .imageExtent = { info.texture.width, info.texture.height, 1 }
+                };
+
+                cmd_buffer.copyImageToBuffer(
+                    info.texture.image,
+                    vk::ImageLayout::eGeneral,
+                    info.reinterpret_staging_buffer->buffer,
+                    raw_copy);
+
+                vk::BufferMemoryBarrier staging_buffer_ready{
+                    .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
+                    .dstAccessMask = vk::AccessFlagBits::eTransferRead,
                     .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                     .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                    .image = info.texture.image,
-                    .subresourceRange = vkutil::color_subresource_range
+                    .buffer = info.reinterpret_staging_buffer->buffer,
+                    .offset = 0,
+                    .size = VK_WHOLE_SIZE
                 };
                 cmd_buffer.pipelineBarrier(
-                    vk::PipelineStageFlagBits::eColorAttachmentOutput
-                        | vk::PipelineStageFlagBits::eFragmentShader,
-                    vk::PipelineStageFlagBits::eComputeShader,
-                    {}, {}, {}, store_to_compute);
+                    vk::PipelineStageFlagBits::eTransfer,
+                    vk::PipelineStageFlagBits::eTransfer,
+                    vk::DependencyFlags{}, {}, staging_buffer_ready, {});
+
+                info.reinterpret_staging_image->transition_to_discard(
+                    cmd_buffer, vkutil::ImageLayout::TransferDst);
+                cmd_buffer.copyBufferToImage(
+                    info.reinterpret_staging_buffer->buffer,
+                    info.reinterpret_staging_image->image,
+                    vk::ImageLayout::eTransferDstOptimal,
+                    raw_copy);
+                info.reinterpret_staging_image->transition_to(
+                    cmd_buffer, vkutil::ImageLayout::SampledImage);
 
                 vk::DescriptorSet descriptor =
                     reinterpret_desc_sets[reinterpret_desc_idx];
@@ -1032,8 +1090,8 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
 
                 vk::DescriptorImageInfo store_info{
                     reinterpret_sampler,
-                    info.reinterpret_store_view,
-                    vk::ImageLayout::eGeneral
+                    info.reinterpret_staging_image->view,
+                    vk::ImageLayout::eShaderReadOnlyOptimal
                 };
                 vk::DescriptorImageInfo cast_info{
                     nullptr,
@@ -1064,7 +1122,7 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
                     .scaled_store_w = info.texture.width,
                     .scaled_store_h = info.texture.height,
                     .ratio = ratio,
-                    .half_index = half_index
+                    .start_word = half_index
                 };
                 cmd_buffer.bindPipeline(
                     vk::PipelineBindPoint::eCompute,
@@ -1089,7 +1147,7 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
                 static thread_local uint64_t hd_typeless_log_counter = 0;
                 if (((++hd_typeless_log_counter & 0xFFu) == 1u)) {
                     LOG_INFO(
-                        "[VS-TYPELESS-HD] raw_offset={} half={} ratio={} size={}x{} scale={}",
+                        "[VS-TYPELESS-HD] raw_offset={} start_word={} ratio={} size={}x{} scale={} staging=1",
                         native_byte_offset,
                         half_index,
                         ratio,

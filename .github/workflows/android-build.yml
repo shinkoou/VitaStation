@@ -1,18 +1,18 @@
-name: VitaStation Android APK - Alpha 4 FIX3 Stage B1 R2
+name: VitaStation Android APK - Alpha 4 FIX4
 
-on:
+"on":
   workflow_dispatch:
   push:
     branches:
       - main
     paths:
-      - '.github/workflows/android-build.yml'
+      - '.github/workflows/android-build-fix4.yml'
 
 permissions:
   contents: write
 
 concurrency:
-  group: vitastation-android-${{ github.ref }}
+  group: vitastation-android-fix4-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -21,7 +21,7 @@ env:
 
 jobs:
   android-build:
-    name: Build VitaStation v0.3.0 Alpha 4 FIX3 Stage B1 R2
+    name: Build VitaStation v0.3.0 Alpha 4 FIX4
     runs-on: ubuntu-latest
 
     steps:
@@ -31,462 +31,365 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Apply FIX3 Stage B1 - stable FrameGen, KGSL delta HUD and vector Touch UI
+      - name: Guard healthy FIX3B1 source baseline
         shell: bash
         run: |
           set -euo pipefail
-          
-          # Protect the proven FrameGen baseline. Stage B1 does not experiment with LSFG.
-          STABLE_FG_COMMIT="1198f481ed25c932d269ad97525d2217c511bd9a"
-          FG_PATH="vita3k/renderer/src/vulkan/frame_generation.cpp"
-          git cat-file -e "${STABLE_FG_COMMIT}^{commit}"
-          git show "${STABLE_FG_COMMIT}:${FG_PATH}" > "${FG_PATH}"
-          
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          gradle = Path('android/app/build.gradle')
-          text = gradle.read_text(encoding='utf-8')
-          text, n1 = re.subn(r'versionCode = \d+', 'versionCode = 43', text, count=1)
-          text, n2 = re.subn(r'versionName = "[^"]+"', 'versionName = "0.3.0-alpha4-fix3b1-r2"', text, count=1)
-          if n1 != 1 or n2 != 1:
-              raise SystemExit('::error::Could not update FIX3 Stage B1 version metadata')
-          gradle.write_text(text, encoding='utf-8')
-
-          # GPU HUD 2.0: direct KGSL counters -> gpubusy delta -> honest zero/unavailable.
-          hud = Path('android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/PerformanceHudView.java')
-          text = hud.read_text(encoding='utf-8')
-
-          field_anchor = '    private long previousWallMs;\n'
-          field_patch = (
-              field_anchor
-              + '    private long previousGpuBusy;\n'
-              + '    private long previousGpuTotal;\n'
-              + '    private boolean hasPreviousGpuBusy;\n'
+          declare -A expected=(
+            ["vita3k/renderer/src/vulkan/frame_generation.cpp"]="1e7cc634f3308566b6ea3d972b73c55086f8f781"
+            ["vita3k/kernel/src/sync_primitives.cpp"]="e5728d3438991a9e75163facb7cb59bb8cd736b5"
+            ["vita3k/renderer/src/vulkan/surface_cache.cpp"]="af699b6ac184e7c9a88a96720cef10285bf6e22b"
+            ["vita3k/renderer/include/renderer/vulkan/surface_cache.h"]="c5b608e0e7b733b971bb11228e2c93b96979c666"
+            ["android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java"]="46d705d4c6882528f7ac9aa4a8c06f2c2a3634af"
+            ["android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlayDrawableButton.java"]="96a6f642d6a1b73f4b7e9a7f54430c59343fe922"
+            ["android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlayDrawableDpad.java"]="39fa7673f7fc9647cb51078d1493b2cf2e181feb"
+            ["android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlayDrawableJoystick.java"]="6d17b256b88684e9612e2ab789c9aabb387c83a1"
+            ["android/app/src/main/res/values/integers.xml"]="a4098388fd1a3a60f5322c6c85e392bdc7faee16"
           )
-          if 'private long previousGpuBusy;' not in text:
-              if text.count(field_anchor) != 1:
-                  raise SystemExit('::error::PerformanceHudView GPU state anchor mismatch')
-              text = text.replace(field_anchor, field_patch, 1)
+          for path in "${!expected[@]}"; do
+            actual="$(git hash-object "$path")"
+            if [ "$actual" != "${expected[$path]}" ]; then
+              echo "::error::Baseline drift at $path expected=${expected[$path]} actual=$actual"
+              exit 1
+            fi
+          done
+          echo "[VS-FIX4] healthy source baseline verified"
 
-          gpu_start_marker = '    private Float readGpuUsage() {'
-          gpu_end_marker = 'private void logGpuMetric'
+      - name: Apply FIX4 source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/fix4_patch.b64" <<'FIX4_B64'
+          CmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aAppbXBvcnQgcmUKCmRlZiByZWFkKHBhdGgpOgogICAgcmV0dXJuIFBhdGgocGF0
+          aCkucmVhZF90ZXh0KGVuY29kaW5nPSJ1dGYtOCIpCgpkZWYgcmVwbGFjZV9vbmNlKHRleHQsIG9sZCwgbmV3LCBsYWJlbCk6
+          CiAgICBjb3VudCA9IHRleHQuY291bnQob2xkKQogICAgaWYgY291bnQgIT0gMToKICAgICAgICByYWlzZSBTeXN0ZW1FeGl0
+          KGYiOjplcnJvcjo6e2xhYmVsfTogZXhwZWN0ZWQgZXhhY3RseSAxIGFuY2hvciwgZ290IHtjb3VudH0iKQogICAgcmV0dXJu
+          IHRleHQucmVwbGFjZShvbGQsIG5ldywgMSkKCiMgVmVyc2lvbgpwID0gUGF0aCgiYW5kcm9pZC9hcHAvYnVpbGQuZ3JhZGxl
+          IikKdGV4dCA9IHAucmVhZF90ZXh0KGVuY29kaW5nPSJ1dGYtOCIpCnRleHQsIG4xID0gcmUuc3VibihyJ3ZlcnNpb25Db2Rl
+          ID0gXGQrJywgJ3ZlcnNpb25Db2RlID0gNDQnLCB0ZXh0LCBjb3VudD0xKQp0ZXh0LCBuMiA9IHJlLnN1Ym4ocid2ZXJzaW9u
+          TmFtZSA9ICJbXiJdKyInLCAndmVyc2lvbk5hbWUgPSAiMC4zLjAtYWxwaGE0LWZpeDQiJywgdGV4dCwgY291bnQ9MSkKaWYg
+          bjEgIT0gMSBvciBuMiAhPSAxOgogICAgcmFpc2UgU3lzdGVtRXhpdCgiOjplcnJvcjo6RklYNCB2ZXJzaW9uIG1ldGFkYXRh
+          IGFuY2hvciBtaXNtYXRjaCIpCnAud3JpdGVfdGV4dCh0ZXh0LCBlbmNvZGluZz0idXRmLTgiKQoKIyBLZXJuZWwgU3luYyAz
+          LjAKcCA9IFBhdGgoInZpdGEzay9rZXJuZWwvc3JjL3N5bmNfcHJpbWl0aXZlcy5jcHAiKQp0ZXh0ID0gcC5yZWFkX3RleHQo
+          ZW5jb2Rpbmc9InV0Zi04IikKb2xkID0gJycnICAgICAgICBpbnQgcmVzID0gaGFuZGxlX3RpbWVvdXQoa2VybmVsLCB0aHJl
+          YWQsIHRocmVhZF9sb2NrLCBtdXRleF9sb2NrLCBtdXRleC0+d2FpdGluZ190aHJlYWRzLCBkYXRhX2l0LCBleHBvcnRfbmFt
+          ZSwgdGltZW91dCk7CgogICAgICAgIGlmICh3ZWlnaHQgPT0gU3luY1dlaWdodDo6TGlnaHQpIHsKJycnCm5ldyA9ICcnJyAg
+          ICAgICAgaW50IHJlczsKICAgICAgICB1aW50MzJfdCBvd25lcnNoaXBfcmV3YWl0cyA9IDA7CiAgICAgICAgd2hpbGUgKHRy
+          dWUpIHsKICAgICAgICAgICAgcmVzID0gaGFuZGxlX3RpbWVvdXQoCiAgICAgICAgICAgICAgICBrZXJuZWwsIHRocmVhZCwg
+          dGhyZWFkX2xvY2ssIG11dGV4X2xvY2ssCiAgICAgICAgICAgICAgICBtdXRleC0+d2FpdGluZ190aHJlYWRzLCBkYXRhX2l0
+          LCBleHBvcnRfbmFtZSwgdGltZW91dCk7CgogICAgICAgICAgICBpZiAocmVzICE9IFNDRV9LRVJORUxfT0sgfHwgbXV0ZXgt
+          Pm93bmVyID09IHRocmVhZCkKICAgICAgICAgICAgICAgIGJyZWFrOwoKICAgICAgICAgICAgLy8gW1ZTLUtFUk5FTC1PV05F
+          UlNISVAtV0FJVF0gQSBzdGF0dXMgd2FrZSBhbG9uZSBpcyBub3Qgb3duZXJzaGlwLgogICAgICAgICAgICBpZiAoKCgrK293
+          bmVyc2hpcF9yZXdhaXRzICYgMHhGRnUpID09IDF1KSkgewogICAgICAgICAgICAgICAgTE9HX0RFQlVHKAogICAgICAgICAg
+          ICAgICAgICAgICJbVlMtS0VSTkVMLU9XTkVSU0hJUC1XQUlUXSBtdXRleD17fSB0aWQ9e30gb3duZXI9e30gcmV3YWl0cz17
+          fSIsCiAgICAgICAgICAgICAgICAgICAgbXV0ZXgtPnVpZCwKICAgICAgICAgICAgICAgICAgICB0aHJlYWRfaWQsCiAgICAg
+          ICAgICAgICAgICAgICAgbXV0ZXgtPm93bmVyID8gbXV0ZXgtPm93bmVyLT5pZCA6IDAsCiAgICAgICAgICAgICAgICAgICAg
+          b3duZXJzaGlwX3Jld2FpdHMpOwogICAgICAgICAgICB9CgogICAgICAgICAgICB0aHJlYWRfbG9jay5sb2NrKCk7CiAgICAg
+          ICAgICAgIHRocmVhZC0+dXBkYXRlX3N0YXR1cyhUaHJlYWRTdGF0dXM6OndhaXQsIFRocmVhZFN0YXR1czo6cnVuKTsKICAg
+          ICAgICAgICAgdGhyZWFkX2xvY2sudW5sb2NrKCk7CiAgICAgICAgfQoKICAgICAgICBpZiAod2VpZ2h0ID09IFN5bmNXZWln
+          aHQ6OkxpZ2h0KSB7CicnJwp0ZXh0ID0gcmVwbGFjZV9vbmNlKHRleHQsIG9sZCwgbmV3LCAia2VybmVsIG93bmVyc2hpcCB3
+          YWl0ZXIiKQpwLndyaXRlX3RleHQodGV4dCwgZW5jb2Rpbmc9InV0Zi04IikKCiMgVHlwZWxlc3MgaGVhZGVyCnAgPSBQYXRo
+          KCJ2aXRhM2svcmVuZGVyZXIvaW5jbHVkZS9yZW5kZXJlci92dWxrYW4vc3VyZmFjZV9jYWNoZS5oIikKdGV4dCA9IHAucmVh
+          ZF90ZXh0KGVuY29kaW5nPSJ1dGYtOCIpCnRleHQgPSByZXBsYWNlX29uY2UodGV4dCwKJycnICAgIC8vIFJhdyA2NC1iaXQg
+          c3RvcmUgdmlldy4gRm9yIHRoZSB2ZXJpZmllZCA4IEJwcCAtPiA0IEJwcCBhbGlhcyBwYXRoCiAgICAvLyB0aGlzIGV4cG9z
+          ZXMgZWFjaCBzb3VyY2UgdGV4ZWwgYXMgdHdvIDMyLWJpdCB3b3Jkcy4KICAgIHZrOjpJbWFnZVZpZXcgcmVpbnRlcnByZXRf
+          c3RvcmVfdmlldyA9IG51bGxwdHI7CgogICAgLy8gb25seSB1c2VkIHdoZW4gdXBzY2FsaW5nIGlzIGVuYWJsZWQsIHRvIGRv
+          d25zY2FsZSB0aGUgaW1hZ2UgZmlyc3QKJycnLAonJycgICAgLy8gW1ZTLVRZUEVMRVNTLVNUQUdJTkddIElzb2xhdGVkIHJh
+          dyA2NC1iaXQgc25hcHNob3QuCiAgICAvLyBUaGUgZnJhbWVidWZmZXIgaW1hZ2UgaXRzZWxmIHN0YXlzIG5vbi1tdXRhYmxl
+          LgogICAgc3RkOjp1bmlxdWVfcHRyPHZrdXRpbDo6QnVmZmVyPiByZWludGVycHJldF9zdGFnaW5nX2J1ZmZlcjsKICAgIHN0
+          ZDo6dW5pcXVlX3B0cjx2a3V0aWw6OkltYWdlPiByZWludGVycHJldF9zdGFnaW5nX2ltYWdlOwoKICAgIC8vIG9ubHkgdXNl
+          ZCB3aGVuIHVwc2NhbGluZyBpcyBlbmFibGVkLCB0byBkb3duc2NhbGUgdGhlIGltYWdlIGZpcnN0CicnJywKInR5cGVsZXNz
+          IHN0YWdpbmcgZmllbGRzIikKdGV4dCA9IHJlcGxhY2Vfb25jZSh0ZXh0LAonJycgICAgdWludDMyX3QgcmF0aW87CiAgICB1
+          aW50MzJfdCBoYWxmX2luZGV4OwonJycsCicnJyAgICB1aW50MzJfdCByYXRpbzsKICAgIHVpbnQzMl90IHN0YXJ0X3dvcmQ7
+          CicnJywKInR5cGVsZXNzIHB1c2ggY29uc3RhbnQiKQpwLndyaXRlX3RleHQodGV4dCwgZW5jb2Rpbmc9InV0Zi04IikKCiMg
+          VHlwZWxlc3Mgc291cmNlCnAgPSBQYXRoKCJ2aXRhM2svcmVuZGVyZXIvc3JjL3Z1bGthbi9zdXJmYWNlX2NhY2hlLmNwcCIp
+          CnRleHQgPSBwLnJlYWRfdGV4dChlbmNvZGluZz0idXRmLTgiKQp0ZXh0ID0gcmVwbGFjZV9vbmNlKHRleHQsCicnJyAgICAg
+          ICAgJiYgZ3VhcmRfbmF0aXZlX3N0b3JlX2NvbCA9PSAwCiAgICAgICAgJiYgc3RhcnRfc291cmNlZF9saW5lID09IDAKICAg
+          ICAgICAmJiAoZ3VhcmRfc3ViX3RleGVsX2J5dGUgJSBieXRlc19wZXJfcGl4ZWxfcmVxdWVzdGVkKSA9PSAwCiAgICAgICAg
+          JiYgaW5mby5vcmlnaW5hbF93aWR0aCA+IDAKICAgICAgICAmJiBpbmZvLm9yaWdpbmFsX2hlaWdodCA+IDA7CgogICAgLy8g
+          VGhlIEFscGhhNCBjb21wdXRlIGV4cGVyaW1lbnQgY2hhbmdlZCBnbG9iYWwgNjQtYml0IGltYWdlIGNyZWF0aW9uIGFuZAog
+          ICAgLy8gY29ycmVsYXRlZCB3aXRoIFVuY2hhcnRlZCBubyBsb25nZXIgcmVhY2hpbmcgZ2FtZXBsYXkuIEtlZXAgZGV0ZWN0
+          aW9uCiAgICAvLyBhbmQgZGlhZ25vc3RpY3MsIGJ1dCByb3V0ZSBjYW5kaWRhdGVzIHRocm91Z2ggdGhlIGNvbnNlcnZhdGl2
+          ZSBmYWxsYmFjawogICAgLy8gdW50aWwgdGhlIHJhdyBzdGFnaW5nIGltcGxlbWVudGF0aW9uIGlzIGlzb2xhdGVkIGZyb20g
+          ZnJhbWVidWZmZXIgaW1hZ2VzLgogICAgY29uc3RleHByIGJvb2wga0VuYWJsZUhkVHlwZWxlc3NFeHBlcmltZW50YWwgPSBm
+          YWxzZTsKICAgIGNvbnN0IGJvb2wgdXNlX2NvbXB1dGVfZGVpbnRlcmxlYXZlID0KICAgICAgICBrRW5hYmxlSGRUeXBlbGVz
+          c0V4cGVyaW1lbnRhbCAmJiBoZF90eXBlbGVzc19jYW5kaWRhdGU7CiAgICBpZiAoaGRfdHlwZWxlc3NfY2FuZGlkYXRlICYm
+          ICFrRW5hYmxlSGRUeXBlbGVzc0V4cGVyaW1lbnRhbCkgewogICAgICAgIHN0YXRpYyB0aHJlYWRfbG9jYWwgdWludDY0X3Qg
+          ZGVmZXJyZWRfdHlwZWxlc3NfY291bnRlciA9IDA7CiAgICAgICAgaWYgKCgoKytkZWZlcnJlZF90eXBlbGVzc19jb3VudGVy
+          ICYgMHgzRkZ1KSA9PSAxdSkpIHsKICAgICAgICAgICAgTE9HX0lORk8oCiAgICAgICAgICAgICAgICAiW1ZTLVRZUEVMRVNT
+          LUhELURFRkVSUkVEXSByYXdfb2Zmc2V0PXt9IHN0b3JlX2JwcD17fSByZXFfYnBwPXt9IHNjYWxlPXt9IC0+IGNvbnNlcnZh
+          dGl2ZSBwYXRoIiwKICAgICAgICAgICAgICAgIGd1YXJkX25hdGl2ZV9ieXRlX29mZnNldCwKICAgICAgICAgICAgICAgIGJ5
+          dGVzX3Blcl9waXhlbF9pbl9zdG9yZSwKICAgICAgICAgICAgICAgIGJ5dGVzX3Blcl9waXhlbF9yZXF1ZXN0ZWQsCiAgICAg
+          ICAgICAgICAgICBzdGF0ZS5yZXNfbXVsdGlwbGllcik7CiAgICAgICAgfQogICAgfQonJycsCicnJyAgICAgICAgJiYgZ3Vh
+          cmRfbmF0aXZlX3N0b3JlX2NvbCA9PSAwCiAgICAgICAgJiYgc3RhcnRfc291cmNlZF9saW5lID09IDAKICAgICAgICAmJiAo
+          Z3VhcmRfbmF0aXZlX2J5dGVfb2Zmc2V0ID09IDB1IHx8IGd1YXJkX25hdGl2ZV9ieXRlX29mZnNldCA9PSA0dSkKICAgICAg
+          ICAmJiAoZ3VhcmRfc3ViX3RleGVsX2J5dGUgJSBieXRlc19wZXJfcGl4ZWxfcmVxdWVzdGVkKSA9PSAwCiAgICAgICAgJiYg
+          aW5mby5vcmlnaW5hbF93aWR0aCA+IDAKICAgICAgICAmJiBpbmZvLm9yaWdpbmFsX2hlaWdodCA+IDA7CgogICAgLy8gRklY
+          NCBpcyBuYXJyb3cgYnkgY29uc3RydWN0aW9uOiBvbmx5IHRoZSB2ZXJpZmllZCArMC8rNCA4LT40IGFsaWFzLgogICAgLy8g
+          VGhlIGZyYW1lYnVmZmVyIHN0YXlzIG5vbi1tdXRhYmxlOyByYXcgcmVpbnRlcnByZXRhdGlvbiBoYXBwZW5zIGluIHN0YWdp
+          bmcuCiAgICBjb25zdGV4cHIgYm9vbCBrRW5hYmxlSGRUeXBlbGVzc0V4cGVyaW1lbnRhbCA9IHRydWU7CiAgICBjb25zdCBi
+          b29sIHVzZV9jb21wdXRlX2RlaW50ZXJsZWF2ZSA9CiAgICAgICAga0VuYWJsZUhkVHlwZWxlc3NFeHBlcmltZW50YWwgJiYg
+          aGRfdHlwZWxlc3NfY2FuZGlkYXRlOwogICAgaWYgKGhkX3R5cGVsZXNzX2NhbmRpZGF0ZSkgewogICAgICAgIHN0YXRpYyB0
+          aHJlYWRfbG9jYWwgdWludDY0X3Qgc3RhZ2luZ190eXBlbGVzc19jb3VudGVyID0gMDsKICAgICAgICBpZiAoKCgrK3N0YWdp
+          bmdfdHlwZWxlc3NfY291bnRlciAmIDB4M0ZGdSkgPT0gMXUpKSB7CiAgICAgICAgICAgIExPR19JTkZPKAogICAgICAgICAg
+          ICAgICAgIltWUy1UWVBFTEVTUy1IRC1TVEFHSU5HXSByYXdfb2Zmc2V0PXt9IHN0b3JlX2JwcD17fSByZXFfYnBwPXt9IHNj
+          YWxlPXt9IHNvdXJjZV9tdXRhYmxlPTAiLAogICAgICAgICAgICAgICAgZ3VhcmRfbmF0aXZlX2J5dGVfb2Zmc2V0LAogICAg
+          ICAgICAgICAgICAgYnl0ZXNfcGVyX3BpeGVsX2luX3N0b3JlLAogICAgICAgICAgICAgICAgYnl0ZXNfcGVyX3BpeGVsX3Jl
+          cXVlc3RlZCwKICAgICAgICAgICAgICAgIHN0YXRlLnJlc19tdWx0aXBsaWVyKTsKICAgICAgICB9CiAgICB9CicnJywKInR5
+          cGVsZXNzIGNhbmRpZGF0ZSBnYXRlIikKCnRleHQgPSByZXBsYWNlX29uY2UodGV4dCwKJycnICAgICAgICAgICAgICAgIGlm
+          ICghaW5mby5yZWludGVycHJldF9zdG9yZV92aWV3KSB7CiAgICAgICAgICAgICAgICAgICAgdms6OkltYWdlVmlld0NyZWF0
+          ZUluZm8gc3RvcmVfdmlld19pbmZvewogICAgICAgICAgICAgICAgICAgICAgICAuaW1hZ2UgPSBpbmZvLnRleHR1cmUuaW1h
+          Z2UsCiAgICAgICAgICAgICAgICAgICAgICAgIC52aWV3VHlwZSA9IHZrOjpJbWFnZVZpZXdUeXBlOjplMkQsCiAgICAgICAg
+          ICAgICAgICAgICAgICAgIC5mb3JtYXQgPSB2azo6Rm9ybWF0OjplUjMyRzMyVWludCwKICAgICAgICAgICAgICAgICAgICAg
+          ICAgLmNvbXBvbmVudHMgPSB7fSwKICAgICAgICAgICAgICAgICAgICAgICAgLnN1YnJlc291cmNlUmFuZ2UgPSB2a3V0aWw6
+          OmNvbG9yX3N1YnJlc291cmNlX3JhbmdlCiAgICAgICAgICAgICAgICAgICAgfTsKICAgICAgICAgICAgICAgICAgICBpbmZv
+          LnJlaW50ZXJwcmV0X3N0b3JlX3ZpZXcgPQogICAgICAgICAgICAgICAgICAgICAgICBzdGF0ZS5kZXZpY2UuY3JlYXRlSW1h
+          Z2VWaWV3KHN0b3JlX3ZpZXdfaW5mbyk7CiAgICAgICAgICAgICAgICB9CgogICAgICAgICAgICAgICAgdms6OkltYWdlTWVt
+          b3J5QmFycmllciBzdG9yZV90b19jb21wdXRlewogICAgICAgICAgICAgICAgICAgIC5zcmNBY2Nlc3NNYXNrID0gdms6OkFj
+          Y2Vzc0ZsYWdCaXRzOjplQ29sb3JBdHRhY2htZW50V3JpdGUKICAgICAgICAgICAgICAgICAgICAgICAgfCB2azo6QWNjZXNz
+          RmxhZ0JpdHM6OmVTaGFkZXJXcml0ZSwKICAgICAgICAgICAgICAgICAgICAuZHN0QWNjZXNzTWFzayA9IHZrOjpBY2Nlc3NG
+          bGFnQml0czo6ZVNoYWRlclJlYWQsCiAgICAgICAgICAgICAgICAgICAgLm9sZExheW91dCA9IHZrOjpJbWFnZUxheW91dDo6
+          ZUdlbmVyYWwsCiAgICAgICAgICAgICAgICAgICAgLm5ld0xheW91dCA9IHZrOjpJbWFnZUxheW91dDo6ZUdlbmVyYWwsCiAg
+          ICAgICAgICAgICAgICAgICAgLnNyY1F1ZXVlRmFtaWx5SW5kZXggPSBWS19RVUVVRV9GQU1JTFlfSUdOT1JFRCwKICAgICAg
+          ICAgICAgICAgICAgICAuZHN0UXVldWVGYW1pbHlJbmRleCA9IFZLX1FVRVVFX0ZBTUlMWV9JR05PUkVELAogICAgICAgICAg
+          ICAgICAgICAgIC5pbWFnZSA9IGluZm8udGV4dHVyZS5pbWFnZSwKICAgICAgICAgICAgICAgICAgICAuc3VicmVzb3VyY2VS
+          YW5nZSA9IHZrdXRpbDo6Y29sb3Jfc3VicmVzb3VyY2VfcmFuZ2UKICAgICAgICAgICAgICAgIH07CiAgICAgICAgICAgICAg
+          ICBjbWRfYnVmZmVyLnBpcGVsaW5lQmFycmllcigKICAgICAgICAgICAgICAgICAgICB2azo6UGlwZWxpbmVTdGFnZUZsYWdC
+          aXRzOjplQ29sb3JBdHRhY2htZW50T3V0cHV0CiAgICAgICAgICAgICAgICAgICAgICAgIHwgdms6OlBpcGVsaW5lU3RhZ2VG
+          bGFnQml0czo6ZUZyYWdtZW50U2hhZGVyLAogICAgICAgICAgICAgICAgICAgIHZrOjpQaXBlbGluZVN0YWdlRmxhZ0JpdHM6
+          OmVDb21wdXRlU2hhZGVyLAogICAgICAgICAgICAgICAgICAgIHt9LCB7fSwge30sIHN0b3JlX3RvX2NvbXB1dGUpOwoKICAg
+          ICAgICAgICAgICAgIHZrOjpEZXNjcmlwdG9yU2V0IGRlc2NyaXB0b3IgPQonJycsCicnJyAgICAgICAgICAgICAgICBjb25z
+          dCB2azo6RGV2aWNlU2l6ZSBzdGFnaW5nX2J5dGVzID0KICAgICAgICAgICAgICAgICAgICBzdGF0aWNfY2FzdDx2azo6RGV2
+          aWNlU2l6ZT4oaW5mby50ZXh0dXJlLndpZHRoKQogICAgICAgICAgICAgICAgICAgICogc3RhdGljX2Nhc3Q8dms6OkRldmlj
+          ZVNpemU+KGluZm8udGV4dHVyZS5oZWlnaHQpCiAgICAgICAgICAgICAgICAgICAgKiA4dTsKICAgICAgICAgICAgICAgIGNv
+          bnN0IGJvb2wgc3RhZ2luZ19uZWVkc19yZWJ1aWxkID0KICAgICAgICAgICAgICAgICAgICAhaW5mby5yZWludGVycHJldF9z
+          dGFnaW5nX2J1ZmZlcgogICAgICAgICAgICAgICAgICAgIHx8ICFpbmZvLnJlaW50ZXJwcmV0X3N0YWdpbmdfaW1hZ2UKICAg
+          ICAgICAgICAgICAgICAgICB8fCBpbmZvLnJlaW50ZXJwcmV0X3N0YWdpbmdfYnVmZmVyLT5zaXplIDwgc3RhZ2luZ19ieXRl
+          cwogICAgICAgICAgICAgICAgICAgIHx8IGluZm8ucmVpbnRlcnByZXRfc3RhZ2luZ19pbWFnZS0+d2lkdGggIT0gaW5mby50
+          ZXh0dXJlLndpZHRoCiAgICAgICAgICAgICAgICAgICAgfHwgaW5mby5yZWludGVycHJldF9zdGFnaW5nX2ltYWdlLT5oZWln
+          aHQgIT0gaW5mby50ZXh0dXJlLmhlaWdodDsKCiAgICAgICAgICAgICAgICBpZiAoc3RhZ2luZ19uZWVkc19yZWJ1aWxkKSB7
+          CiAgICAgICAgICAgICAgICAgICAgaWYgKGluZm8ucmVpbnRlcnByZXRfc3RhZ2luZ19idWZmZXIpIHsKICAgICAgICAgICAg
+          ICAgICAgICAgICAgc3RhdGUuZnJhbWUoKS5kZXN0cm95X3F1ZXVlLmFkZF9idWZmZXIoKmluZm8ucmVpbnRlcnByZXRfc3Rh
+          Z2luZ19idWZmZXIpOwogICAgICAgICAgICAgICAgICAgICAgICBpbmZvLnJlaW50ZXJwcmV0X3N0YWdpbmdfYnVmZmVyLnJl
+          c2V0KCk7CiAgICAgICAgICAgICAgICAgICAgfQogICAgICAgICAgICAgICAgICAgIGlmIChpbmZvLnJlaW50ZXJwcmV0X3N0
+          YWdpbmdfaW1hZ2UpIHsKICAgICAgICAgICAgICAgICAgICAgICAgc3RhdGUuZnJhbWUoKS5kZXN0cm95X3F1ZXVlLmFkZF9p
+          bWFnZSgqaW5mby5yZWludGVycHJldF9zdGFnaW5nX2ltYWdlKTsKICAgICAgICAgICAgICAgICAgICAgICAgaW5mby5yZWlu
+          dGVycHJldF9zdGFnaW5nX2ltYWdlLnJlc2V0KCk7CiAgICAgICAgICAgICAgICAgICAgfQoKICAgICAgICAgICAgICAgICAg
+          ICBpbmZvLnJlaW50ZXJwcmV0X3N0YWdpbmdfYnVmZmVyID0KICAgICAgICAgICAgICAgICAgICAgICAgc3RkOjptYWtlX3Vu
+          aXF1ZTx2a3V0aWw6OkJ1ZmZlcj4oc3RhZ2luZ19ieXRlcyk7CiAgICAgICAgICAgICAgICAgICAgaW5mby5yZWludGVycHJl
+          dF9zdGFnaW5nX2J1ZmZlci0+aW5pdF9idWZmZXIoCiAgICAgICAgICAgICAgICAgICAgICAgIHZrOjpCdWZmZXJVc2FnZUZs
+          YWdCaXRzOjplVHJhbnNmZXJEc3QKICAgICAgICAgICAgICAgICAgICAgICAgfCB2azo6QnVmZmVyVXNhZ2VGbGFnQml0czo6
+          ZVRyYW5zZmVyU3JjKTsKCiAgICAgICAgICAgICAgICAgICAgaW5mby5yZWludGVycHJldF9zdGFnaW5nX2ltYWdlID0KICAg
+          ICAgICAgICAgICAgICAgICAgICAgc3RkOjptYWtlX3VuaXF1ZTx2a3V0aWw6OkltYWdlPigKICAgICAgICAgICAgICAgICAg
+          ICAgICAgICAgIGluZm8udGV4dHVyZS53aWR0aCwKICAgICAgICAgICAgICAgICAgICAgICAgICAgIGluZm8udGV4dHVyZS5o
+          ZWlnaHQsCiAgICAgICAgICAgICAgICAgICAgICAgICAgICB2azo6Rm9ybWF0OjplUjMyRzMyVWludCk7CiAgICAgICAgICAg
+          ICAgICAgICAgaW5mby5yZWludGVycHJldF9zdGFnaW5nX2ltYWdlLT5pbml0X2ltYWdlKAogICAgICAgICAgICAgICAgICAg
+          ICAgICB2azo6SW1hZ2VVc2FnZUZsYWdCaXRzOjplVHJhbnNmZXJEc3QKICAgICAgICAgICAgICAgICAgICAgICAgfCB2azo6
+          SW1hZ2VVc2FnZUZsYWdCaXRzOjplU2FtcGxlZCk7CiAgICAgICAgICAgICAgICB9CgogICAgICAgICAgICAgICAgdms6OkJ1
+          ZmZlckltYWdlQ29weSByYXdfY29weXsKICAgICAgICAgICAgICAgICAgICAuYnVmZmVyT2Zmc2V0ID0gMCwKICAgICAgICAg
+          ICAgICAgICAgICAuYnVmZmVyUm93TGVuZ3RoID0gaW5mby50ZXh0dXJlLndpZHRoLAogICAgICAgICAgICAgICAgICAgIC5i
+          dWZmZXJJbWFnZUhlaWdodCA9IGluZm8udGV4dHVyZS5oZWlnaHQsCiAgICAgICAgICAgICAgICAgICAgLmltYWdlU3VicmVz
+          b3VyY2UgPSB2a3V0aWw6OmNvbG9yX3N1YnJlc291cmNlX2xheWVyLAogICAgICAgICAgICAgICAgICAgIC5pbWFnZU9mZnNl
+          dCA9IHsgMCwgMCwgMCB9LAogICAgICAgICAgICAgICAgICAgIC5pbWFnZUV4dGVudCA9IHsgaW5mby50ZXh0dXJlLndpZHRo
+          LCBpbmZvLnRleHR1cmUuaGVpZ2h0LCAxIH0KICAgICAgICAgICAgICAgIH07CgogICAgICAgICAgICAgICAgY21kX2J1ZmZl
+          ci5jb3B5SW1hZ2VUb0J1ZmZlcigKICAgICAgICAgICAgICAgICAgICBpbmZvLnRleHR1cmUuaW1hZ2UsCiAgICAgICAgICAg
+          ICAgICAgICAgdms6OkltYWdlTGF5b3V0OjplR2VuZXJhbCwKICAgICAgICAgICAgICAgICAgICBpbmZvLnJlaW50ZXJwcmV0
+          X3N0YWdpbmdfYnVmZmVyLT5idWZmZXIsCiAgICAgICAgICAgICAgICAgICAgcmF3X2NvcHkpOwoKICAgICAgICAgICAgICAg
+          IHZrOjpCdWZmZXJNZW1vcnlCYXJyaWVyIHN0YWdpbmdfYnVmZmVyX3JlYWR5ewogICAgICAgICAgICAgICAgICAgIC5zcmNB
+          Y2Nlc3NNYXNrID0gdms6OkFjY2Vzc0ZsYWdCaXRzOjplVHJhbnNmZXJXcml0ZSwKICAgICAgICAgICAgICAgICAgICAuZHN0
+          QWNjZXNzTWFzayA9IHZrOjpBY2Nlc3NGbGFnQml0czo6ZVRyYW5zZmVyUmVhZCwKICAgICAgICAgICAgICAgICAgICAuc3Jj
+          UXVldWVGYW1pbHlJbmRleCA9IFZLX1FVRVVFX0ZBTUlMWV9JR05PUkVELAogICAgICAgICAgICAgICAgICAgIC5kc3RRdWV1
+          ZUZhbWlseUluZGV4ID0gVktfUVVFVUVfRkFNSUxZX0lHTk9SRUQsCiAgICAgICAgICAgICAgICAgICAgLmJ1ZmZlciA9IGlu
+          Zm8ucmVpbnRlcnByZXRfc3RhZ2luZ19idWZmZXItPmJ1ZmZlciwKICAgICAgICAgICAgICAgICAgICAub2Zmc2V0ID0gMCwK
+          ICAgICAgICAgICAgICAgICAgICAuc2l6ZSA9IFZLX1dIT0xFX1NJWkUKICAgICAgICAgICAgICAgIH07CiAgICAgICAgICAg
+          ICAgICBjbWRfYnVmZmVyLnBpcGVsaW5lQmFycmllcigKICAgICAgICAgICAgICAgICAgICB2azo6UGlwZWxpbmVTdGFnZUZs
+          YWdCaXRzOjplVHJhbnNmZXIsCiAgICAgICAgICAgICAgICAgICAgdms6OlBpcGVsaW5lU3RhZ2VGbGFnQml0czo6ZVRyYW5z
+          ZmVyLAogICAgICAgICAgICAgICAgICAgIHZrOjpEZXBlbmRlbmN5RmxhZ3N7fSwge30sIHN0YWdpbmdfYnVmZmVyX3JlYWR5
+          LCB7fSk7CgogICAgICAgICAgICAgICAgaW5mby5yZWludGVycHJldF9zdGFnaW5nX2ltYWdlLT50cmFuc2l0aW9uX3RvX2Rp
+          c2NhcmQoCiAgICAgICAgICAgICAgICAgICAgY21kX2J1ZmZlciwgdmt1dGlsOjpJbWFnZUxheW91dDo6VHJhbnNmZXJEc3Qp
+          OwogICAgICAgICAgICAgICAgY21kX2J1ZmZlci5jb3B5QnVmZmVyVG9JbWFnZSgKICAgICAgICAgICAgICAgICAgICBpbmZv
+          LnJlaW50ZXJwcmV0X3N0YWdpbmdfYnVmZmVyLT5idWZmZXIsCiAgICAgICAgICAgICAgICAgICAgaW5mby5yZWludGVycHJl
+          dF9zdGFnaW5nX2ltYWdlLT5pbWFnZSwKICAgICAgICAgICAgICAgICAgICB2azo6SW1hZ2VMYXlvdXQ6OmVUcmFuc2ZlckRz
+          dE9wdGltYWwsCiAgICAgICAgICAgICAgICAgICAgcmF3X2NvcHkpOwogICAgICAgICAgICAgICAgaW5mby5yZWludGVycHJl
+          dF9zdGFnaW5nX2ltYWdlLT50cmFuc2l0aW9uX3RvKAogICAgICAgICAgICAgICAgICAgIGNtZF9idWZmZXIsIHZrdXRpbDo6
+          SW1hZ2VMYXlvdXQ6OlNhbXBsZWRJbWFnZSk7CgogICAgICAgICAgICAgICAgdms6OkRlc2NyaXB0b3JTZXQgZGVzY3JpcHRv
+          ciA9CicnJywKInR5cGVsZXNzIHNvdXJjZSBzdGFnaW5nIikKCnRleHQgPSByZXBsYWNlX29uY2UodGV4dCwKJycnICAgICAg
+          ICAgICAgICAgIHZrOjpEZXNjcmlwdG9ySW1hZ2VJbmZvIHN0b3JlX2luZm97CiAgICAgICAgICAgICAgICAgICAgcmVpbnRl
+          cnByZXRfc2FtcGxlciwKICAgICAgICAgICAgICAgICAgICBpbmZvLnJlaW50ZXJwcmV0X3N0b3JlX3ZpZXcsCiAgICAgICAg
+          ICAgICAgICAgICAgdms6OkltYWdlTGF5b3V0OjplR2VuZXJhbAogICAgICAgICAgICAgICAgfTsKJycnLAonJycgICAgICAg
+          ICAgICAgICAgdms6OkRlc2NyaXB0b3JJbWFnZUluZm8gc3RvcmVfaW5mb3sKICAgICAgICAgICAgICAgICAgICByZWludGVy
+          cHJldF9zYW1wbGVyLAogICAgICAgICAgICAgICAgICAgIGluZm8ucmVpbnRlcnByZXRfc3RhZ2luZ19pbWFnZS0+dmlldywK
+          ICAgICAgICAgICAgICAgICAgICB2azo6SW1hZ2VMYXlvdXQ6OmVTaGFkZXJSZWFkT25seU9wdGltYWwKICAgICAgICAgICAg
+          ICAgIH07CicnJywKInR5cGVsZXNzIHN0YWdpbmcgZGVzY3JpcHRvciIpCnRleHQgPSByZXBsYWNlX29uY2UodGV4dCwKJycn
+          ICAgICAgICAgICAgICAgICAgICAucmF0aW8gPSByYXRpbywKICAgICAgICAgICAgICAgICAgICAuaGFsZl9pbmRleCA9IGhh
+          bGZfaW5kZXgKJycnLAonJycgICAgICAgICAgICAgICAgICAgIC5yYXRpbyA9IHJhdGlvLAogICAgICAgICAgICAgICAgICAg
+          IC5zdGFydF93b3JkID0gaGFsZl9pbmRleAonJycsCiJ0eXBlbGVzcyBwdXNoIGFzc2lnbm1lbnQiKQp0ZXh0ID0gcmVwbGFj
+          ZV9vbmNlKHRleHQsCicnJyAgICAgICAgICAgICAgICAgICAgICAgICJbVlMtVFlQRUxFU1MtSERdIHJhd19vZmZzZXQ9e30g
+          aGFsZj17fSByYXRpbz17fSBzaXplPXt9eHt9IHNjYWxlPXt9IiwKJycnLAonJycgICAgICAgICAgICAgICAgICAgICAgICAi
+          W1ZTLVRZUEVMRVNTLUhEXSByYXdfb2Zmc2V0PXt9IHN0YXJ0X3dvcmQ9e30gcmF0aW89e30gc2l6ZT17fXh7fSBzY2FsZT17
+          fSBzdGFnaW5nPTEiLAonJycsCiJ0eXBlbGVzcyBydW50aW1lIGxvZyIpCnAud3JpdGVfdGV4dCh0ZXh0LCBlbmNvZGluZz0i
+          dXRmLTgiKQoKIyBTaGFkZXIgc291cmNlCnNoYWRlciA9IHInJycjdmVyc2lvbiA0NTAKbGF5b3V0KGxvY2FsX3NpemVfeCA9
+          IDgsIGxvY2FsX3NpemVfeSA9IDgsIGxvY2FsX3NpemVfeiA9IDEpIGluOwpsYXlvdXQoYmluZGluZyA9IDApIHVuaWZvcm0g
+          dXNhbXBsZXIyRCBzdG9yZV9pbWc7CmxheW91dChiaW5kaW5nID0gMSwgcjMydWkpIHVuaWZvcm0gd3JpdGVvbmx5IHVpbWFn
+          ZTJEIG91dF9pbWc7CmxheW91dChwdXNoX2NvbnN0YW50KSB1bmlmb3JtIFJlaW50ZXJwcmV0UHVzaCB7CiAgICB1aW50IG91
+          dF93aWR0aDsKICAgIHVpbnQgb3V0X2hlaWdodDsKICAgIHVpbnQgc2NhbGVkX3N0b3JlX3c7CiAgICB1aW50IHNjYWxlZF9z
+          dG9yZV9oOwogICAgdWludCByYXRpbzsKICAgIHVpbnQgc3RhcnRfd29yZDsKfSBwYzsKCnZvaWQgbWFpbigpIHsKICAgIHV2
+          ZWMyIGRzdCA9IGdsX0dsb2JhbEludm9jYXRpb25JRC54eTsKICAgIGlmIChkc3QueCA+PSBwYy5vdXRfd2lkdGggfHwgZHN0
+          LnkgPj0gcGMub3V0X2hlaWdodCkKICAgICAgICByZXR1cm47CgogICAgdWludCB3b3Jkc19wZXJfcm93ID0gcGMuc2NhbGVk
+          X3N0b3JlX3cgKiBwYy5yYXRpbzsKICAgIGlmICh3b3Jkc19wZXJfcm93ID09IDB1IHx8IHBjLnNjYWxlZF9zdG9yZV9oID09
+          IDB1KSB7CiAgICAgICAgaW1hZ2VTdG9yZShvdXRfaW1nLCBpdmVjMihkc3QpLCB1dmVjNCgwdSkpOwogICAgICAgIHJldHVy
+          bjsKICAgIH0KCiAgICB1aW50IGdsb2JhbF93b3JkID0gcGMuc3RhcnRfd29yZCArIGRzdC55ICogd29yZHNfcGVyX3JvdyAr
+          IGRzdC54OwogICAgdWludCBzb3VyY2Vfcm93ID0gZ2xvYmFsX3dvcmQgLyB3b3Jkc19wZXJfcm93OwogICAgdWludCB3b3Jk
+          X2luX3JvdyA9IGdsb2JhbF93b3JkICUgd29yZHNfcGVyX3JvdzsKICAgIGlmIChzb3VyY2Vfcm93ID49IHBjLnNjYWxlZF9z
+          dG9yZV9oKSB7CiAgICAgICAgaW1hZ2VTdG9yZShvdXRfaW1nLCBpdmVjMihkc3QpLCB1dmVjNCgwdSkpOwogICAgICAgIHJl
+          dHVybjsKICAgIH0KCiAgICB1aW50IHNvdXJjZV94ID0gd29yZF9pbl9yb3cgLyBwYy5yYXRpbzsKICAgIHVpbnQgbGFuZSA9
+          IHdvcmRfaW5fcm93ICUgcGMucmF0aW87CiAgICB1dmVjMiByYXcgPSB0ZXhlbEZldGNoKHN0b3JlX2ltZywgaXZlYzIoc291
+          cmNlX3gsIHNvdXJjZV9yb3cpLCAwKS54eTsKICAgIHVpbnQgdmFsdWUgPSBsYW5lID09IDB1ID8gcmF3LnggOiByYXcueTsK
+          ICAgIGltYWdlU3RvcmUob3V0X2ltZywgaXZlYzIoZHN0KSwgdXZlYzQodmFsdWUsIDB1LCAwdSwgMHUpKTsKfQonJycKc3Ag
+          PSBQYXRoKCJ2aXRhM2svc2hhZGVycy1idWlsdGluL3Z1bGthbi9zdXJmYWNlX2Nhc3RfcmVpbnRlcnByZXQuY29tcCIpCnNw
+          LnBhcmVudC5ta2RpcihwYXJlbnRzPVRydWUsIGV4aXN0X29rPVRydWUpCnNwLndyaXRlX3RleHQoc2hhZGVyLCBlbmNvZGlu
+          Zz0idXRmLTgiKQoKIyBUb3VjaCBzaXplIHNldHRlcnMKZm9yIGZpbGVfbmFtZSBpbiBbCiAgICAiYW5kcm9pZC9hcHAvc3Jj
+          L21haW4vamF2YS9vcmcvdml0YTNrL2VtdWxhdG9yL292ZXJsYXkvSW5wdXRPdmVybGF5RHJhd2FibGVCdXR0b24uamF2YSIs
+          CiAgICAiYW5kcm9pZC9hcHAvc3JjL21haW4vamF2YS9vcmcvdml0YTNrL2VtdWxhdG9yL292ZXJsYXkvSW5wdXRPdmVybGF5
+          RHJhd2FibGVEcGFkLmphdmEiLApdOgogICAgcCA9IFBhdGgoZmlsZV9uYW1lKQogICAgdGV4dCA9IHAucmVhZF90ZXh0KGVu
+          Y29kaW5nPSJ1dGYtOCIpCiAgICBtYXJrZXIgPSAnJycgIHB1YmxpYyBpbnQgZ2V0SGVpZ2h0KCkKICB7CiAgICByZXR1cm4g
+          bUhlaWdodDsKICB9CicnJwogICAgYWRkaXRpb24gPSBtYXJrZXIgKyAnJycKICAvLyBbVlMtVE9VQ0gtRU5HSU5FNF0gR2Vv
+          bWV0cnkgaXMgaW5kZXBlbmRlbnQgZnJvbSBsZWdhY3kgUE5HIHNpemUuCiAgcHVibGljIHZvaWQgc2V0U2l6ZShpbnQgd2lk
+          dGgsIGludCBoZWlnaHQpCiAgewogICAgbVdpZHRoID0gTWF0aC5tYXgoMSwgd2lkdGgpOwogICAgbUhlaWdodCA9IE1hdGgu
+          bWF4KDEsIGhlaWdodCk7CiAgICBzZXRCb3VuZHMobUNvbnRyb2xQb3NpdGlvblgsIG1Db250cm9sUG9zaXRpb25ZLAogICAg
+          ICAgICAgICBtQ29udHJvbFBvc2l0aW9uWCArIG1XaWR0aCwgbUNvbnRyb2xQb3NpdGlvblkgKyBtSGVpZ2h0KTsKICB9Cicn
+          JwogICAgdGV4dCA9IHJlcGxhY2Vfb25jZSh0ZXh0LCBtYXJrZXIsIGFkZGl0aW9uLCAidG91Y2ggc2l6ZSBzZXR0ZXIgIiAr
+          IGZpbGVfbmFtZSkKICAgIHAud3JpdGVfdGV4dCh0ZXh0LCBlbmNvZGluZz0idXRmLTgiKQoKIyBKb3lzdGljayBnZW9tZXRy
+          eQpwID0gUGF0aCgiYW5kcm9pZC9hcHAvc3JjL21haW4vamF2YS9vcmcvdml0YTNrL2VtdWxhdG9yL292ZXJsYXkvSW5wdXRP
+          dmVybGF5RHJhd2FibGVKb3lzdGljay5qYXZhIikKdGV4dCA9IHAucmVhZF90ZXh0KGVuY29kaW5nPSJ1dGYtOCIpCnRleHQg
+          PSByZXBsYWNlX29uY2UodGV4dCwKIiAgcHJpdmF0ZSBmaW5hbCBpbnQgbVdpZHRoO1xuICBwcml2YXRlIGZpbmFsIGludCBt
+          SGVpZ2h0O1xuIiwKIiAgcHJpdmF0ZSBpbnQgbVdpZHRoO1xuICBwcml2YXRlIGludCBtSGVpZ2h0O1xuIiwKImpveXN0aWNr
+          IHNpemUgZmllbGRzIikKdGV4dCA9IHJlcGxhY2Vfb25jZSh0ZXh0LAoiICAgIG1XaWR0aCA9IGJpdG1hcE91dGVyLmdldFdp
+          ZHRoKCk7XG4gICAgbUhlaWdodCA9IGJpdG1hcE91dGVyLmdldEhlaWdodCgpO1xuIiwKIiAgICBtV2lkdGggPSByZWN0T3V0
+          ZXIud2lkdGgoKTtcbiAgICBtSGVpZ2h0ID0gcmVjdE91dGVyLmhlaWdodCgpO1xuIiwKImpveXN0aWNrIGNvbnN0cnVjdG9y
+          IHNpemUiKQp0ZXh0ID0gdGV4dC5yZXBsYWNlKCJtT3V0ZXJCaXRtYXAuZ2V0SW50cmluc2ljV2lkdGgoKSArIG1Db250cm9s
+          UG9zaXRpb25YIiwKICAgICAgICAgICAgICAgICAgICAibVdpZHRoICsgbUNvbnRyb2xQb3NpdGlvblgiKQp0ZXh0ID0gdGV4
+          dC5yZXBsYWNlKCJtT3V0ZXJCaXRtYXAuZ2V0SW50cmluc2ljSGVpZ2h0KCkgKyBtQ29udHJvbFBvc2l0aW9uWSIsCiAgICAg
+          ICAgICAgICAgICAgICAgIm1IZWlnaHQgKyBtQ29udHJvbFBvc2l0aW9uWSIpCnAud3JpdGVfdGV4dCh0ZXh0LCBlbmNvZGlu
+          Zz0idXRmLTgiKQoKIyBJbnB1dE92ZXJsYXkgZXhwbGljaXQgZ2VvbWV0cnkKcCA9IFBhdGgoImFuZHJvaWQvYXBwL3NyYy9t
+          YWluL2phdmEvb3JnL3ZpdGEzay9lbXVsYXRvci9vdmVybGF5L0lucHV0T3ZlcmxheS5qYXZhIikKdGV4dCA9IHAucmVhZF90
+          ZXh0KGVuY29kaW5nPSJ1dGYtOCIpCmFuY2hvciA9ICIgIHByaXZhdGUgc3RhdGljIElucHV0T3ZlcmxheURyYXdhYmxlQnV0
+          dG9uIGluaXRpYWxpemVPdmVybGF5QnV0dG9uKENvbnRleHQgY29udGV4dCxcbiIKaGVscGVycyA9IHInJycgIC8vIFtWUy1U
+          T1VDSC1FTkdJTkU0XSBDb21wYWN0IFZpdGFTdGF0aW9uIGdlb21ldHJ5LgogIHByaXZhdGUgc3RhdGljIGludCB2c1Nob3J0
+          RWRnZShMYXlvdXRCb3VuZHMgYm91bmRzKQogIHsKICAgIHJldHVybiBNYXRoLm1heCgxLCBNYXRoLm1pbihib3VuZHMud2lk
+          dGgsIGJvdW5kcy5oZWlnaHQpKTsKICB9CgogIHByaXZhdGUgc3RhdGljIGludCB2c0J1dHRvbldpZHRoKGludCBsZWdhY3lJ
+          ZCwgTGF5b3V0Qm91bmRzIGJvdW5kcywgZmxvYXQgZ2xvYmFsU2NhbGUpCiAgewogICAgZmxvYXQgZnJhY3Rpb24gPSAwLjEw
+          NWY7CiAgICBpZiAobGVnYWN5SWQgPT0gQnV0dG9uVHlwZS5UUklHR0VSX0wgfHwgbGVnYWN5SWQgPT0gQnV0dG9uVHlwZS5U
+          UklHR0VSX1IpCiAgICAgIGZyYWN0aW9uID0gMC4xOGY7CiAgICBlbHNlIGlmIChsZWdhY3lJZCA9PSBCdXR0b25UeXBlLlRS
+          SUdHRVJfTDIgfHwgbGVnYWN5SWQgPT0gQnV0dG9uVHlwZS5UUklHR0VSX1IyKQogICAgICBmcmFjdGlvbiA9IDAuMTNmOwog
+          ICAgZWxzZSBpZiAobGVnYWN5SWQgPT0gQnV0dG9uVHlwZS5CVVRUT05fU1RBUlQgfHwgbGVnYWN5SWQgPT0gQnV0dG9uVHlw
+          ZS5CVVRUT05fU0VMRUNUKQogICAgICBmcmFjdGlvbiA9IDAuMTJmOwogICAgZWxzZSBpZiAobGVnYWN5SWQgPT0gQnV0dG9u
+          VHlwZS5CVVRUT05fUFMKICAgICAgICAgICAgfHwgbGVnYWN5SWQgPT0gQnV0dG9uVHlwZS5UUklHR0VSX0wzIHx8IGxlZ2Fj
+          eUlkID09IEJ1dHRvblR5cGUuVFJJR0dFUl9SMwogICAgICAgICAgICB8fCBsZWdhY3lJZCA9PSBCdXR0b25UeXBlLkJVVFRP
+          Tl9UT1VDSF9TV0lUQ0gKICAgICAgICAgICAgfHwgbGVnYWN5SWQgPT0gQnV0dG9uVHlwZS5CVVRUT05fVE9VQ0hfSElERSkK
+          ICAgICAgZnJhY3Rpb24gPSAwLjA3NWY7CiAgICByZXR1cm4gTWF0aC5tYXgoMjQsIE1hdGgucm91bmQodnNTaG9ydEVkZ2Uo
+          Ym91bmRzKSAqIGZyYWN0aW9uICogZ2xvYmFsU2NhbGUpKTsKICB9CgogIHByaXZhdGUgc3RhdGljIGludCB2c0J1dHRvbkhl
+          aWdodChpbnQgbGVnYWN5SWQsIExheW91dEJvdW5kcyBib3VuZHMsIGZsb2F0IGdsb2JhbFNjYWxlKQogIHsKICAgIGZsb2F0
+          IGZyYWN0aW9uID0gMC4xMDVmOwogICAgaWYgKGxlZ2FjeUlkID09IEJ1dHRvblR5cGUuVFJJR0dFUl9MIHx8IGxlZ2FjeUlk
+          ID09IEJ1dHRvblR5cGUuVFJJR0dFUl9SKQogICAgICBmcmFjdGlvbiA9IDAuMDcwZjsKICAgIGVsc2UgaWYgKGxlZ2FjeUlk
+          ID09IEJ1dHRvblR5cGUuVFJJR0dFUl9MMiB8fCBsZWdhY3lJZCA9PSBCdXR0b25UeXBlLlRSSUdHRVJfUjIKICAgICAgICAg
+          ICAgfHwgbGVnYWN5SWQgPT0gQnV0dG9uVHlwZS5CVVRUT05fU1RBUlQgfHwgbGVnYWN5SWQgPT0gQnV0dG9uVHlwZS5CVVRU
+          T05fU0VMRUNUKQogICAgICBmcmFjdGlvbiA9IDAuMDU1ZjsKICAgIGVsc2UgaWYgKGxlZ2FjeUlkID09IEJ1dHRvblR5cGUu
+          QlVUVE9OX1BTCiAgICAgICAgICAgIHx8IGxlZ2FjeUlkID09IEJ1dHRvblR5cGUuVFJJR0dFUl9MMyB8fCBsZWdhY3lJZCA9
+          PSBCdXR0b25UeXBlLlRSSUdHRVJfUjMKICAgICAgICAgICAgfHwgbGVnYWN5SWQgPT0gQnV0dG9uVHlwZS5CVVRUT05fVE9V
+          Q0hfU1dJVENICiAgICAgICAgICAgIHx8IGxlZ2FjeUlkID09IEJ1dHRvblR5cGUuQlVUVE9OX1RPVUNIX0hJREUpCiAgICAg
+          IGZyYWN0aW9uID0gMC4wNzVmOwogICAgcmV0dXJuIE1hdGgubWF4KDI0LCBNYXRoLnJvdW5kKHZzU2hvcnRFZGdlKGJvdW5k
+          cykgKiBmcmFjdGlvbiAqIGdsb2JhbFNjYWxlKSk7CiAgfQoKICBwcml2YXRlIHN0YXRpYyBpbnQgdnNEcGFkU2l6ZShMYXlv
+          dXRCb3VuZHMgYm91bmRzLCBmbG9hdCBnbG9iYWxTY2FsZSkKICB7CiAgICByZXR1cm4gTWF0aC5tYXgoNDgsIE1hdGgucm91
+          bmQodnNTaG9ydEVkZ2UoYm91bmRzKSAqIDAuMTlmICogZ2xvYmFsU2NhbGUpKTsKICB9CgogIHByaXZhdGUgc3RhdGljIGlu
+          dCB2c0pveXN0aWNrU2l6ZShMYXlvdXRCb3VuZHMgYm91bmRzLCBmbG9hdCBnbG9iYWxTY2FsZSkKICB7CiAgICByZXR1cm4g
+          TWF0aC5tYXgoNDgsIE1hdGgucm91bmQodnNTaG9ydEVkZ2UoYm91bmRzKSAqIDAuMThmICogZ2xvYmFsU2NhbGUpKTsKICB9
+          CgonJycKdGV4dCA9IHJlcGxhY2Vfb25jZSh0ZXh0LCBhbmNob3IsIGhlbHBlcnMgKyBhbmNob3IsICJ0b3VjaCBnZW9tZXRy
+          eSBoZWxwZXIgaW5zZXJ0aW9uIikKdGV4dCA9IHJlcGxhY2Vfb25jZSh0ZXh0LAonJycgICAgZmluYWwgSW5wdXRPdmVybGF5
+          RHJhd2FibGVCdXR0b24gb3ZlcmxheURyYXdhYmxlID0KICAgICAgICAgICAgbmV3IElucHV0T3ZlcmxheURyYXdhYmxlQnV0
+          dG9uKHJlcywgZGVmYXVsdFN0YXRlQml0bWFwLCBwcmVzc2VkU3RhdGVCaXRtYXAsIGxlZ2FjeUlkLAogICAgICAgICAgICAg
+          ICAgICAgIGNvbnRyb2wsIHJvbGUpOwoKICAgIE92ZXJsYXlQb3NpdGlvbiBwb3NpdGlvbiA9IGxheW91dC5wb3NpdGlvbkZv
+          cihsZWdhY3lJZCk7CicnJywKJycnICAgIGZpbmFsIElucHV0T3ZlcmxheURyYXdhYmxlQnV0dG9uIG92ZXJsYXlEcmF3YWJs
+          ZSA9CiAgICAgICAgICAgIG5ldyBJbnB1dE92ZXJsYXlEcmF3YWJsZUJ1dHRvbihyZXMsIGRlZmF1bHRTdGF0ZUJpdG1hcCwg
+          cHJlc3NlZFN0YXRlQml0bWFwLCBsZWdhY3lJZCwKICAgICAgICAgICAgICAgICAgICBjb250cm9sLCByb2xlKTsKICAgIG92
+          ZXJsYXlEcmF3YWJsZS5zZXRTaXplKAogICAgICAgICAgICB2c0J1dHRvbldpZHRoKGxlZ2FjeUlkLCBsYXlvdXRCb3VuZHMs
+          IGdsb2JhbFNjYWxlKSwKICAgICAgICAgICAgdnNCdXR0b25IZWlnaHQobGVnYWN5SWQsIGxheW91dEJvdW5kcywgZ2xvYmFs
+          U2NhbGUpKTsKCiAgICBPdmVybGF5UG9zaXRpb24gcG9zaXRpb24gPSBsYXlvdXQucG9zaXRpb25Gb3IobGVnYWN5SWQpOwon
+          JycsCiJidXR0b24gZXhwbGljaXQgZ2VvbWV0cnkiKQp0ZXh0ID0gcmVwbGFjZV9vbmNlKHRleHQsCicnJyAgICBmaW5hbCBJ
+          bnB1dE92ZXJsYXlEcmF3YWJsZURwYWQgb3ZlcmxheURyYXdhYmxlID0KICAgICAgICAgICAgbmV3IElucHV0T3ZlcmxheURy
+          YXdhYmxlRHBhZChyZXMsIGRlZmF1bHRTdGF0ZUJpdG1hcCwKICAgICAgICAgICAgICAgICAgICBwcmVzc2VkT25lRGlyZWN0
+          aW9uU3RhdGVCaXRtYXAsIHByZXNzZWRUd29EaXJlY3Rpb25zU3RhdGVCaXRtYXAsCiAgICAgICAgICAgICAgICAgICAgbGVn
+          YWN5SWQsIHVwQ29udHJvbCwgZG93bkNvbnRyb2wsIGxlZnRDb250cm9sLCByaWdodENvbnRyb2wpOwoKICAgIE92ZXJsYXlQ
+          b3NpdGlvbiBwb3NpdGlvbiA9IGxheW91dC5wb3NpdGlvbkZvcihsZWdhY3lJZCk7CicnJywKJycnICAgIGZpbmFsIElucHV0
+          T3ZlcmxheURyYXdhYmxlRHBhZCBvdmVybGF5RHJhd2FibGUgPQogICAgICAgICAgICBuZXcgSW5wdXRPdmVybGF5RHJhd2Fi
+          bGVEcGFkKHJlcywgZGVmYXVsdFN0YXRlQml0bWFwLAogICAgICAgICAgICAgICAgICAgIHByZXNzZWRPbmVEaXJlY3Rpb25T
+          dGF0ZUJpdG1hcCwgcHJlc3NlZFR3b0RpcmVjdGlvbnNTdGF0ZUJpdG1hcCwKICAgICAgICAgICAgICAgICAgICBsZWdhY3lJ
+          ZCwgdXBDb250cm9sLCBkb3duQ29udHJvbCwgbGVmdENvbnRyb2wsIHJpZ2h0Q29udHJvbCk7CiAgICBmaW5hbCBpbnQgZHBh
+          ZFNpemUgPSB2c0RwYWRTaXplKGxheW91dEJvdW5kcywgZ2xvYmFsU2NhbGUpOwogICAgb3ZlcmxheURyYXdhYmxlLnNldFNp
+          emUoZHBhZFNpemUsIGRwYWRTaXplKTsKCiAgICBPdmVybGF5UG9zaXRpb24gcG9zaXRpb24gPSBsYXlvdXQucG9zaXRpb25G
+          b3IobGVnYWN5SWQpOwonJycsCiJkcGFkIGV4cGxpY2l0IGdlb21ldHJ5IikKdGV4dCA9IHJlcGxhY2Vfb25jZSh0ZXh0LAoi
+          ICAgIGludCBvdXRlclNpemUgPSBiaXRtYXBPdXRlci5nZXRXaWR0aCgpO1xuIiwKIiAgICBpbnQgb3V0ZXJTaXplID0gdnNK
+          b3lzdGlja1NpemUobGF5b3V0Qm91bmRzLCBnbG9iYWxTY2FsZSk7XG4iLAoiam95c3RpY2sgZXhwbGljaXQgZ2VvbWV0cnki
+          KQpwLndyaXRlX3RleHQodGV4dCwgZW5jb2Rpbmc9InV0Zi04IikKCiMgRGVmYXVsdCBwb3NpdGlvbnMgb25seS4gU2F2ZWQg
+          Y3VzdG9tIGxheW91dHMgcmVtYWluIGludGFjdC4KcCA9IFBhdGgoImFuZHJvaWQvYXBwL3NyYy9tYWluL3Jlcy92YWx1ZXMv
+          aW50ZWdlcnMueG1sIikKdGV4dCA9IHAucmVhZF90ZXh0KGVuY29kaW5nPSJ1dGYtOCIpCmRlZmF1bHRzID0gewogICAgIkJV
+          VFRPTl9DUk9TU19YIjo4NDUsICJCVVRUT05fQ1JPU1NfWSI6NDg1LAogICAgIkJVVFRPTl9DSVJDTEVfWCI6OTAwLCAiQlVU
+          VE9OX0NJUkNMRV9ZIjozODUsCiAgICAiQlVUVE9OX1NRVUFSRV9YIjo3OTAsICJCVVRUT05fU1FVQVJFX1kiOjM4NSwKICAg
+          ICJCVVRUT05fVFJJQU5HTEVfWCI6ODQ1LCAiQlVUVE9OX1RSSUFOR0xFX1kiOjI4NSwKICAgICJCVVRUT05fU0VMRUNUX1gi
+          OjM5MCwgIkJVVFRPTl9TRUxFQ1RfWSI6ODIwLAogICAgIkJVVFRPTl9TVEFSVF9YIjo1NTAsICJCVVRUT05fU1RBUlRfWSI6
+          ODIwLAogICAgIkJVVFRPTl9QU19YIjo0NzUsICJCVVRUT05fUFNfWSI6ODE1LAogICAgIkRQQURfVVBfWCI6NDUsICJEUEFE
+          X1VQX1kiOjMzNSwKICAgICJTVElDS19MRUZUX1giOjcwLCAiU1RJQ0tfTEVGVF9ZIjo2NTAsCiAgICAiU1RJQ0tfUklHSFRf
+          WCI6ODA1LCAiU1RJQ0tfUklHSFRfWSI6NjUwLAogICAgIlRSSUdHRVJfTF9YIjo0NSwgIlRSSUdHRVJfTF9ZIjozNSwKICAg
+          ICJUUklHR0VSX1JfWCI6NzkwLCAiVFJJR0dFUl9SX1kiOjM1LAp9CmZvciBrZXksIHZhbHVlIGluIGRlZmF1bHRzLml0ZW1z
+          KCk6CiAgICB0ZXh0LCBuID0gcmUuc3VibigKICAgICAgICByZicoPGludGVnZXIgbmFtZT0ie3JlLmVzY2FwZShrZXkpfSI+
+          KS0/XGQrKDwvaW50ZWdlcj4pJywKICAgICAgICByZidcZzwxPnt2YWx1ZX1cZzwyPicsCiAgICAgICAgdGV4dCwgY291bnQ9
+          MSkKICAgIGlmIG4gIT0gMToKICAgICAgICByYWlzZSBTeXN0ZW1FeGl0KGYiOjplcnJvcjo6VG91Y2ggZGVmYXVsdCBjb29y
+          ZGluYXRlIG1pc3Npbmc6IHtrZXl9IikKcC53cml0ZV90ZXh0KHRleHQsIGVuY29kaW5nPSJ1dGYtOCIpCgojIEdhdGVzCmdh
+          dGVzID0gewogICAgImFuZHJvaWQvYXBwL2J1aWxkLmdyYWRsZSI6IFsidmVyc2lvbkNvZGUgPSA0NCIsICd2ZXJzaW9uTmFt
+          ZSA9ICIwLjMuMC1hbHBoYTQtZml4NCInXSwKICAgICJ2aXRhM2sva2VybmVsL3NyYy9zeW5jX3ByaW1pdGl2ZXMuY3BwIjog
+          WyJbVlMtS0VSTkVMLU9XTkVSU0hJUC1XQUlUXSJdLAogICAgInZpdGEzay9yZW5kZXJlci9pbmNsdWRlL3JlbmRlcmVyL3Z1
+          bGthbi9zdXJmYWNlX2NhY2hlLmgiOiBbIltWUy1UWVBFTEVTUy1TVEFHSU5HXSIsICJzdGFydF93b3JkIl0sCiAgICAidml0
+          YTNrL3JlbmRlcmVyL3NyYy92dWxrYW4vc3VyZmFjZV9jYWNoZS5jcHAiOiBbIltWUy1UWVBFTEVTUy1IRC1TVEFHSU5HXSIs
+          ICJzb3VyY2VfbXV0YWJsZT0wIl0sCiAgICAiYW5kcm9pZC9hcHAvc3JjL21haW4vamF2YS9vcmcvdml0YTNrL2VtdWxhdG9y
+          L292ZXJsYXkvSW5wdXRPdmVybGF5LmphdmEiOiBbIltWUy1UT1VDSC1FTkdJTkU0XSJdLAp9CmZvciBwYXRoLCBuZWVkbGVz
+          IGluIGdhdGVzLml0ZW1zKCk6CiAgICBkYXRhID0gcmVhZChwYXRoKQogICAgZm9yIG5lZWRsZSBpbiBuZWVkbGVzOgogICAg
+          ICAgIGlmIG5lZWRsZSBub3QgaW4gZGF0YToKICAgICAgICAgICAgcmFpc2UgU3lzdGVtRXhpdChmIjo6ZXJyb3I6Om1pc3Np
+          bmcge25lZWRsZX0gaW4ge3BhdGh9IikKcHJpbnQoIltWUy1GSVg0XSBwYXRjaCBnYXRlcyBwYXNzZWQiKQo=
+          FIX4_B64
+          base64 --decode "$RUNNER_TEMP/fix4_patch.b64" > "$RUNNER_TEMP/fix4_patch.py"
+          python3 -m py_compile "$RUNNER_TEMP/fix4_patch.py"
+          python3 "$RUNNER_TEMP/fix4_patch.py"
+          test "$(git hash-object vita3k/renderer/src/vulkan/frame_generation.cpp)" = "1e7cc634f3308566b6ea3d972b73c55086f8f781"
 
-          gpu_start = text.find(gpu_start_marker)
-          gpu_end = text.find(gpu_end_marker, gpu_start + len(gpu_start_marker) if gpu_start >= 0 else 0)
-          if gpu_start < 0 or gpu_end < 0:
-              raise SystemExit(
-                  '::error::Could not locate GPU HUD method boundaries '
-                  f'start={gpu_start} end={gpu_end}'
-              )
-          print(f'[VS-CI] GPU HUD literal boundaries start={gpu_start} end={gpu_end}')
+      - name: Compile and validate FIX4 typeless shader
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y glslang-tools
+          SHADER="vita3k/shaders-builtin/vulkan/surface_cast_reinterpret.comp"
+          SPV="${SHADER}.spv"
+          test -s "$SHADER"
+          glslangValidator -V --target-env vulkan1.1 "$SHADER" -o "$SPV"
+          test -s "$SPV"
+          spirv-val "$SPV"
+          echo "[VS-FIX4] typeless shader validated: $(stat -c%s "$SPV") bytes"
 
-          # Literal boundary replacement. No regex and no indentation assumptions.
-          gpu_replacement = r'''    private Float readGpuUsage() {
-                  Float zeroCandidate = null;
-                  String zeroSource = null;
-
-                  // [VS-GPU-HUD2] Direct Qualcomm/KGSL percentage counters first.
-                  for (String path : new String[]{
-                          "/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage",
-                          "/sys/class/kgsl/kgsl-3d0/devfreq/gpu_load",
-                          "/sys/class/kgsl/kgsl-3d0/devfreq/load",
-                          "/sys/class/kgsl/kgsl-3d0/devfreq/utilization",
-                          "/sys/class/kgsl/kgsl-3d0/devfreq/busy_percent"}) {
-                      Float value = readSinglePercent(path);
-                      if (value != null) {
-                          if (value > 0.1f) {
-                              logGpuMetric(path, "DIRECT", value);
-                              return value;
-                          }
-                          if (zeroCandidate == null) {
-                              zeroCandidate = value;
-                              zeroSource = path;
-                          }
-                      }
-                  }
-
-                  try {
-                      File devfreq = new File("/sys/class/devfreq");
-                      File[] devices = devfreq.listFiles();
-                      if (devices != null) {
-                          for (File device : devices) {
-                              String descriptor = device.getName().toLowerCase(Locale.ROOT);
-                              try {
-                                  descriptor += " " + device.getCanonicalPath().toLowerCase(Locale.ROOT);
-                              } catch (Throwable ignored) {
-                              }
-
-                              if (!descriptor.contains("gpu")
-                                      && !descriptor.contains("mali")
-                                      && !descriptor.contains("kgsl")
-                                      && !descriptor.contains("3d0")) {
-                                  continue;
-                              }
-
-                              for (String leaf : new String[]{
-                                      "load", "utilization", "busy_percent",
-                                      "gpu_load", "gpu_busy_percentage"}) {
-                                  String path = new File(device, leaf).getAbsolutePath();
-                                  Float value = readSinglePercent(path);
-                                  if (value != null) {
-                                      if (value > 0.1f) {
-                                          logGpuMetric(path, "DEVFREQ", value);
-                                          return value;
-                                      }
-                                      if (zeroCandidate == null) {
-                                          zeroCandidate = value;
-                                          zeroSource = path;
-                                      }
-                                  }
-                              }
-                          }
-                      }
-                  } catch (Throwable ignored) {
-                  }
-
-                  // [VS-GPU-HUD2] gpubusy is commonly cumulative. "Now" is deltaBusy/deltaTotal.
-                  Float busyDelta = readGpuBusyDeltaPercent();
-                  if (busyDelta != null) {
-                      if (busyDelta > 0.1f) {
-                          logGpuMetric("/sys/class/kgsl/kgsl-3d0/gpubusy", "GPU_DELTA", busyDelta);
-                          return busyDelta;
-                      }
-                      if (zeroCandidate == null) {
-                          zeroCandidate = busyDelta;
-                          zeroSource = "/sys/class/kgsl/kgsl-3d0/gpubusy";
-                      }
-                  }
-
-                  if (zeroCandidate != null) {
-                      logGpuMetric(zeroSource == null ? "zero-candidate" : zeroSource, "ZERO", zeroCandidate);
-                      return zeroCandidate;
-                  }
-
-                  logGpuMetric("none", "UNAVAILABLE", null);
-                  return null;
-              }
-
-              private Float readGpuBusyDeltaPercent() {
-                  final String source = "/sys/class/kgsl/kgsl-3d0/gpubusy";
-                  try {
-                      String raw = readText(source);
-                      if (raw == null) return null;
-
-                      String[] parts = raw.trim().split("\\s+");
-                      if (parts.length < 2) return null;
-
-                      long busy = Long.parseLong(parts[0]);
-                      long total = Long.parseLong(parts[1]);
-                      if (busy < 0L || total <= 0L) return null;
-
-                      if (!hasPreviousGpuBusy) {
-                          previousGpuBusy = busy;
-                          previousGpuTotal = total;
-                          hasPreviousGpuBusy = true;
-                          logGpuMetric(source, "PRIMED", null);
-                          return null;
-                      }
-
-                      long busyDelta = busy - previousGpuBusy;
-                      long totalDelta = total - previousGpuTotal;
-                      previousGpuBusy = busy;
-                      previousGpuTotal = total;
-
-                      if (busyDelta >= 0L && totalDelta > 0L) {
-                          return clamp((busyDelta * 100f) / totalDelta);
-                      }
-
-                      if (busy <= total) {
-                          return clamp((busy * 100f) / total);
-                      }
-
-                      hasPreviousGpuBusy = false;
-                      return null;
-                  } catch (Throwable ignored) {
-                      hasPreviousGpuBusy = false;
-                      return null;
-                  }
-              }'''
-
-          text = text[:gpu_start] + gpu_replacement + '\n\n    ' + text[gpu_end:]
-          if text.count('[VS-GPU-HUD2]') < 2 or 'private Float readGpuBusyDeltaPercent()' not in text:
-              raise SystemExit('::error::GPU HUD 2.0 replacement verification failed')
-
-          # FIX3A left a double-escaped regex in readSinglePercent on some generated trees.
-          text = text.replace('text.trim().split("\\\\\\\\s+")[0]', 'text.trim().split("\\\\s+")[0]')
-          hud.write_text(text, encoding='utf-8')
-
-          # Touch UI 3.1 REAL: keep input backend, discard old PNG appearance.
-          overlay = Path('android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java')
-          text = overlay.read_text(encoding='utf-8')
-
-          if 'import android.graphics.Path;\n' not in text:
-              text = text.replace('import android.graphics.Paint;\n',
-                                  'import android.graphics.Paint;\nimport android.graphics.Path;\n', 1)
-          if 'import android.graphics.RectF;\n' not in text:
-              text = text.replace('import android.graphics.Rect;\n',
-                                  'import android.graphics.Rect;\nimport android.graphics.RectF;\n', 1)
-
-          paint_anchor = '  private final Set<InputOverlayDrawableJoystick> overlayJoysticks = new HashSet<>();\n'
-          paint_patch = paint_anchor + r'''  // [VS-TOUCH-VECTOR] VitaStation Touch UI 3.1 vector skin.
-            // Legacy bitmap objects remain only as geometry/input carriers.
-            private final Paint mVsTouchGlow = new Paint(Paint.ANTI_ALIAS_FLAG);
-            private final Paint mVsTouchStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
-            private final Paint mVsTouchFill = new Paint(Paint.ANTI_ALIAS_FLAG);
-            private final Paint mVsTouchText = new Paint(Paint.ANTI_ALIAS_FLAG);
-            private final Path mVsTouchPath = new Path();
-          '''
-          if '[VS-TOUCH-VECTOR]' not in text:
-              if text.count(paint_anchor) != 1:
-                  raise SystemExit('::error::Touch vector paint anchor mismatch')
-              text = text.replace(paint_anchor, paint_patch, 1)
-
-          draw_anchor = '''  public void draw(Canvas canvas)
-            {
-              super.draw(canvas);
-          '''
-          helpers = r'''  private float visualAlpha(boolean pressed) {
-              float base = resolvedVisualOpacity(mOverlayDimmed) / 255f;
-              if (pressed)
-                base = Math.min(1f, base * 1.45f);
-              return base;
-            }
-
-            private void prepareVectorPaints(float alpha, boolean pressed) {
-              int strokeAlpha = Math.max(0, Math.min(255, Math.round(255f * alpha)));
-              int glowAlpha = Math.max(0, Math.min(255, Math.round(72f * alpha)));
-              int fillAlpha = Math.max(0, Math.min(255, Math.round((pressed ? 74f : 28f) * alpha)));
-
-              mVsTouchGlow.setStyle(Paint.Style.STROKE);
-              mVsTouchGlow.setStrokeCap(Paint.Cap.ROUND);
-              mVsTouchGlow.setStrokeJoin(Paint.Join.ROUND);
-              mVsTouchGlow.setStrokeWidth(Math.max(2f, 5.0f * getResources().getDisplayMetrics().density));
-              mVsTouchGlow.setColor(VITASTATION_CYAN);
-              mVsTouchGlow.setAlpha(glowAlpha);
-
-              mVsTouchStroke.setStyle(Paint.Style.STROKE);
-              mVsTouchStroke.setStrokeCap(Paint.Cap.ROUND);
-              mVsTouchStroke.setStrokeJoin(Paint.Join.ROUND);
-              mVsTouchStroke.setStrokeWidth(Math.max(1.4f, 1.8f * getResources().getDisplayMetrics().density));
-              mVsTouchStroke.setColor(VITASTATION_CYAN);
-              mVsTouchStroke.setAlpha(strokeAlpha);
-
-              mVsTouchFill.setStyle(Paint.Style.FILL);
-              mVsTouchFill.setColor(VITASTATION_CYAN);
-              mVsTouchFill.setAlpha(fillAlpha);
-
-              mVsTouchText.setStyle(Paint.Style.FILL);
-              mVsTouchText.setColor(VITASTATION_NEUTRAL);
-              mVsTouchText.setAlpha(strokeAlpha);
-              mVsTouchText.setTextAlign(Paint.Align.CENTER);
-              mVsTouchText.setTypeface(android.graphics.Typeface.create(
-                      "sans-serif-medium", android.graphics.Typeface.BOLD));
-            }
-
-            private RectF compactArtRect(Rect bounds, float insetFraction) {
-              RectF rect = new RectF(bounds);
-              float inset = Math.min(rect.width(), rect.height()) * insetFraction;
-              rect.inset(inset, inset);
-              return rect;
-            }
-
-            private void drawVectorOutline(Canvas canvas, RectF rect, float radius) {
-              canvas.drawRoundRect(rect, radius, radius, mVsTouchGlow);
-              canvas.drawRoundRect(rect, radius, radius, mVsTouchFill);
-              canvas.drawRoundRect(rect, radius, radius, mVsTouchStroke);
-            }
-
-            private void drawCenteredLabel(Canvas canvas, String label, RectF rect, float fraction) {
-              mVsTouchText.setTextSize(Math.max(10f, Math.min(rect.width(), rect.height()) * fraction));
-              Paint.FontMetrics fm = mVsTouchText.getFontMetrics();
-              float baseline = rect.centerY() - (fm.ascent + fm.descent) / 2f;
-              canvas.drawText(label, rect.centerX(), baseline, mVsTouchText);
-            }
-
-            private void drawFaceSymbol(Canvas canvas, int legacyId, RectF rect) {
-              float cx = rect.centerX();
-              float cy = rect.centerY();
-              float r = Math.min(rect.width(), rect.height()) * 0.21f;
-
-              if (legacyId == ButtonType.BUTTON_CIRCLE) {
-                canvas.drawCircle(cx, cy, r, mVsTouchStroke);
-                return;
-              }
-
-              if (legacyId == ButtonType.BUTTON_SQUARE) {
-                RectF symbol = new RectF(cx - r, cy - r, cx + r, cy + r);
-                canvas.drawRoundRect(symbol, r * 0.08f, r * 0.08f, mVsTouchStroke);
-                return;
-              }
-
-              mVsTouchPath.reset();
-              if (legacyId == ButtonType.BUTTON_TRIANGLE) {
-                float h = r * 1.12f;
-                mVsTouchPath.moveTo(cx, cy - h);
-                mVsTouchPath.lineTo(cx - r, cy + h * 0.72f);
-                mVsTouchPath.lineTo(cx + r, cy + h * 0.72f);
-                mVsTouchPath.close();
-                canvas.drawPath(mVsTouchPath, mVsTouchStroke);
-                return;
-              }
-
-              if (legacyId == ButtonType.BUTTON_CROSS) {
-                canvas.drawLine(cx - r * 0.78f, cy - r * 0.78f,
-                        cx + r * 0.78f, cy + r * 0.78f, mVsTouchStroke);
-                canvas.drawLine(cx + r * 0.78f, cy - r * 0.78f,
-                        cx - r * 0.78f, cy + r * 0.78f, mVsTouchStroke);
-              }
-            }
-
-            private void drawVitaStationButton(Canvas canvas, InputOverlayDrawableButton button) {
-              int legacyId = button.getLegacyId();
-              boolean pressed = button.getPressed();
-              prepareVectorPaints(visualAlpha(pressed), pressed);
-
-              RectF rect = compactArtRect(button.getBounds(),
-                      legacyId == ButtonType.BUTTON_CROSS
-                              || legacyId == ButtonType.BUTTON_CIRCLE
-                              || legacyId == ButtonType.BUTTON_SQUARE
-                              || legacyId == ButtonType.BUTTON_TRIANGLE ? 0.13f : 0.08f);
-
-              if (legacyId == ButtonType.BUTTON_CROSS
-                      || legacyId == ButtonType.BUTTON_CIRCLE
-                      || legacyId == ButtonType.BUTTON_SQUARE
-                      || legacyId == ButtonType.BUTTON_TRIANGLE) {
-                float radius = Math.min(rect.width(), rect.height()) * 0.44f;
-                canvas.drawCircle(rect.centerX(), rect.centerY(), radius, mVsTouchGlow);
-                canvas.drawCircle(rect.centerX(), rect.centerY(), radius, mVsTouchFill);
-                canvas.drawCircle(rect.centerX(), rect.centerY(), radius, mVsTouchStroke);
-                drawFaceSymbol(canvas, legacyId, rect);
-                return;
-              }
-
-              if (legacyId == ButtonType.BUTTON_PS) {
-                float radius = Math.min(rect.width(), rect.height()) * 0.43f;
-                canvas.drawCircle(rect.centerX(), rect.centerY(), radius, mVsTouchGlow);
-                canvas.drawCircle(rect.centerX(), rect.centerY(), radius, mVsTouchFill);
-                canvas.drawCircle(rect.centerX(), rect.centerY(), radius, mVsTouchStroke);
-                drawCenteredLabel(canvas, "PS", rect, 0.28f);
-                return;
-              }
-
-              String label;
-              switch (legacyId) {
-                case ButtonType.TRIGGER_L: label = "L"; break;
-                case ButtonType.TRIGGER_R: label = "R"; break;
-                case ButtonType.TRIGGER_L2: label = "L2"; break;
-                case ButtonType.TRIGGER_R2: label = "R2"; break;
-                case ButtonType.TRIGGER_L3: label = "L3"; break;
-                case ButtonType.TRIGGER_R3: label = "R3"; break;
-                case ButtonType.BUTTON_SELECT: label = "SELECT"; break;
-                case ButtonType.BUTTON_START: label = "START"; break;
-                case ButtonType.BUTTON_TOUCH_SWITCH: label = button.getPressed() ? "BACK" : "FRONT"; break;
-                case ButtonType.BUTTON_TOUCH_HIDE: label = "HIDE"; break;
-                default: label = ""; break;
-              }
-
-              float radius = Math.min(rect.height() * 0.34f, rect.width() * 0.16f);
-              drawVectorOutline(canvas, rect, radius);
-              drawCenteredLabel(canvas, label, rect,
-                      (legacyId == ButtonType.BUTTON_SELECT || legacyId == ButtonType.BUTTON_START) ? 0.24f : 0.34f);
-            }
-
-            private void drawVitaStationDpad(Canvas canvas, InputOverlayDrawableDpad dpad) {
-              boolean pressed = dpad.getTrackId() != -1;
-              prepareVectorPaints(visualAlpha(pressed), pressed);
-
-              RectF rect = compactArtRect(dpad.getBounds(), 0.16f);
-              float cx = rect.centerX();
-              float cy = rect.centerY();
-              float radius = Math.min(rect.width(), rect.height()) * 0.46f;
-              float half = radius * 0.28f;
-
-              mVsTouchPath.reset();
-              mVsTouchPath.moveTo(cx - half, cy - radius);
-              mVsTouchPath.lineTo(cx + half, cy - radius);
-              mVsTouchPath.lineTo(cx + half, cy - half);
-              mVsTouchPath.lineTo(cx + radius, cy - half);
-              mVsTouchPath.lineTo(cx + radius, cy + half);
-              mVsTouchPath.lineTo(cx + half, cy + half);
-              mVsTouchPath.lineTo(cx + half, cy + radius);
-              mVsTouchPath.lineTo(cx - half, cy + radius);
-              mVsTouchPath.lineTo(cx - half, cy + half);
-              mVsTouchPath.lineTo(cx - radius, cy + half);
-              mVsTouchPath.lineTo(cx - radius, cy - half);
-              mVsTouchPath.lineTo(cx - half, cy - half);
-              mVsTouchPath.close();
-
-              canvas.drawPath(mVsTouchPath, mVsTouchGlow);
-              canvas.drawPath(mVsTouchPath, mVsTouchFill);
-              canvas.drawPath(mVsTouchPath, mVsTouchStroke);
-            }
-
-            private void drawVitaStationJoystick(Canvas canvas, InputOverlayDrawableJoystick joystick) {
-              boolean pressed = joystick.getTrackId() != -1;
-              prepareVectorPaints(visualAlpha(pressed), pressed);
-
-              RectF rect = compactArtRect(joystick.getBounds(), 0.12f);
-              float cx = rect.centerX();
-              float cy = rect.centerY();
-              float radius = Math.min(rect.width(), rect.height()) * 0.46f;
-
-              canvas.drawCircle(cx, cy, radius, mVsTouchGlow);
-              canvas.drawCircle(cx, cy, radius, mVsTouchStroke);
-
-              float knobRadius = radius * 0.48f;
-              float travel = radius * 0.34f;
-              float knobX = cx + Math.max(-1f, Math.min(1f, joystick.getX())) * travel;
-              float knobY = cy + Math.max(-1f, Math.min(1f, joystick.getY())) * travel;
-
-              canvas.drawCircle(knobX, knobY, knobRadius, mVsTouchFill);
-              canvas.drawCircle(knobX, knobY, knobRadius, mVsTouchStroke);
-            }
-
-          '''
-          if 'private void drawVitaStationButton' not in text:
-              if text.count(draw_anchor) != 1:
-                  raise SystemExit('::error::Touch vector draw anchor mismatch')
-              text = text.replace(draw_anchor, helpers + draw_anchor, 1)
-
-          draw_replacements = (
-              ('      button.draw(canvas);\n', '      drawVitaStationButton(canvas, button);\n', 'button'),
-              ('        dpad.draw(canvas);\n', '        drawVitaStationDpad(canvas, dpad);\n', 'dpad'),
-              ('        joystick.draw(canvas);\n', '        drawVitaStationJoystick(canvas, joystick);\n', 'joystick'),
-          )
-          for old_draw, new_draw, label in draw_replacements:
-              occurrences = text.count(old_draw)
-              if occurrences != 1:
-                  raise SystemExit(f'::error::Touch vector {label} draw count={occurrences}, expected=1')
-              text = text.replace(old_draw, new_draw, 1)
-
-          if 'button.draw(canvas);' in text or 'dpad.draw(canvas);' in text or 'joystick.draw(canvas);' in text:
-              raise SystemExit('::error::Legacy overlay draw calls remain after vector skin install')
-
-          overlay.write_text(text, encoding='utf-8')
-          PY
-          
-          git diff --check
-          
-          grep -q 'versionCode = 43' android/app/build.gradle
-          grep -q 'versionName = "0.3.0-alpha4-fix3b1-r2"' android/app/build.gradle
-          
-          grep -q '#include <lsfg_3_1p.hpp>' vita3k/renderer/src/vulkan/frame_generation.cpp
-          grep -q 'kWarmupFrames = 60' vita3k/renderer/src/vulkan/frame_generation.cpp
-          ! grep -q '\[VS-FG-TRANSITION\]' vita3k/renderer/src/vulkan/frame_generation.cpp
-          ! grep -q '\[VS-FG-FPS-GATE\]' vita3k/renderer/src/vulkan/frame_generation.cpp
+      - name: Source gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'versionCode = 44' android/app/build.gradle
+          grep -q 'versionName = "0.3.0-alpha4-fix4"' android/app/build.gradle
+          grep -q '\[VS-KERNEL-OWNERSHIP-WAIT\]' vita3k/kernel/src/sync_primitives.cpp
           grep -q '\[VS-KERNEL-SYNC-FIX\]' vita3k/kernel/src/sync_primitives.cpp
-          grep -q 'condvar->uid = uid' vita3k/kernel/src/sync_primitives.cpp
-          grep -q 'kEnableHdTypelessExperimental = false' vita3k/renderer/src/vulkan/surface_cache.cpp
-          
+          grep -q '\[VS-TYPELESS-HD-STAGING\]' vita3k/renderer/src/vulkan/surface_cache.cpp
+          grep -q 'source_mutable=0' vita3k/renderer/src/vulkan/surface_cache.cpp
+          grep -q '\[VS-TYPELESS-STAGING\]' vita3k/renderer/include/renderer/vulkan/surface_cache.h
+          grep -q 'start_word' vita3k/renderer/include/renderer/vulkan/surface_cache.h
+          grep -q '\[VS-TOUCH-ENGINE4\]' android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java
           grep -q '\[VS-GPU-HUD2\]' android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/PerformanceHudView.java
-          grep -q 'previousGpuBusy' android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/PerformanceHudView.java
-          grep -q '"GPU_DELTA"' android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/PerformanceHudView.java
-          grep -q '\[VS-TOUCH-VECTOR\]' android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java
-          grep -q 'drawVitaStationButton' android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java
-          grep -q 'drawVitaStationDpad' android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java
-          grep -q 'drawVitaStationJoystick' android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java
+          test "$(git hash-object vita3k/renderer/src/vulkan/frame_generation.cpp)" = "1e7cc634f3308566b6ea3d972b73c55086f8f781"
 
       - name: Set up Java 17
         uses: actions/setup-java@v5
@@ -535,31 +438,16 @@ jobs:
               exit 1
             fi
           done
-
           SIGNING_FILE="$RUNNER_TEMP/vitastation-permanent-release.jks"
           umask 077
           printf '%s' "$KEYSTORE_B64" | base64 --decode > "$SIGNING_FILE"
-
-          keytool -list -v \
-            -keystore "$SIGNING_FILE" \
-            -storepass "$STORE_PASSWORD" \
-            -alias "$KEY_ALIAS" \
-            > "$RUNNER_TEMP/vitastation-key-info.txt"
-
-          actual_fingerprint="$(
-            grep -m1 'SHA256:' "$RUNNER_TEMP/vitastation-key-info.txt" \
-              | sed 's/.*SHA256: //' \
-              | tr -d ':' \
-              | tr '[:upper:]' '[:lower:]'
-          )"
-          test "$actual_fingerprint" = "$VITASTATION_SIGNING_CERT_SHA256"
-
+          keytool -list -v -keystore "$SIGNING_FILE" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" > "$RUNNER_TEMP/vitastation-keytool.txt"
           echo "SIGNING_STORE_PATH=$SIGNING_FILE" >> "$GITHUB_ENV"
           echo "SIGNING_STORE_PASSWORD=$STORE_PASSWORD" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build signed VitaStation FIX3 Stage B1 R2 APK
+      - name: Build signed VitaStation FIX4 APK
         shell: bash
         run: |
           set -euo pipefail
@@ -572,34 +460,33 @@ jobs:
           APK="artifacts/vitastation-android/app.apk"
           test -f "$APK"
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
-          "$APKSIGNER" verify --verbose --print-certs "$APK" \
-            | tee "$RUNNER_TEMP/vitastation-apksigner.txt"
-
-          actual="$(
-            grep -m1 'certificate SHA-256 digest:' "$RUNNER_TEMP/vitastation-apksigner.txt" \
-              | sed 's/.*digest: //' \
-              | tr -d ':' \
-              | tr '[:upper:]' '[:lower:]'
-          )"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/vitastation-apksigner.txt"
+          actual="$(grep -m1 'certificate SHA-256 digest:' "$RUNNER_TEMP/vitastation-apksigner.txt" | sed 's/.*digest: //' | tr -d ':' | tr '[:upper:]' '[:lower:]')"
           test "$actual" = "$VITASTATION_SIGNING_CERT_SHA256"
 
-      - name: Persist FIX3 Stage B1 R2 source only after green signed build
+      - name: Persist FIX4 source only after green signed build
         shell: bash
         run: |
           set -euo pipefail
+          test "$(git hash-object vita3k/renderer/src/vulkan/frame_generation.cpp)" = "1e7cc634f3308566b6ea3d972b73c55086f8f781"
           git config user.name "VitaStation Bot"
           git config user.email "actions@users.noreply.github.com"
-
           git add \
             android/app/build.gradle \
             android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java \
-            android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/PerformanceHudView.java \
-            vita3k/renderer/src/vulkan/frame_generation.cpp
-
+            android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlayDrawableButton.java \
+            android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlayDrawableDpad.java \
+            android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlayDrawableJoystick.java \
+            android/app/src/main/res/values/integers.xml \
+            vita3k/kernel/src/sync_primitives.cpp \
+            vita3k/renderer/include/renderer/vulkan/surface_cache.h \
+            vita3k/renderer/src/vulkan/surface_cache.cpp \
+            vita3k/shaders-builtin/vulkan/surface_cast_reinterpret.comp \
+            vita3k/shaders-builtin/vulkan/surface_cast_reinterpret.comp.spv
           if git diff --cached --quiet; then
-            echo "FIX3 Stage B1 R2 source already persisted."
+            echo "[VS-FIX4] source already persisted"
           else
-            git commit -m "VitaStation v0.3.0 Alpha4 FIX3B1: vector touch + KGSL delta HUD [skip ci]"
+            git commit -m "VitaStation v0.3.0 Alpha4 FIX4: kernel ownership + typeless staging + touch engine4 [skip ci]"
             git push origin HEAD:main
           fi
 
@@ -608,14 +495,14 @@ jobs:
         run: |
           set -euo pipefail
           SRC="artifacts/vitastation-android/app.apk"
-          DST="artifacts/vitastation-android/VitaStation-v0.3.0-Alpha4-FIX3B1-R2-VectorTouch-KGSLDeltaHUD-StableFG-Signed.apk"
+          DST="artifacts/vitastation-android/VitaStation-v0.3.0-Alpha4-FIX4-KernelSync3-TypelessStaging-TouchEngine4-StableFG-Signed.apk"
           test -f "$SRC"
           mv "$SRC" "$DST"
           ls -lh "$DST"
 
-      - name: Upload VitaStation FIX3 Stage B1 R2 APK
+      - name: Upload VitaStation FIX4 APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.3.0-Alpha4-FIX3B1-R2-VectorTouch-KGSLDeltaHUD-StableFG-Signed-Android
-          path: artifacts/vitastation-android/VitaStation-v0.3.0-Alpha4-FIX3B1-R2-VectorTouch-KGSLDeltaHUD-StableFG-Signed.apk
+          name: VitaStation-v0.3.0-Alpha4-FIX4-KernelSync3-TypelessStaging-TouchEngine4-StableFG-Signed-Android
+          path: artifacts/vitastation-android/VitaStation-v0.3.0-Alpha4-FIX4-KernelSync3-TypelessStaging-TouchEngine4-StableFG-Signed.apk
           if-no-files-found: error

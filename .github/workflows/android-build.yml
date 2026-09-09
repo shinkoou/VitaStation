@@ -1,4 +1,4 @@
-name: VitaStation Android APK
+name: VitaStation Android APK - Alpha 4 FIX2 R1
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
     branches:
       - main
     paths:
-      - '.github/workflows/android-build.yml'
+      - '.github/workflows/android-build-fix2-r1.yml'
 
 permissions:
   contents: write
@@ -17,7 +17,7 @@ env:
 
 jobs:
   android-build:
-    name: Build VitaStation v0.3.0 Alpha 4 FIX2
+    name: Build VitaStation v0.3.0 Alpha 4 FIX2 R1
     runs-on: ubuntu-latest
 
     steps:
@@ -27,13 +27,87 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Apply v0.3.0 Alpha 4 FIX2 Recovery + Integration Pass
+      - name: Apply Alpha 4 FIX2 payload + repair Gamepad Kotlin
         shell: bash
         run: |
           set -euo pipefail
-          printf '%s' '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' | base64 --decode | gzip --decompress > /tmp/vs-alpha4-fix2.py
+
+          # Reuse the exact FIX2 payload already embedded in the original workflow.
+          # This avoids touching/repacking the renderer, kernel, FG, Touch UI, etc.
+          python3 - <<'PY'
+          import base64
+          import gzip
+          import re
+          from pathlib import Path
+
+          source_workflow = Path(".github/workflows/android-build.yml")
+          if not source_workflow.is_file():
+              raise SystemExit(
+                  "::error::Original .github/workflows/android-build.yml not found. "
+                  "Keep the original FIX2 workflow in the repository."
+              )
+
+          text = source_workflow.read_text(encoding="utf-8")
+          match = re.search(
+              r"printf '%s' '([A-Za-z0-9+/=]+)' "
+              r"\| base64 --decode \| gzip --decompress "
+              r"> /tmp/vs-alpha4-fix2\.py",
+              text,
+          )
+          if not match:
+              raise SystemExit(
+                  "::error::Could not locate the embedded Alpha 4 FIX2 payload "
+                  "inside android-build.yml."
+              )
+
+          payload = base64.b64decode(match.group(1), validate=True)
+          script = gzip.decompress(payload)
+          Path("/tmp/vs-alpha4-fix2.py").write_bytes(script)
+
+          print(f"Recovered FIX2 payload: {len(script)} bytes")
+          PY
+
           python3 -m py_compile /tmp/vs-alpha4-fix2.py
           python3 /tmp/vs-alpha4-fix2.py
+
+          # FIX2-R1:
+          # The payload generated invalid Kotlin:
+          #   name="${device.name.orEmpty()}"
+          # inside a normal quoted Kotlin string.
+          # Remove only those inner quotes and leave the rest of the FIX2 intact.
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path(
+              "android/app/src/main/java/org/vita3k/emulator/InputDeviceUtils.kt"
+          )
+          text = path.read_text(encoding="utf-8")
+
+          broken = 'name="${device.name.orEmpty()}" '
+          fixed = 'name=${device.name.orEmpty()} '
+
+          count = text.count(broken)
+          if count != 1:
+              raise SystemExit(
+                  f"::error::Expected exactly one malformed VS-PAD name field, "
+                  f"found {count}. Payload/source may have changed."
+              )
+
+          text = text.replace(broken, fixed, 1)
+          path.write_text(text, encoding="utf-8")
+
+          print("FIX2-R1: repaired InputDeviceUtils.kt VS-PAD diagnostic string.")
+          PY
+
+          # Fail early if the exact syntax bug is still present.
+          grep -Fq 'name=${device.name.orEmpty()}' \
+            android/app/src/main/java/org/vita3k/emulator/InputDeviceUtils.kt
+
+          if grep -Fq 'name="${device.name.orEmpty()}"' \
+            android/app/src/main/java/org/vita3k/emulator/InputDeviceUtils.kt; then
+            echo "::error::Broken VS-PAD Kotlin quoting is still present."
+            exit 1
+          fi
 
           git diff --check
           grep -q 'versionCode = 41' android/app/build.gradle
@@ -106,10 +180,17 @@ jobs:
           umask 077
           printf '%s' "$KEYSTORE_B64" | base64 --decode > "$SIGNING_FILE"
 
-          keytool -list -v             -keystore "$SIGNING_FILE"             -storepass "$STORE_PASSWORD"             -alias "$KEY_ALIAS"             > "$RUNNER_TEMP/vitastation-key-info.txt"
+          keytool -list -v \
+            -keystore "$SIGNING_FILE" \
+            -storepass "$STORE_PASSWORD" \
+            -alias "$KEY_ALIAS" \
+            > "$RUNNER_TEMP/vitastation-key-info.txt"
 
           actual_fingerprint="$(
-            grep -m1 'SHA256:' "$RUNNER_TEMP/vitastation-key-info.txt"               | sed 's/.*SHA256: //'               | tr -d ':'               | tr '[:upper:]' '[:lower:]'
+            grep -m1 'SHA256:' "$RUNNER_TEMP/vitastation-key-info.txt" \
+              | sed 's/.*SHA256: //' \
+              | tr -d ':' \
+              | tr '[:upper:]' '[:lower:]'
           )"
 
           if [ "$actual_fingerprint" != "$VITASTATION_SIGNING_CERT_SHA256" ]; then
@@ -122,7 +203,7 @@ jobs:
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build VitaStation v0.3.0 Alpha 4 FIX2 signed APK
+      - name: Build VitaStation v0.3.0 Alpha 4 FIX2 R1 signed APK
         shell: bash
         run: |
           set -euo pipefail
@@ -138,10 +219,14 @@ jobs:
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           test -x "$APKSIGNER"
 
-          "$APKSIGNER" verify --verbose --print-certs "$APK"             | tee "$RUNNER_TEMP/vitastation-apksigner.txt"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" \
+            | tee "$RUNNER_TEMP/vitastation-apksigner.txt"
 
           actual="$(
-            grep -m1 'certificate SHA-256 digest:' "$RUNNER_TEMP/vitastation-apksigner.txt"               | sed 's/.*digest: //'               | tr -d ':'               | tr '[:upper:]' '[:lower:]'
+            grep -m1 'certificate SHA-256 digest:' "$RUNNER_TEMP/vitastation-apksigner.txt" \
+              | sed 's/.*digest: //' \
+              | tr -d ':' \
+              | tr '[:upper:]' '[:lower:]'
           )"
 
           if [ "$actual" != "$VITASTATION_SIGNING_CERT_SHA256" ]; then
@@ -149,7 +234,7 @@ jobs:
             exit 1
           fi
 
-      - name: Persist Alpha 4 FIX2 source only after green signed build
+      - name: Persist Alpha 4 FIX2 R1 source only after green signed build
         shell: bash
         run: |
           set -euo pipefail
@@ -168,9 +253,9 @@ jobs:
             vita3k/renderer/src/vulkan/surface_cache.cpp
 
           if git diff --cached --quiet; then
-            echo "Alpha 4 FIX2 source already persisted."
+            echo "Alpha 4 FIX2 R1 source already persisted."
           else
-            git commit -m "VitaStation v0.3.0 Alpha 4 FIX2: recovery integration pass [skip ci]"
+            git commit -m "VitaStation v0.3.0 Alpha 4 FIX2 R1: repair pad diagnostics [skip ci]"
             git push origin HEAD:main
           fi
 
@@ -179,14 +264,14 @@ jobs:
         run: |
           set -euo pipefail
           SRC="artifacts/vitastation-android/app.apk"
-          DST="artifacts/vitastation-android/VitaStation-v0.3.0-Alpha4-FIX2-Recovery-FG221-Kernel-TouchUI21-PadDiag-Signed.apk"
+          DST="artifacts/vitastation-android/VitaStation-v0.3.0-Alpha4-FIX2-R1-Recovery-FG221-Kernel-TouchUI21-PadDiag-Signed.apk"
           test -f "$SRC"
           mv "$SRC" "$DST"
           ls -lh "$DST"
 
-      - name: Upload VitaStation v0.3.0 Alpha 4 FIX2 APK
+      - name: Upload VitaStation v0.3.0 Alpha 4 FIX2 R1 APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.3.0-Alpha4-FIX2-Recovery-FG221-Kernel-TouchUI21-PadDiag-Signed-Android
-          path: artifacts/vitastation-android/VitaStation-v0.3.0-Alpha4-FIX2-Recovery-FG221-Kernel-TouchUI21-PadDiag-Signed.apk
+          name: VitaStation-v0.3.0-Alpha4-FIX2-R1-Recovery-FG221-Kernel-TouchUI21-PadDiag-Signed-Android
+          path: artifacts/vitastation-android/VitaStation-v0.3.0-Alpha4-FIX2-R1-Recovery-FG221-Kernel-TouchUI21-PadDiag-Signed.apk
           if-no-files-found: error

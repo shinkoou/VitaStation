@@ -6,7 +6,7 @@ on:
     branches:
       - main
     paths:
-      - '.github/workflows/android-build-fix2-r1.yml'
+      - '.github/workflows/android-build.yml'
 
 permissions:
   contents: write
@@ -32,21 +32,20 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Reuse the exact FIX2 payload already embedded in the original workflow.
-          # This avoids touching/repacking the renderer, kernel, FG, Touch UI, etc.
+          # Recover the exact FIX2 payload from the immutable Run #36 commit.
+          # fetch-depth: 0 above guarantees the commit is available locally.
+          ORIGINAL_FIX2_COMMIT="54a03697bb76f86fb7e1f1debe2c36b77fbb857f"
+          git cat-file -e "${ORIGINAL_FIX2_COMMIT}^{commit}"
+          git show "${ORIGINAL_FIX2_COMMIT}:.github/workflows/android-build.yml" \
+            > /tmp/vs-original-fix2-workflow.yml
+
           python3 - <<'PY'
           import base64
           import gzip
           import re
           from pathlib import Path
 
-          source_workflow = Path(".github/workflows/android-build.yml")
-          if not source_workflow.is_file():
-              raise SystemExit(
-                  "::error::Original .github/workflows/android-build.yml not found. "
-                  "Keep the original FIX2 workflow in the repository."
-              )
-
+          source_workflow = Path("/tmp/vs-original-fix2-workflow.yml")
           text = source_workflow.read_text(encoding="utf-8")
           match = re.search(
               r"printf '%s' '([A-Za-z0-9+/=]+)' "

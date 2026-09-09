@@ -14,9 +14,11 @@ import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.drawable.Drawable;
 import android.util.DisplayMetrics;
 import android.view.MotionEvent;
@@ -56,6 +58,13 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
   private final Set<InputOverlayDrawableButton> overlayButtons = new HashSet<>();
   private final Set<InputOverlayDrawableDpad> overlayDpads = new HashSet<>();
   private final Set<InputOverlayDrawableJoystick> overlayJoysticks = new HashSet<>();
+  // [VS-TOUCH-VECTOR] VitaStation Touch UI 3.1 vector skin.
+  // Legacy bitmap objects remain only as geometry/input carriers.
+  private final Paint mVsTouchGlow = new Paint(Paint.ANTI_ALIAS_FLAG);
+  private final Paint mVsTouchStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
+  private final Paint mVsTouchFill = new Paint(Paint.ANTI_ALIAS_FLAG);
+  private final Paint mVsTouchText = new Paint(Paint.ANTI_ALIAS_FLAG);
+  private final Path mVsTouchPath = new Path();
   private final Runnable mHideOverlayTicker = new Runnable() {
     @Override
     public void run() {
@@ -282,6 +291,203 @@ private static Bitmap tintBitmap(Bitmap source, int tint)
     invalidate();
   }
 
+  private float visualAlpha(boolean pressed) {
+    float base = resolvedVisualOpacity(mOverlayDimmed) / 255f;
+    if (pressed)
+      base = Math.min(1f, base * 1.45f);
+    return base;
+  }
+
+  private void prepareVectorPaints(float alpha, boolean pressed) {
+    int strokeAlpha = Math.max(0, Math.min(255, Math.round(255f * alpha)));
+    int glowAlpha = Math.max(0, Math.min(255, Math.round(72f * alpha)));
+    int fillAlpha = Math.max(0, Math.min(255, Math.round((pressed ? 74f : 28f) * alpha)));
+
+    mVsTouchGlow.setStyle(Paint.Style.STROKE);
+    mVsTouchGlow.setStrokeCap(Paint.Cap.ROUND);
+    mVsTouchGlow.setStrokeJoin(Paint.Join.ROUND);
+    mVsTouchGlow.setStrokeWidth(Math.max(2f, 5.0f * getResources().getDisplayMetrics().density));
+    mVsTouchGlow.setColor(VITASTATION_CYAN);
+    mVsTouchGlow.setAlpha(glowAlpha);
+
+    mVsTouchStroke.setStyle(Paint.Style.STROKE);
+    mVsTouchStroke.setStrokeCap(Paint.Cap.ROUND);
+    mVsTouchStroke.setStrokeJoin(Paint.Join.ROUND);
+    mVsTouchStroke.setStrokeWidth(Math.max(1.4f, 1.8f * getResources().getDisplayMetrics().density));
+    mVsTouchStroke.setColor(VITASTATION_CYAN);
+    mVsTouchStroke.setAlpha(strokeAlpha);
+
+    mVsTouchFill.setStyle(Paint.Style.FILL);
+    mVsTouchFill.setColor(VITASTATION_CYAN);
+    mVsTouchFill.setAlpha(fillAlpha);
+
+    mVsTouchText.setStyle(Paint.Style.FILL);
+    mVsTouchText.setColor(VITASTATION_NEUTRAL);
+    mVsTouchText.setAlpha(strokeAlpha);
+    mVsTouchText.setTextAlign(Paint.Align.CENTER);
+    mVsTouchText.setTypeface(android.graphics.Typeface.create(
+            "sans-serif-medium", android.graphics.Typeface.BOLD));
+  }
+
+  private RectF compactArtRect(Rect bounds, float insetFraction) {
+    RectF rect = new RectF(bounds);
+    float inset = Math.min(rect.width(), rect.height()) * insetFraction;
+    rect.inset(inset, inset);
+    return rect;
+  }
+
+  private void drawVectorOutline(Canvas canvas, RectF rect, float radius) {
+    canvas.drawRoundRect(rect, radius, radius, mVsTouchGlow);
+    canvas.drawRoundRect(rect, radius, radius, mVsTouchFill);
+    canvas.drawRoundRect(rect, radius, radius, mVsTouchStroke);
+  }
+
+  private void drawCenteredLabel(Canvas canvas, String label, RectF rect, float fraction) {
+    mVsTouchText.setTextSize(Math.max(10f, Math.min(rect.width(), rect.height()) * fraction));
+    Paint.FontMetrics fm = mVsTouchText.getFontMetrics();
+    float baseline = rect.centerY() - (fm.ascent + fm.descent) / 2f;
+    canvas.drawText(label, rect.centerX(), baseline, mVsTouchText);
+  }
+
+  private void drawFaceSymbol(Canvas canvas, int legacyId, RectF rect) {
+    float cx = rect.centerX();
+    float cy = rect.centerY();
+    float r = Math.min(rect.width(), rect.height()) * 0.21f;
+
+    if (legacyId == ButtonType.BUTTON_CIRCLE) {
+      canvas.drawCircle(cx, cy, r, mVsTouchStroke);
+      return;
+    }
+
+    if (legacyId == ButtonType.BUTTON_SQUARE) {
+      RectF symbol = new RectF(cx - r, cy - r, cx + r, cy + r);
+      canvas.drawRoundRect(symbol, r * 0.08f, r * 0.08f, mVsTouchStroke);
+      return;
+    }
+
+    mVsTouchPath.reset();
+    if (legacyId == ButtonType.BUTTON_TRIANGLE) {
+      float h = r * 1.12f;
+      mVsTouchPath.moveTo(cx, cy - h);
+      mVsTouchPath.lineTo(cx - r, cy + h * 0.72f);
+      mVsTouchPath.lineTo(cx + r, cy + h * 0.72f);
+      mVsTouchPath.close();
+      canvas.drawPath(mVsTouchPath, mVsTouchStroke);
+      return;
+    }
+
+    if (legacyId == ButtonType.BUTTON_CROSS) {
+      canvas.drawLine(cx - r * 0.78f, cy - r * 0.78f,
+              cx + r * 0.78f, cy + r * 0.78f, mVsTouchStroke);
+      canvas.drawLine(cx + r * 0.78f, cy - r * 0.78f,
+              cx - r * 0.78f, cy + r * 0.78f, mVsTouchStroke);
+    }
+  }
+
+  private void drawVitaStationButton(Canvas canvas, InputOverlayDrawableButton button) {
+    int legacyId = button.getLegacyId();
+    boolean pressed = button.getPressed();
+    prepareVectorPaints(visualAlpha(pressed), pressed);
+
+    RectF rect = compactArtRect(button.getBounds(),
+            legacyId == ButtonType.BUTTON_CROSS
+                    || legacyId == ButtonType.BUTTON_CIRCLE
+                    || legacyId == ButtonType.BUTTON_SQUARE
+                    || legacyId == ButtonType.BUTTON_TRIANGLE ? 0.13f : 0.08f);
+
+    if (legacyId == ButtonType.BUTTON_CROSS
+            || legacyId == ButtonType.BUTTON_CIRCLE
+            || legacyId == ButtonType.BUTTON_SQUARE
+            || legacyId == ButtonType.BUTTON_TRIANGLE) {
+      float radius = Math.min(rect.width(), rect.height()) * 0.44f;
+      canvas.drawCircle(rect.centerX(), rect.centerY(), radius, mVsTouchGlow);
+      canvas.drawCircle(rect.centerX(), rect.centerY(), radius, mVsTouchFill);
+      canvas.drawCircle(rect.centerX(), rect.centerY(), radius, mVsTouchStroke);
+      drawFaceSymbol(canvas, legacyId, rect);
+      return;
+    }
+
+    if (legacyId == ButtonType.BUTTON_PS) {
+      float radius = Math.min(rect.width(), rect.height()) * 0.43f;
+      canvas.drawCircle(rect.centerX(), rect.centerY(), radius, mVsTouchGlow);
+      canvas.drawCircle(rect.centerX(), rect.centerY(), radius, mVsTouchFill);
+      canvas.drawCircle(rect.centerX(), rect.centerY(), radius, mVsTouchStroke);
+      drawCenteredLabel(canvas, "PS", rect, 0.28f);
+      return;
+    }
+
+    String label;
+    switch (legacyId) {
+      case ButtonType.TRIGGER_L: label = "L"; break;
+      case ButtonType.TRIGGER_R: label = "R"; break;
+      case ButtonType.TRIGGER_L2: label = "L2"; break;
+      case ButtonType.TRIGGER_R2: label = "R2"; break;
+      case ButtonType.TRIGGER_L3: label = "L3"; break;
+      case ButtonType.TRIGGER_R3: label = "R3"; break;
+      case ButtonType.BUTTON_SELECT: label = "SELECT"; break;
+      case ButtonType.BUTTON_START: label = "START"; break;
+      case ButtonType.BUTTON_TOUCH_SWITCH: label = button.getPressed() ? "BACK" : "FRONT"; break;
+      case ButtonType.BUTTON_TOUCH_HIDE: label = "HIDE"; break;
+      default: label = ""; break;
+    }
+
+    float radius = Math.min(rect.height() * 0.34f, rect.width() * 0.16f);
+    drawVectorOutline(canvas, rect, radius);
+    drawCenteredLabel(canvas, label, rect,
+            (legacyId == ButtonType.BUTTON_SELECT || legacyId == ButtonType.BUTTON_START) ? 0.24f : 0.34f);
+  }
+
+  private void drawVitaStationDpad(Canvas canvas, InputOverlayDrawableDpad dpad) {
+    boolean pressed = dpad.getTrackId() != -1;
+    prepareVectorPaints(visualAlpha(pressed), pressed);
+
+    RectF rect = compactArtRect(dpad.getBounds(), 0.16f);
+    float cx = rect.centerX();
+    float cy = rect.centerY();
+    float radius = Math.min(rect.width(), rect.height()) * 0.46f;
+    float half = radius * 0.28f;
+
+    mVsTouchPath.reset();
+    mVsTouchPath.moveTo(cx - half, cy - radius);
+    mVsTouchPath.lineTo(cx + half, cy - radius);
+    mVsTouchPath.lineTo(cx + half, cy - half);
+    mVsTouchPath.lineTo(cx + radius, cy - half);
+    mVsTouchPath.lineTo(cx + radius, cy + half);
+    mVsTouchPath.lineTo(cx + half, cy + half);
+    mVsTouchPath.lineTo(cx + half, cy + radius);
+    mVsTouchPath.lineTo(cx - half, cy + radius);
+    mVsTouchPath.lineTo(cx - half, cy + half);
+    mVsTouchPath.lineTo(cx - radius, cy + half);
+    mVsTouchPath.lineTo(cx - radius, cy - half);
+    mVsTouchPath.lineTo(cx - half, cy - half);
+    mVsTouchPath.close();
+
+    canvas.drawPath(mVsTouchPath, mVsTouchGlow);
+    canvas.drawPath(mVsTouchPath, mVsTouchFill);
+    canvas.drawPath(mVsTouchPath, mVsTouchStroke);
+  }
+
+  private void drawVitaStationJoystick(Canvas canvas, InputOverlayDrawableJoystick joystick) {
+    boolean pressed = joystick.getTrackId() != -1;
+    prepareVectorPaints(visualAlpha(pressed), pressed);
+
+    RectF rect = compactArtRect(joystick.getBounds(), 0.12f);
+    float cx = rect.centerX();
+    float cy = rect.centerY();
+    float radius = Math.min(rect.width(), rect.height()) * 0.46f;
+
+    canvas.drawCircle(cx, cy, radius, mVsTouchGlow);
+    canvas.drawCircle(cx, cy, radius, mVsTouchStroke);
+
+    float knobRadius = radius * 0.48f;
+    float travel = radius * 0.34f;
+    float knobX = cx + Math.max(-1f, Math.min(1f, joystick.getX())) * travel;
+    float knobY = cy + Math.max(-1f, Math.min(1f, joystick.getY())) * travel;
+
+    canvas.drawCircle(knobX, knobY, knobRadius, mVsTouchFill);
+    canvas.drawCircle(knobX, knobY, knobRadius, mVsTouchStroke);
+  }
+
   public void draw(Canvas canvas)
   {
     super.draw(canvas);
@@ -300,19 +506,19 @@ private static Bitmap tintBitmap(Bitmap source, int tint)
         continue;
       }
 
-      button.draw(canvas);
+      drawVitaStationButton(canvas, button);
     }
 
     if (!mHideOverlayButtons)
     {
       for (InputOverlayDrawableDpad dpad : overlayDpads)
       {
-        dpad.draw(canvas);
+        drawVitaStationDpad(canvas, dpad);
       }
 
       for (InputOverlayDrawableJoystick joystick : overlayJoysticks)
       {
-        joystick.draw(canvas);
+        drawVitaStationJoystick(canvas, joystick);
       }
     }
   }

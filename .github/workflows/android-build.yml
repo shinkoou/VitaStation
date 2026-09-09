@@ -1,4 +1,4 @@
-name: VitaStation Android APK - Alpha 4 FIX3 Stage B1
+name: VitaStation Android APK - Alpha 4 FIX3 Stage B1 R1
 
 on:
   workflow_dispatch:
@@ -11,13 +11,17 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: vitastation-android-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   VCPKG_ROOT: /usr/local/share/vcpkg
   VITASTATION_SIGNING_CERT_SHA256: fc57542b62221ad0c0550d12b2791e4e40794e980c9f26a86d83250d67ed5d30
 
 jobs:
   android-build:
-    name: Build VitaStation v0.3.0 Alpha 4 FIX3 Stage B1
+    name: Build VitaStation v0.3.0 Alpha 4 FIX3 Stage B1 R1
     runs-on: ubuntu-latest
 
     steps:
@@ -45,7 +49,7 @@ jobs:
           gradle = Path('android/app/build.gradle')
           text = gradle.read_text(encoding='utf-8')
           text, n1 = re.subn(r'versionCode = \d+', 'versionCode = 43', text, count=1)
-          text, n2 = re.subn(r'versionName = "[^"]+"', 'versionName = "0.3.0-alpha4-fix3b1"', text, count=1)
+          text, n2 = re.subn(r'versionName = "[^"]+"', 'versionName = "0.3.0-alpha4-fix3b1-r1"', text, count=1)
           if n1 != 1 or n2 != 1:
               raise SystemExit('::error::Could not update FIX3 Stage B1 version metadata')
           gradle.write_text(text, encoding='utf-8')
@@ -67,9 +71,8 @@ jobs:
               text = text.replace(field_anchor, field_patch, 1)
           
           pattern = re.compile(
-              r'    private Float readGpuUsage\(\) \{.*?\n    \}\n\n'
-              r'private void logGpuMetric',
-              re.S
+              r'(?ms)^[ \\t]*private Float readGpuUsage\\(\\) \\{.*?'
+              r'^[ \\t]*\\}\\s*\\n[ \\t]*private void logGpuMetric'
           )
           replacement = r'''    private Float readGpuUsage() {
                   Float zeroCandidate = null;
@@ -449,7 +452,7 @@ jobs:
           git diff --check
           
           grep -q 'versionCode = 43' android/app/build.gradle
-          grep -q 'versionName = "0.3.0-alpha4-fix3b1"' android/app/build.gradle
+          grep -q 'versionName = "0.3.0-alpha4-fix3b1-r1"' android/app/build.gradle
           
           grep -q '#include <lsfg_3_1p.hpp>' vita3k/renderer/src/vulkan/frame_generation.cpp
           grep -q 'kWarmupFrames = 60' vita3k/renderer/src/vulkan/frame_generation.cpp
@@ -538,7 +541,7 @@ jobs:
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build signed VitaStation FIX3 Stage B1 APK
+      - name: Build signed VitaStation FIX3 Stage B1 R1 APK
         shell: bash
         run: |
           set -euo pipefail
@@ -562,7 +565,7 @@ jobs:
           )"
           test "$actual" = "$VITASTATION_SIGNING_CERT_SHA256"
 
-      - name: Persist FIX3 Stage B1 source only after green signed build
+      - name: Persist FIX3 Stage B1 R1 source only after green signed build
         shell: bash
         run: |
           set -euo pipefail
@@ -576,7 +579,7 @@ jobs:
             vita3k/renderer/src/vulkan/frame_generation.cpp
 
           if git diff --cached --quiet; then
-            echo "FIX3 Stage B1 source already persisted."
+            echo "FIX3 Stage B1 R1 source already persisted."
           else
             git commit -m "VitaStation v0.3.0 Alpha4 FIX3B1: vector touch + KGSL delta HUD [skip ci]"
             git push origin HEAD:main
@@ -587,14 +590,14 @@ jobs:
         run: |
           set -euo pipefail
           SRC="artifacts/vitastation-android/app.apk"
-          DST="artifacts/vitastation-android/VitaStation-v0.3.0-Alpha4-FIX3B1-VectorTouch-KGSLDeltaHUD-StableFG-Signed.apk"
+          DST="artifacts/vitastation-android/VitaStation-v0.3.0-Alpha4-FIX3B1-R1-VectorTouch-KGSLDeltaHUD-StableFG-Signed.apk"
           test -f "$SRC"
           mv "$SRC" "$DST"
           ls -lh "$DST"
 
-      - name: Upload VitaStation FIX3 Stage B1 APK
+      - name: Upload VitaStation FIX3 Stage B1 R1 APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.3.0-Alpha4-FIX3B1-VectorTouch-KGSLDeltaHUD-StableFG-Signed-Android
-          path: artifacts/vitastation-android/VitaStation-v0.3.0-Alpha4-FIX3B1-VectorTouch-KGSLDeltaHUD-StableFG-Signed.apk
+          name: VitaStation-v0.3.0-Alpha4-FIX3B1-R1-VectorTouch-KGSLDeltaHUD-StableFG-Signed-Android
+          path: artifacts/vitastation-android/VitaStation-v0.3.0-Alpha4-FIX3B1-R1-VectorTouch-KGSLDeltaHUD-StableFG-Signed.apk
           if-no-files-found: error

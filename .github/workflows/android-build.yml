@@ -3,8 +3,10 @@ name: VitaStation Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [main]
-    paths: ['.github/workflows/android-build.yml']
+    branches:
+      - main
+    paths:
+      - '.github/workflows/android-build.yml'
 
 permissions:
   contents: write
@@ -15,7 +17,7 @@ env:
 
 jobs:
   android-build:
-    name: Build VitaStation v0.3.0 Alpha 1
+    name: Build VitaStation v0.3.0 Alpha 2
     runs-on: ubuntu-latest
 
     steps:
@@ -25,44 +27,18 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Apply VitaStation v0.3.0 Alpha 1
+      - name: Apply v0.3.0 Alpha 2 Mega Update
         shell: bash
         run: |
           set -euo pipefail
-          printf '%s' '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' | base64 --decode | gzip --decompress > /tmp/vitastation-v030-alpha1.py
-          python3 /tmp/vitastation-v030-alpha1.py
-
-          # Text/resource hygiene.
-          python3 - <<'PY'
-          from pathlib import Path
-          for raw in [
-              "android/app/src/main/res/values/strings.xml",
-              "android/app/src/main/res/values-pt-rBR/strings.xml",
-          ]:
-              p = Path(raw)
-              p.write_text(p.read_text(encoding="utf-8").rstrip() + "\n", encoding="utf-8")
-          PY
-
+          printf '%s' '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' | base64 --decode | gzip --decompress > /tmp/vs-alpha2.py
+          python3 /tmp/vs-alpha2.py
           git diff --check
-          grep -q 'versionCode = 37' android/app/build.gradle
-          grep -q 'versionName = "0.3.0-alpha1"' android/app/build.gradle
-          grep -q 'last_write_scene' vita3k/renderer/include/renderer/vulkan/surface_cache.h
-          grep -q 'needs_late_resolve' vita3k/renderer/src/vulkan/surface_cache.cpp
-          grep -q '\[VS-SURFACE-RESOLVE\]' vita3k/renderer/src/vulkan/surface_cache.cpp
-          grep -q 'FrameTimingHistory' vita3k/renderer/src/vulkan/frame_generation.cpp
-          grep -q '\[VS-FG\]' vita3k/renderer/src/vulkan/frame_generation.cpp
-          ! grep -q 'Para começar, instale os arquivos de firmware do seu PS Vita.&lt;br&gt;&lt;br&gt;' android/app/src/main/res/values-pt-rBR/strings.xml
-
-      - name: Restore native dependency cache
-        uses: actions/cache@v5
-        with:
-          path: |
-            /usr/local/share/vcpkg/installed
-            /usr/local/share/vcpkg/packages
-          key: vitastation-android-native-v030a1-${{ hashFiles('CMakeLists.txt', 'vita3k/CMakeLists.txt', 'external/lsfg-vk-android/framegen/CMakeLists.txt', 'cmake/**', '.ci/**', 'android/app/build.gradle', 'vcpkg.json') }}
-          restore-keys: |
-            vitastation-android-native-lsfg-
-            vitastation-android-native-
+          grep -q 'versionName = "0.3.0-alpha2"' android/app/build.gradle
+          grep -q 'versionCode = 38' android/app/build.gradle
+          grep -q 'notify_color_surface_draw' vita3k/renderer/src/vulkan/scene.cpp
+          grep -q 'VS-TYPELESS-NATIVE' vita3k/renderer/src/vulkan/surface_cache.cpp
+          grep -q 'VS-FG-SCENE' vita3k/renderer/src/vulkan/frame_generation.cpp
 
       - name: Set up Java 17
         uses: actions/setup-java@v5
@@ -73,14 +49,13 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
-          add-job-summary: on-failure
-          cache-provider: basic
           validate-wrappers: false
 
       - name: Set up Android SDK tools
         uses: android-actions/setup-android@v4
 
       - name: Set up Android build environment
+        shell: bash
         run: bash ./.ci/setup-android.sh
 
       - name: Release resource and Kotlin preflight
@@ -88,9 +63,9 @@ jobs:
         run: |
           set -euo pipefail
           cd android
-          bash ./gradlew             :app:mergeReleaseResources             :app:compileReleaseKotlin             --stacktrace
+          bash ./gradlew :app:mergeReleaseResources :app:compileReleaseKotlin --stacktrace
 
-      - name: Set up ccache
+      - name: Restore native ccache
         uses: hendrikmuhs/ccache-action@v1.2.23
 
       - name: Configure permanent VitaStation signing
@@ -102,35 +77,25 @@ jobs:
           KEY_PASSWORD: ${{ secrets.VITASTATION_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          missing=0
           for name in KEYSTORE_B64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
             if [ -z "${!name:-}" ]; then
               echo "::error::Missing permanent signing secret: $name"
-              missing=1
+              exit 1
             fi
           done
-          if [ "$missing" -ne 0 ]; then exit 1; fi
-
           SIGNING_FILE="$RUNNER_TEMP/vitastation-permanent-release.jks"
           umask 077
           printf '%s' "$KEYSTORE_B64" | base64 --decode > "$SIGNING_FILE"
-
-          keytool -list -v             -keystore "$SIGNING_FILE"             -storepass "$STORE_PASSWORD"             -alias "$KEY_ALIAS" > "$RUNNER_TEMP/vitastation-key-info.txt"
-
-          actual_fingerprint="$(
-            grep -m1 'SHA256:' "$RUNNER_TEMP/vitastation-key-info.txt"               | sed 's/.*SHA256: //'               | tr -d ':'               | tr '[:upper:]' '[:lower:]'
-          )"
-          if [ "$actual_fingerprint" != "$VITASTATION_SIGNING_CERT_SHA256" ]; then
-            echo "::error::Permanent signing certificate fingerprint mismatch."
-            exit 1
-          fi
-
+          keytool -list -v -keystore "$SIGNING_FILE" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" > "$RUNNER_TEMP/vitastation-key-info.txt"
+          actual_fingerprint="$(grep -m1 'SHA256:' "$RUNNER_TEMP/vitastation-key-info.txt" | sed 's/.*SHA256: //' | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          test "$actual_fingerprint" = "$VITASTATION_SIGNING_CERT_SHA256"
           echo "SIGNING_STORE_PATH=$SIGNING_FILE" >> "$GITHUB_ENV"
           echo "SIGNING_STORE_PASSWORD=$STORE_PASSWORD" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build VitaStation v0.3.0 Alpha 1 APK
+      - name: Build VitaStation v0.3.0 Alpha 2 signed APK
+        shell: bash
         run: bash ./.ci/build-android.sh artifacts/vitastation-android
 
       - name: Verify permanent APK signature
@@ -140,29 +105,21 @@ jobs:
           APK="artifacts/vitastation-android/app.apk"
           test -f "$APK"
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
-          test -x "$APKSIGNER"
-          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/apksigner-output.txt"
-          actual="$(
-            grep -m1 'certificate SHA-256 digest:' "$RUNNER_TEMP/apksigner-output.txt"               | sed 's/.*digest: //' | tr -d ':' | tr '[:upper:]' '[:lower:]'
-          )"
-          if [ "$actual" != "$VITASTATION_SIGNING_CERT_SHA256" ]; then
-            echo "::error::APK permanent signature mismatch."
-            exit 1
-          fi
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/vitastation-apksigner.txt"
+          actual="$(grep -m1 'certificate SHA-256 digest:' "$RUNNER_TEMP/vitastation-apksigner.txt" | sed 's/.*digest: //' | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          test "$actual" = "$VITASTATION_SIGNING_CERT_SHA256"
 
-      - name: Persist Alpha 1 only after successful signed build
+      - name: Persist Alpha 2 source only after green signed build
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "VitaStation Bot"
           git config user.email "actions@users.noreply.github.com"
-
-          git add             android/app/build.gradle             android/app/src/main/res/values/strings.xml             android/app/src/main/res/values-pt-rBR/strings.xml             vita3k/renderer/include/renderer/vulkan/surface_cache.h             vita3k/renderer/src/vulkan/surface_cache.cpp             vita3k/renderer/include/renderer/vulkan/frame_generation.h             vita3k/renderer/src/vulkan/frame_generation.cpp
-
+          git add             android/app/build.gradle             vita3k/renderer/include/renderer/vulkan/surface_cache.h             vita3k/renderer/src/vulkan/surface_cache.cpp             vita3k/renderer/src/vulkan/scene.cpp             vita3k/renderer/src/vulkan/frame_generation.cpp
           if git diff --cached --quiet; then
-            echo "v0.3.0-alpha1 source already applied."
+            echo "Alpha 2 source already persisted."
           else
-            git commit -m "VitaStation v0.3.0 Alpha 1: Renderer 2.0 + adaptive FrameGen foundation [skip ci]"
+            git commit -m "VitaStation v0.3.0 Alpha 2: SurfaceDeps 2.1 + native typeless + FG scene guard [skip ci]"
             git push origin HEAD:main
           fi
 
@@ -170,13 +127,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -f artifacts/vitastation-android/app.apk
-          mv artifacts/vitastation-android/app.apk             artifacts/vitastation-android/VitaStation-v0.3.0-Alpha1-Renderer2-SurfaceDeps-AdaptiveFG-Signed.apk
-          ls -lh artifacts/vitastation-android/
+          SRC="artifacts/vitastation-android/app.apk"
+          DST="artifacts/vitastation-android/VitaStation-v0.3.0-Alpha2-SurfaceDeps2-NativeTypeless-FGSceneGuard-Signed.apk"
+          test -f "$SRC"
+          mv "$SRC" "$DST"
+          ls -lh "$DST"
 
-      - name: Upload VitaStation v0.3.0 Alpha 1 APK
+      - name: Upload VitaStation v0.3.0 Alpha 2 APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.3.0-Alpha1-Renderer2-SurfaceDeps-AdaptiveFG-Signed-Android
-          path: artifacts/vitastation-android/VitaStation-v0.3.0-Alpha1-Renderer2-SurfaceDeps-AdaptiveFG-Signed.apk
+          name: VitaStation-v0.3.0-Alpha2-SurfaceDeps2-NativeTypeless-FGSceneGuard-Signed-Android
+          path: artifacts/vitastation-android/VitaStation-v0.3.0-Alpha2-SurfaceDeps2-NativeTypeless-FGSceneGuard-Signed.apk
           if-no-files-found: error

@@ -1209,6 +1209,7 @@ SceUID condvar_create(SceUID *uid_out, KernelState &kernel, const char *export_n
     }
 
     const CondvarPtr condvar = std::make_shared<Condvar>();
+    condvar->uid = uid;
     condvar->attr = attr;
     condvar->associated_mutex = std::move(assoc_mutex);
     strncpy(condvar->name, name, KERNELOBJECT_MAX_NAME_LENGTH);
@@ -1259,11 +1260,45 @@ int condvar_wait(KernelState &kernel, MemState &mem, const char *export_name, Sc
     const auto data_it = condvar->waiting_threads->push(data);
     thread_lock.unlock();
 
-    if (auto error = handle_timeout(kernel, thread, thread_lock, condition_variable_lock, condvar->waiting_threads, data_it, export_name, timeout))
-        return error;
+    const int wait_result = handle_timeout(
+        kernel,
+        thread,
+        thread_lock,
+        condition_variable_lock,
+        condvar->waiting_threads,
+        data_it,
+        export_name,
+        timeout);
 
     condition_variable_lock.unlock();
-    return mutex_lock_impl(kernel, mem, export_name, thread_id, 1, condvar->associated_mutex, weight, timeout, false);
+
+    // Vita kernel semantics hand the associated mutex back to the waiter before
+    // returning from a condition-variable wait, including timeout/error paths.
+    // Re-lock is deliberately untimed: the condition wait may have timed out,
+    // but the guest still resumes owning its mutex.
+    const int relock_result = mutex_lock_impl(
+        kernel,
+        mem,
+        export_name,
+        thread_id,
+        1,
+        condvar->associated_mutex,
+        weight,
+        nullptr,
+        false);
+
+    if (wait_result != SCE_KERNEL_OK) {
+        LOG_DEBUG(
+            "[VS-KERNEL-SYNC-FIX] cond={} mutex={} tid={} wait_result={} relock_result={} timeout_reacquire=1",
+            condid,
+            condvar->associated_mutex->uid,
+            thread_id,
+            wait_result,
+            relock_result);
+        return wait_result;
+    }
+
+    return relock_result;
 }
 
 int condvar_signal(KernelState &kernel, const char *export_name, SceUID thread_id, SceUID condid, Condvar::SignalTarget signal_target, SyncWeight weight) {

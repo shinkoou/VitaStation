@@ -222,6 +222,13 @@ static bool is_scene_cut(const FrameSignatureDelta& delta) {
         || (delta.mean_delta >= 0.34f);
 }
 
+static bool is_transition(const FrameSignatureDelta& delta) {
+    // Menus, fades, logos and large UI changes often sit below the hard scene
+    // cut threshold but are still unsafe for optical-flow interpolation.
+    return (delta.mean_delta >= 0.10f && delta.changed_fraction >= 0.22f)
+        || (delta.mean_delta >= 0.18f);
+}
+
 RuntimeSettings runtime_snapshot() {
     std::lock_guard<std::mutex> lock(g_runtime_mutex);
     return g_runtime;
@@ -554,12 +561,14 @@ struct FrameGenerationPresenter::Impl {
     uint32_t generation_miss_streak = 0;
     uint32_t static_frame_streak = 0;
     bool static_guard_active = false;
+    bool high_fps_guard_active = false;
     FrameTimingHistory timing;
     std::string library_cache_dir;
 
     static constexpr uint64_t kWarmupFrames = 60;
     static constexpr uint32_t kMissesBeforeHudPause = 2;
     static constexpr uint32_t kStaticFramesBeforePause = 3;
+    static constexpr double kTemporaryHighRealFpsGate = 55.0;
     static constexpr float kStaticMeanDelta = 0.012f;
     static constexpr float kStaticChangedFraction = 0.02f;
 
@@ -1159,27 +1168,20 @@ struct FrameGenerationPresenter::Impl {
         set_last_error(reason);
     }
 
-    void reset_lsfg_context(const char* reason) {
+    void soft_reprime_history(const char* reason, const uint32_t cooldown_frames) {
+        // Do not destroy/recreate LSFG while a game is running. The Alpha4 hard
+        // reset happened on the presentation path and correlated with the
+        // Uncharted boot regression. Instead invalidate VitaStation's input
+        // history, present real frames, then prime LSFG again with fresh input.
         set_active(false);
         input_primed = false;
         lsfg_frame_index = 0;
         generation_miss_streak = 0;
-
-        if (context_id >= 0) {
-            LSFG_3_1P::waitIdle();
-            LSFG_3_1P::deleteContext(context_id);
-            context_id = -1;
-        }
-
-        std::vector<AHardwareBuffer*> outputs{ output_0.ahb };
-        context_id = LSFG_3_1P::createContextFromAHB(
-            input_0.ahb,
-            input_1.ahb,
-            outputs,
-            fg_extent,
-            VK_FORMAT_R16G16B16A16_SFLOAT);
-
-        LOG_INFO("[VS-FG-RESET] reason={} -> context recreated", reason);
+        timing.cooldown_frames = std::max(timing.cooldown_frames, cooldown_frames);
+        LOG_INFO(
+            "[VS-FG-SOFT-RESET] reason={} cooldown={} context_preserved=1",
+            reason,
+            cooldown_frames);
     }
 
     void release_swapchain() {
@@ -1192,6 +1194,7 @@ struct FrameGenerationPresenter::Impl {
         generation_miss_streak = 0;
         static_frame_streak = 0;
         static_guard_active = false;
+        high_fps_guard_active = false;
         timing.reset();
         scene_probe_supported = true;
         scene_probe_warned = false;
@@ -1330,6 +1333,7 @@ struct FrameGenerationPresenter::Impl {
             generation_miss_streak = 0;
             static_frame_streak = 0;
             static_guard_active = false;
+            high_fps_guard_active = false;
             timing.reset();
             set_last_error("");
             // Runtime-active stays false during the startup warm-up. This keeps
@@ -1385,6 +1389,27 @@ struct FrameGenerationPresenter::Impl {
                 return queue_present(real_image_index, render_ready);
             }
 
+            const double effective_real_fps = timing.real_fps();
+            if (effective_real_fps >= kTemporaryHighRealFpsGate) {
+                if (!high_fps_guard_active) {
+                    high_fps_guard_active = true;
+                    LOG_INFO(
+                        "[VS-FG-FPS-GATE] real_fps={:.1f} threshold={:.1f} -> FG paused until display-aware pacing",
+                        effective_real_fps,
+                        kTemporaryHighRealFpsGate);
+                }
+                set_active(false);
+                input_primed = false;
+                ++frame_index;
+                return queue_present(real_image_index, render_ready);
+            }
+            if (high_fps_guard_active) {
+                high_fps_guard_active = false;
+                soft_reprime_history("HIGH_FPS_EXIT", 2);
+                ++frame_index;
+                return queue_present(real_image_index, render_ready);
+            }
+
             // One frame before generation starts, capture a previous frame into
             // the opposite input image. The first LSFG call (frame 0) expects
             // input_0 to be current and input_1 to be previous.
@@ -1418,15 +1443,26 @@ struct FrameGenerationPresenter::Impl {
                 timing.note_scene_cut();
                 static_frame_streak = 0;
                 static_guard_active = false;
-                reset_lsfg_context("SCENE_CUT");
+                soft_reprime_history("SCENE_CUT", 6);
                 ++frame_index;
 
                 LOG_INFO(
-                    "[VS-FG-SCENE] cut detected: mean_delta={:.3f} changed={:.1f}% cuts={} -> hard reset",
+                    "[VS-FG-SCENE] cut detected: mean_delta={:.3f} changed={:.1f}% cuts={} -> soft re-prime",
                     signature_delta.mean_delta,
                     signature_delta.changed_fraction * 100.0f,
                     timing.scene_cuts);
 
+                return queue_present(real_image_index);
+            }
+
+            if (is_transition(signature_delta)) {
+                ++timing.scene_guard_skips;
+                soft_reprime_history("TRANSITION", 3);
+                ++frame_index;
+                LOG_INFO(
+                    "[VS-FG-TRANSITION] mean_delta={:.3f} changed={:.1f}% -> real frames + re-prime",
+                    signature_delta.mean_delta,
+                    signature_delta.changed_fraction * 100.0f);
                 return queue_present(real_image_index);
             }
 
@@ -1452,6 +1488,8 @@ struct FrameGenerationPresenter::Impl {
                     }
 
                     set_active(false);
+                    input_primed = false;
+                    timing.cooldown_frames = std::max<uint32_t>(timing.cooldown_frames, 2);
                     ++frame_index;
                     return queue_present(real_image_index);
                 }
@@ -1460,7 +1498,7 @@ struct FrameGenerationPresenter::Impl {
 
                 if (static_guard_active) {
                     static_guard_active = false;
-                    reset_lsfg_context("STATIC_TO_MOTION");
+                    soft_reprime_history("STATIC_TO_MOTION", 2);
                     ++frame_index;
 
                     LOG_INFO(

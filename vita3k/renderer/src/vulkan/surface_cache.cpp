@@ -510,13 +510,13 @@ SurfaceRetrieveResult VKSurfaceCache::retrieve_color_surface_for_framebuffer(Mem
     image.format = vk_format;
     image.layout = vkutil::ImageLayout::Undefined;
 
-    // Existing mutable RGBA8 supports sRGB/linear alternate views.
-    // 64-bit render targets are also mutable so HD Typeless 2.0 can expose
-    // the same bytes through an R32G32_UINT view before any scaling.
+    // Alpha4 FIX2 boot-recovery gate: only the established RGBA8 sRGB/linear
+    // alternate-view case is globally mutable. 64-bit render targets are kept
+    // on the normal Vita3K/VitaStation creation path until HD Typeless is
+    // reintroduced through an isolated staging representation.
     const bool need_mutable_rgba8 =
         (vk_format == vk::Format::eR8G8B8A8Unorm || vk_format == vk::Format::eR8G8B8A8Srgb);
-    const bool need_mutable_raw64 = gxm::bits_per_pixel(base_format) == 64;
-    const bool need_mutable = need_mutable_rgba8 || need_mutable_raw64;
+    const bool need_mutable = need_mutable_rgba8;
     const vk::ImageCreateFlags image_create_flags =
         need_mutable ? vk::ImageCreateFlagBits::eMutableFormat : vk::ImageCreateFlags();
     const void *image_info_pNext = nullptr;
@@ -711,7 +711,7 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
     const uint32_t guard_ratio = bytes_per_pixel_requested
         ? (bytes_per_pixel_in_store / bytes_per_pixel_requested) : 0u;
 
-    const bool use_compute_deinterleave =
+    const bool hd_typeless_candidate =
         state.res_multiplier != 1.0f
         && info.tiling == SurfaceTiling::Linear
         && bytes_per_pixel_in_store == 8
@@ -722,6 +722,25 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
         && (guard_sub_texel_byte % bytes_per_pixel_requested) == 0
         && info.original_width > 0
         && info.original_height > 0;
+
+    // The Alpha4 compute experiment changed global 64-bit image creation and
+    // correlated with Uncharted no longer reaching gameplay. Keep detection
+    // and diagnostics, but route candidates through the conservative fallback
+    // until the raw staging implementation is isolated from framebuffer images.
+    constexpr bool kEnableHdTypelessExperimental = false;
+    const bool use_compute_deinterleave =
+        kEnableHdTypelessExperimental && hd_typeless_candidate;
+    if (hd_typeless_candidate && !kEnableHdTypelessExperimental) {
+        static thread_local uint64_t deferred_typeless_counter = 0;
+        if (((++deferred_typeless_counter & 0x3FFu) == 1u)) {
+            LOG_INFO(
+                "[VS-TYPELESS-HD-DEFERRED] raw_offset={} store_bpp={} req_bpp={} scale={} -> conservative path",
+                guard_native_byte_offset,
+                bytes_per_pixel_in_store,
+                bytes_per_pixel_requested,
+                state.res_multiplier);
+        }
+    }
 
     if (static_cast<uint16_t>(start_sourced_line + height) > info.height)
         LOG_WARN_ONCE("Trying to use texture partially in the surface cache");

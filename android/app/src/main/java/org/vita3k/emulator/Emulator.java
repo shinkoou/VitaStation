@@ -11,7 +11,9 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.util.Log;
+import android.view.InputDevice;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.ViewGroup;
 import android.view.View;
@@ -110,6 +112,8 @@ public class Emulator extends SDLActivity
     private boolean nativeQuitRequested;
     private boolean libraryReturnRequested;
     private long nativeQuitStartedAtMs;
+    private long lastPadMotionLogUptimeMs;
+    private int lastPadDeviceId = -1;
 
     private final Runnable nativeQuitMonitor = new Runnable() {
         @Override
@@ -376,8 +380,57 @@ public class Emulator extends SDLActivity
         }
     }
 
+    private void logPhysicalGamepadDevice(InputDevice device) {
+        if (!InputDeviceUtils.isPhysicalGamepad(device)) {
+            return;
+        }
+        if (lastPadDeviceId != device.getId()) {
+            lastPadDeviceId = device.getId();
+            Log.i(TAG, InputDeviceUtils.describeDevice(device));
+        }
+    }
+
+    @Override
+    public boolean dispatchGenericMotionEvent(MotionEvent event) {
+        final InputDevice device = event != null ? event.getDevice() : null;
+        if (InputDeviceUtils.isPhysicalGamepad(device)) {
+            logPhysicalGamepadDevice(device);
+            final long now = SystemClock.uptimeMillis();
+            if (now - lastPadMotionLogUptimeMs >= 500L) {
+                lastPadMotionLogUptimeMs = now;
+                Log.d(TAG, String.format(java.util.Locale.US,
+                        "[VS-PAD-AXIS] id=%d lx=%.3f ly=%.3f rx=%.3f ry=%.3f hatx=%.2f haty=%.2f l2=%.3f r2=%.3f",
+                        device.getId(),
+                        event.getAxisValue(MotionEvent.AXIS_X),
+                        event.getAxisValue(MotionEvent.AXIS_Y),
+                        event.getAxisValue(MotionEvent.AXIS_Z),
+                        event.getAxisValue(MotionEvent.AXIS_RZ),
+                        event.getAxisValue(MotionEvent.AXIS_HAT_X),
+                        event.getAxisValue(MotionEvent.AXIS_HAT_Y),
+                        Math.max(event.getAxisValue(MotionEvent.AXIS_LTRIGGER),
+                                event.getAxisValue(MotionEvent.AXIS_BRAKE)),
+                        Math.max(event.getAxisValue(MotionEvent.AXIS_RTRIGGER),
+                                event.getAxisValue(MotionEvent.AXIS_GAS))));
+            }
+        }
+        // Diagnostics only: SDL remains the primary backend in FIX2 Stage 1.
+        return super.dispatchGenericMotionEvent(event);
+    }
+
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
+        final InputDevice device = event != null ? event.getDevice() : null;
+        if (InputDeviceUtils.isPhysicalGamepad(device)) {
+            logPhysicalGamepadDevice(device);
+            if (event.getAction() == KeyEvent.ACTION_DOWN || event.getAction() == KeyEvent.ACTION_UP) {
+                Log.d(TAG,
+                        "[VS-PAD-KEY] id=" + device.getId()
+                                + " key=" + KeyEvent.keyCodeToString(event.getKeyCode())
+                                + " action=" + event.getAction()
+                                + " repeat=" + event.getRepeatCount());
+            }
+        }
+
         if (event.getKeyCode() == KeyEvent.KEYCODE_BACK && nativeKeyboardRequested) {
             if (event.getAction() == KeyEvent.ACTION_UP && event.getRepeatCount() == 0) {
                 dismissImeFromKeyboard(mTextEdit);

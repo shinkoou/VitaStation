@@ -12,6 +12,10 @@ import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.util.DisplayMetrics;
@@ -38,12 +42,16 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
   private final static int OVERLAY_MASK_UTILITY =
           OVERLAY_MASK_TOUCH_SCREEN_SWITCH | OVERLAY_MASK_HIDE_TOGGLE;
 
-  // VitaStation Touch UI 2.0 fades controls before the existing auto-hide.
+  // VitaStation Touch UI 2.1: smaller art, generous hitboxes and a neon
+  // accent that fades away when the player is looking at the game.
   private final static int OVERLAY_TIME_BEFORE_DIM_MS = 1500;
   private final static int OVERLAY_TIME_BEFORE_HIDE = 10;
-  private final static float OVERLAY_ACTIVE_ALPHA = 0.82f;
-  private final static float OVERLAY_IDLE_ALPHA = 0.38f;
-  private final static int OVERLAY_HIT_SLOP_DP = 12;
+  private final static float OVERLAY_ACTIVE_ALPHA = 0.72f;
+  private final static float OVERLAY_IDLE_ALPHA = 0.24f;
+  private final static int OVERLAY_HIT_SLOP_DP = 16;
+  private final static int VITASTATION_CYAN = Color.rgb(61, 220, 255);
+  private final static int VITASTATION_VIOLET = Color.rgb(124, 92, 255);
+  private final static int VITASTATION_NEUTRAL = Color.rgb(220, 235, 255);
 
   private final Set<InputOverlayDrawableButton> overlayButtons = new HashSet<>();
   private final Set<InputOverlayDrawableDpad> overlayDpads = new HashSet<>();
@@ -95,6 +103,50 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
             (int) (bitmap.getWidth() * bitmapScale),
             (int) (bitmap.getHeight() * bitmapScale),
             true);
+  }
+
+  private static int tintForControl(int legacyId)
+  {
+    switch (legacyId)
+    {
+      case ButtonType.DPAD_UP:
+      case ButtonType.STICK_LEFT:
+      case ButtonType.TRIGGER_L:
+      case ButtonType.TRIGGER_L2:
+      case ButtonType.TRIGGER_L3:
+      case ButtonType.BUTTON_SELECT:
+        return VITASTATION_CYAN;
+
+      case ButtonType.STICK_RIGHT:
+      case ButtonType.TRIGGER_R:
+      case ButtonType.TRIGGER_R2:
+      case ButtonType.TRIGGER_R3:
+      case ButtonType.BUTTON_START:
+      case ButtonType.BUTTON_CROSS:
+      case ButtonType.BUTTON_CIRCLE:
+      case ButtonType.BUTTON_SQUARE:
+      case ButtonType.BUTTON_TRIANGLE:
+        return VITASTATION_VIOLET;
+
+      default:
+        return VITASTATION_NEUTRAL;
+    }
+  }
+
+  private static Bitmap tintBitmap(Bitmap source, int tint)
+  {
+    if (source == null)
+      return null;
+
+    Bitmap output = Bitmap.createBitmap(
+            source.getWidth(), source.getHeight(), Bitmap.Config.ARGB_8888);
+    Canvas canvas = new Canvas(output);
+    Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    // MULTIPLY keeps black/translucent parts dark while recoloring the existing
+    // light outlines instead of painting a solid cyan/violet rectangle.
+    paint.setColorFilter(new PorterDuffColorFilter(tint, PorterDuff.Mode.MULTIPLY));
+    canvas.drawBitmap(source, 0, 0, paint);
+    return output;
   }
 
   /**
@@ -750,7 +802,7 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     final Resources res = context.getResources();
 
     // Decide scale based on button ID and user preference
-    float scale = 0.15f;
+    float scale = 0.13f;
 
     if(legacyId == ButtonType.TRIGGER_L
             || legacyId == ButtonType.TRIGGER_R
@@ -758,19 +810,20 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
             || legacyId == ButtonType.TRIGGER_R2
             || legacyId == ButtonType.BUTTON_START
             || legacyId == ButtonType.BUTTON_SELECT)
-      scale = 0.25f;
+      scale = 0.20f;
     else if(legacyId == ButtonType.BUTTON_TOUCH_SWITCH
             || legacyId == ButtonType.BUTTON_PS
             || legacyId == ButtonType.BUTTON_TOUCH_HIDE)
-      scale = 0.11f;
+      scale = 0.09f;
 
     scale *= globalScale;
 
     // Initialize the InputOverlayDrawableButton.
-    final Bitmap defaultStateBitmap =
-            resizeBitmap(context, BitmapFactory.decodeResource(res, defaultResId), scale);
-    final Bitmap pressedStateBitmap =
-            resizeBitmap(context, BitmapFactory.decodeResource(res, pressedResId), scale);
+    final int tint = tintForControl(legacyId);
+    final Bitmap defaultStateBitmap = tintBitmap(
+            resizeBitmap(context, BitmapFactory.decodeResource(res, defaultResId), scale), tint);
+    final Bitmap pressedStateBitmap = tintBitmap(
+            resizeBitmap(context, BitmapFactory.decodeResource(res, pressedResId), scale), tint);
     final InputOverlayDrawableButton overlayDrawable =
             new InputOverlayDrawableButton(res, defaultStateBitmap, pressedStateBitmap, legacyId,
                     control, role);
@@ -827,19 +880,20 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     final Resources res = context.getResources();
 
     // Decide scale based on button ID and user preference
-    float scale = 0.35f;
+    float scale = 0.29f;
 
     scale *= globalScale;
 
     // Initialize the InputOverlayDrawableDpad.
-    final Bitmap defaultStateBitmap =
-            resizeBitmap(context, BitmapFactory.decodeResource(res, defaultResId), scale);
-    final Bitmap pressedOneDirectionStateBitmap =
+    final int tint = tintForControl(legacyId);
+    final Bitmap defaultStateBitmap = tintBitmap(
+            resizeBitmap(context, BitmapFactory.decodeResource(res, defaultResId), scale), tint);
+    final Bitmap pressedOneDirectionStateBitmap = tintBitmap(
             resizeBitmap(context, BitmapFactory.decodeResource(res, pressedOneDirectionResId),
-                    scale);
-    final Bitmap pressedTwoDirectionsStateBitmap =
+                    scale), tint);
+    final Bitmap pressedTwoDirectionsStateBitmap = tintBitmap(
             resizeBitmap(context, BitmapFactory.decodeResource(res, pressedTwoDirectionsResId),
-                    scale);
+                    scale), tint);
     final InputOverlayDrawableDpad overlayDrawable =
             new InputOverlayDrawableDpad(res, defaultStateBitmap,
                     pressedOneDirectionStateBitmap, pressedTwoDirectionsStateBitmap,
@@ -886,14 +940,17 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     final Resources res = context.getResources();
 
     // Decide scale based on user preference
-    float scale = 0.275f;
+    float scale = 0.235f;
     scale *= globalScale;
 
     // Initialize the InputOverlayDrawableJoystick.
-    final Bitmap bitmapOuter =
-            resizeBitmap(context, BitmapFactory.decodeResource(res, resOuter), scale);
-    final Bitmap bitmapInnerDefault = BitmapFactory.decodeResource(res, defaultResInner);
-    final Bitmap bitmapInnerPressed = BitmapFactory.decodeResource(res, pressedResInner);
+    final int tint = tintForControl(legacyId);
+    final Bitmap bitmapOuter = tintBitmap(
+            resizeBitmap(context, BitmapFactory.decodeResource(res, resOuter), scale), tint);
+    final Bitmap bitmapInnerDefault = tintBitmap(
+            BitmapFactory.decodeResource(res, defaultResInner), tint);
+    final Bitmap bitmapInnerPressed = tintBitmap(
+            BitmapFactory.decodeResource(res, pressedResInner), tint);
 
     OverlayPosition position = layout.positionFor(legacyId);
     if (position == null)
@@ -902,7 +959,7 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     int drawableY = Math.round(position.getNormalizedY() * layoutBounds.height);
 
     // Decide inner scale based on joystick ID
-    float innerScale = 1.375f;
+    float innerScale = 1.45f;
 
     // Now set the bounds for the InputOverlayDrawableJoystick.
     // This will dictate where on the screen (and the what the size) the InputOverlayDrawableJoystick will be.

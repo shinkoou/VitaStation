@@ -37,14 +37,21 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Apply exact verified FIX7-R2 baseline
+      - name: Apply exact verified FIX7-R2 baseline from green Run 52
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          import subprocess
 
-          workflow = Path('.github/workflows/android-build.yml').read_text(encoding='utf-8')
+          # [VS-FIX7-R3-R2-HISTORY] Read the exact green FIX7-R2 workflow from
+          # Run #52's commit instead of the file currently being replaced.
+          fix7_r2_commit = "2eddab750e31ede25ec771bc07fef4d5a00d32b8"
+          workflow = subprocess.check_output(
+              ["git", "show", f"{fix7_r2_commit}:.github/workflows/android-build.yml"],
+              text=True,
+          )
 
           def embedded_python(step_name: str) -> str:
               marker = f'      - name: {step_name}'

@@ -858,7 +858,9 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
             if ((casted_vec[i].cropped_height == height) && (casted_vec[i].cropped_width == width) && (casted_vec[i].cropped_y == start_sourced_line) && (casted_vec[i].cropped_x == start_x) && (casted_vec[i].format == base_format)) {
                 casted = &casted_vec[i];
 
-                if (casted->source_generation == source_generation) {
+                // [VS-FEEDBACK-CACHE] Framebuffer feedback/same-scene RAW must resolve after producer commands.
+                // Generation equality alone cannot make an active attachment snapshot reusable.
+                if (!needs_late_resolve && casted->source_generation == source_generation) {
                     return TextureLookupResult{
                         casted->texture.view,
                         casted->texture.layout,

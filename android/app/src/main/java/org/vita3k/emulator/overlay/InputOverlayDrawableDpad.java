@@ -185,8 +185,10 @@ public final class InputOverlayDrawableDpad
   public void setOpacity(int value)
   {
     mDefaultStateBitmap.setAlpha(value);
-    mPressedOneDirectionStateBitmap.setAlpha(value);
-    mPressedTwoDirectionsStateBitmap.setAlpha(value);
+    // [VS-TOUCH-PNG5] Pressed directions are brighter without changing hit geometry.
+    final int pressedAlpha = Math.min(255, Math.round(value * 1.62f));
+    mPressedOneDirectionStateBitmap.setAlpha(pressedAlpha);
+    mPressedTwoDirectionsStateBitmap.setAlpha(pressedAlpha);
   }
 
   public Rect getBounds()

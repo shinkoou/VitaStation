@@ -291,7 +291,8 @@ public final class InputOverlayDrawableJoystick
     mOpacity = value;
 
     mDefaultStateInnerBitmap.setAlpha(value);
-    mPressedStateInnerBitmap.setAlpha(value);
+    // [VS-TOUCH-PNG5] Pressed knob brightens while the authored outer ring stays intact.
+    mPressedStateInnerBitmap.setAlpha(Math.min(255, Math.round(value * 1.62f)));
 
     if (trackId == -1)
     {

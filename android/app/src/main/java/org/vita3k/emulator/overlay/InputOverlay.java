@@ -15,8 +15,6 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
-import android.graphics.PorterDuff;
-import android.graphics.PorterDuffColorFilter;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.drawable.Drawable;
@@ -48,8 +46,8 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
   // accent that fades away when the player is looking at the game.
   private final static int OVERLAY_TIME_BEFORE_DIM_MS = 1500;
   private final static int OVERLAY_TIME_BEFORE_HIDE = 10;
-  private final static float OVERLAY_ACTIVE_ALPHA = 0.64f; // [VS-TOUCH-UI3]
-  private final static float OVERLAY_IDLE_ALPHA = 0.18f;
+  private final static float OVERLAY_ACTIVE_ALPHA = 0.42f; // [VS-TOUCH-PNG5]
+  private final static float OVERLAY_IDLE_ALPHA = 0.22f;
   private final static int OVERLAY_HIT_SLOP_DP = 20;
   private final static int VITASTATION_CYAN = Color.rgb(41, 182, 255);
   private final static int VITASTATION_VIOLET = Color.rgb(124, 92, 255);
@@ -114,27 +112,6 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
             true);
   }
 
-  private static int tintForControl(int legacyId)
-{
-  // Touch UI 3.0 Stage A uses one electric-blue accent.
-  return VITASTATION_CYAN;
-}
-
-private static Bitmap tintBitmap(Bitmap source, int tint)
-  {
-    if (source == null)
-      return null;
-
-    Bitmap output = Bitmap.createBitmap(
-            source.getWidth(), source.getHeight(), Bitmap.Config.ARGB_8888);
-    Canvas canvas = new Canvas(output);
-    Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-    // MULTIPLY keeps black/translucent parts dark while recoloring the existing
-    // light outlines instead of painting a solid cyan/violet rectangle.
-    paint.setColorFilter(new PorterDuffColorFilter(tint, PorterDuff.Mode.MULTIPLY));
-    canvas.drawBitmap(source, 0, 0, paint);
-    return output;
-  }
 
   /**
    * Constructor
@@ -506,19 +483,19 @@ private static Bitmap tintBitmap(Bitmap source, int tint)
         continue;
       }
 
-      drawVitaStationButton(canvas, button);
+      button.draw(canvas); // [VS-TOUCH-PNG5] PNG visual authority
     }
 
     if (!mHideOverlayButtons)
     {
       for (InputOverlayDrawableDpad dpad : overlayDpads)
       {
-        drawVitaStationDpad(canvas, dpad);
+        dpad.draw(canvas);
       }
 
       for (InputOverlayDrawableJoystick joystick : overlayJoysticks)
       {
-        drawVitaStationJoystick(canvas, joystick);
+        joystick.draw(canvas);
       }
     }
   }
@@ -1051,12 +1028,11 @@ private static Bitmap tintBitmap(Bitmap source, int tint)
 
     scale *= globalScale;
 
-    // Initialize the InputOverlayDrawableButton.
-    final int tint = tintForControl(legacyId);
-    final Bitmap defaultStateBitmap = tintBitmap(
-            resizeBitmap(context, BitmapFactory.decodeResource(res, defaultResId), scale), tint);
-    final Bitmap pressedStateBitmap = tintBitmap(
-            resizeBitmap(context, BitmapFactory.decodeResource(res, pressedResId), scale), tint);
+    // [VS-TOUCH-PNG5] Preserve authored neon/black/white pixels. No runtime tint.
+    final Bitmap defaultStateBitmap =
+            resizeBitmap(context, BitmapFactory.decodeResource(res, defaultResId), scale);
+    final Bitmap pressedStateBitmap =
+            resizeBitmap(context, BitmapFactory.decodeResource(res, pressedResId), scale);
     final InputOverlayDrawableButton overlayDrawable =
             new InputOverlayDrawableButton(res, defaultStateBitmap, pressedStateBitmap, legacyId,
                     control, role);
@@ -1120,16 +1096,13 @@ private static Bitmap tintBitmap(Bitmap source, int tint)
 
     scale *= globalScale;
 
-    // Initialize the InputOverlayDrawableDpad.
-    final int tint = tintForControl(legacyId);
-    final Bitmap defaultStateBitmap = tintBitmap(
-            resizeBitmap(context, BitmapFactory.decodeResource(res, defaultResId), scale), tint);
-    final Bitmap pressedOneDirectionStateBitmap = tintBitmap(
-            resizeBitmap(context, BitmapFactory.decodeResource(res, pressedOneDirectionResId),
-                    scale), tint);
-    final Bitmap pressedTwoDirectionsStateBitmap = tintBitmap(
-            resizeBitmap(context, BitmapFactory.decodeResource(res, pressedTwoDirectionsResId),
-                    scale), tint);
+    // [VS-TOUCH-PNG5] D-pad artwork is four independent neon directions, not a vector cross.
+    final Bitmap defaultStateBitmap =
+            resizeBitmap(context, BitmapFactory.decodeResource(res, defaultResId), scale);
+    final Bitmap pressedOneDirectionStateBitmap =
+            resizeBitmap(context, BitmapFactory.decodeResource(res, pressedOneDirectionResId), scale);
+    final Bitmap pressedTwoDirectionsStateBitmap =
+            resizeBitmap(context, BitmapFactory.decodeResource(res, pressedTwoDirectionsResId), scale);
     final InputOverlayDrawableDpad overlayDrawable =
             new InputOverlayDrawableDpad(res, defaultStateBitmap,
                     pressedOneDirectionStateBitmap, pressedTwoDirectionsStateBitmap,
@@ -1181,14 +1154,11 @@ private static Bitmap tintBitmap(Bitmap source, int tint)
     float scale = 0.205f;
     scale *= globalScale;
 
-    // Initialize the InputOverlayDrawableJoystick.
-    final int tint = tintForControl(legacyId);
-    final Bitmap bitmapOuter = tintBitmap(
-            resizeBitmap(context, BitmapFactory.decodeResource(res, resOuter), scale), tint);
-    final Bitmap bitmapInnerDefault = tintBitmap(
-            BitmapFactory.decodeResource(res, defaultResInner), tint);
-    final Bitmap bitmapInnerPressed = tintBitmap(
-            BitmapFactory.decodeResource(res, pressedResInner), tint);
+    // [VS-TOUCH-PNG5] Keep the volumetric ring/knob artwork intact. No runtime tint.
+    final Bitmap bitmapOuter =
+            resizeBitmap(context, BitmapFactory.decodeResource(res, resOuter), scale);
+    final Bitmap bitmapInnerDefault = BitmapFactory.decodeResource(res, defaultResInner);
+    final Bitmap bitmapInnerPressed = BitmapFactory.decodeResource(res, pressedResInner);
 
     OverlayPosition position = layout.positionFor(legacyId);
     if (position == null)

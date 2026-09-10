@@ -126,7 +126,8 @@ public final class InputOverlayDrawableButton
   public void setOpacity(int value)
   {
     mDefaultStateBitmap.setAlpha(value);
-    mPressedStateBitmap.setAlpha(value);
+    // [VS-TOUCH-PNG5] Pressed art peaks near 68% when active art is 42%.
+    mPressedStateBitmap.setAlpha(Math.min(255, Math.round(value * 1.62f)));
   }
 
   public Rect getBounds()

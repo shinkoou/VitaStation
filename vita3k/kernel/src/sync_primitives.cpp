@@ -738,10 +738,21 @@ int mutex_try_lock(KernelState &kernel, MemState &mem, const char *export_name, 
     return mutex_lock_impl(kernel, mem, export_name, thread_id, lock_count, mutex, weight, nullptr, true);
 }
 
-inline static int mutex_unlock_impl(KernelState &kernel, const char *export_name, SceUID thread_id, int unlock_count, MutexPtr &mutex) {
+inline static int mutex_unlock_impl(KernelState &kernel, MemState &mem, const char *export_name, SceUID thread_id, int unlock_count, MutexPtr &mutex, SyncWeight weight) {
     const ThreadStatePtr current_thread = kernel.get_thread(thread_id);
 
     const std::lock_guard<std::mutex> mutex_lock(mutex->mutex);
+
+    // [VS-LWMUTEX-WORKAREA] The guest workarea is part of the observable LwMutex
+    // state. Keep it coherent with host ownership/count before waking a waiter.
+    const auto sync_lw_workarea = [&]() {
+        if (weight != SyncWeight::Light)
+            return;
+
+        SceKernelLwMutexWork *work = mutex->workarea.get(mem);
+        work->lockCount = mutex->lock_count;
+        work->owner = mutex->owner ? mutex->owner->id : 0;
+    };
 
     if (current_thread == mutex->owner) {
         if (unlock_count > mutex->lock_count) {
@@ -750,28 +761,38 @@ inline static int mutex_unlock_impl(KernelState &kernel, const char *export_name
 
         mutex->lock_count -= unlock_count;
 
-        if (mutex->lock_count == 0) {
-            mutex->owner = nullptr;
-
-            if (!mutex->waiting_threads->empty()) {
-                const auto waiting_thread_data = *mutex->waiting_threads->begin();
-                const auto waiting_thread = waiting_thread_data.thread;
-                const auto waiting_lock_count = waiting_thread_data.lock_count;
-
-                const std::lock_guard<std::mutex> waiting_thread_lock(waiting_thread->mutex);
-                waiting_thread->update_status(ThreadStatus::run, ThreadStatus::wait);
-
-                mutex->waiting_threads->pop();
-                mutex->lock_count += waiting_lock_count;
-                mutex->owner = waiting_thread;
-            }
+        // Partial unlock: owner is unchanged, but the guest count must follow.
+        if (mutex->lock_count != 0) {
+            sync_lw_workarea();
+            return SCE_KERNEL_OK;
         }
+
+        // Full unlock with no waiter publishes the unowned state to the guest.
+        mutex->owner = nullptr;
+        if (mutex->waiting_threads->empty()) {
+            sync_lw_workarea();
+            return SCE_KERNEL_OK;
+        }
+
+        // Full unlock with handoff. Publish the final host+guest owner/count before
+        // making the waiter runnable so it cannot observe stale LwMutex workarea data.
+        const auto waiting_thread_data = *mutex->waiting_threads->begin();
+        const auto waiting_thread = waiting_thread_data.thread;
+        const auto waiting_lock_count = waiting_thread_data.lock_count;
+
+        mutex->waiting_threads->pop();
+        mutex->lock_count = waiting_lock_count;
+        mutex->owner = waiting_thread;
+        sync_lw_workarea();
+
+        const std::lock_guard<std::mutex> waiting_thread_lock(waiting_thread->mutex);
+        waiting_thread->update_status(ThreadStatus::run, ThreadStatus::wait);
     }
 
     return SCE_KERNEL_OK;
 }
 
-int mutex_unlock(KernelState &kernel, const char *export_name, SceUID thread_id, SceUID mutexid, int unlock_count, SyncWeight weight) {
+int mutex_unlock(KernelState &kernel, MemState &mem, const char *export_name, SceUID thread_id, SceUID mutexid, int unlock_count, SyncWeight weight) {
     assert(mutexid >= 0);
 
     MutexPtr mutex;
@@ -784,7 +805,7 @@ int mutex_unlock(KernelState &kernel, const char *export_name, SceUID thread_id,
             mutex->waiting_threads->size());
     }
 
-    return mutex_unlock_impl(kernel, export_name, thread_id, unlock_count, mutex);
+    return mutex_unlock_impl(kernel, mem, export_name, thread_id, unlock_count, mutex, weight);
 }
 
 int mutex_delete(KernelState &kernel, const char *export_name, SceUID thread_id, SceUID mutexid, SyncWeight weight) {
@@ -1270,7 +1291,7 @@ int condvar_wait(KernelState &kernel, MemState &mem, const char *export_name, Sc
 
     std::unique_lock<std::mutex> condition_variable_lock(condvar->mutex);
 
-    if (auto error = mutex_unlock_impl(kernel, export_name, thread_id, 1, condvar->associated_mutex))
+    if (auto error = mutex_unlock_impl(kernel, mem, export_name, thread_id, 1, condvar->associated_mutex, weight))
         return error;
 
     std::unique_lock<std::mutex> thread_lock(thread->mutex);

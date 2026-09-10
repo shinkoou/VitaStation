@@ -1,11 +1,9 @@
-# VitaStation Alpha 4 FIX7
-# Upload this file as .github/workflows/android-build.yml
-# One consolidated build: Gintama thread-domain waits, Uncharted surface sync + feedback visibility,
-# Lord of Apocalypse GXM/thread/event compatibility, reference-matched PNG touch migration,
-# live Qualcomm GPU delta HUD, and Licenses/HACKs UI.
-# FrameGen and FIX4 typeless staging remain frozen.
+# VitaStation Alpha 4 FIX7-R3
+# Builds from the exact successful FIX7-R2 patch baseline, then applies only the
+# Fractional-HD Surface Safety + Eden attribution delta. No Bootstrap.
+# FrameGen and FIX4 HD typeless compute staging remain frozen.
 
-name: VitaStation Android APK - Alpha 4 FIX7
+name: VitaStation Android APK - Alpha 4 FIX7-R3
 
 "on":
   workflow_dispatch:
@@ -13,24 +11,23 @@ name: VitaStation Android APK - Alpha 4 FIX7
     branches:
       - main
     paths:
-      - '.github/workflows/android-build.yml'
+      - '.github/workflows/android-build-fix7-r3.yml'
 
-# Keep the same non-persisting behavior as the current FIX5 workflow.
 permissions:
   contents: read
 
 concurrency:
-  group: vitastation-android-${{ github.ref }}
+  group: vitastation-android-fix7-r3-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   VCPKG_ROOT: /usr/local/share/vcpkg
   VITASTATION_SIGNING_CERT_SHA256: fc57542b62221ad0c0550d12b2791e4e40794e980c9f26a86d83250d67ed5d30
-  FIX7_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX7-KernelDomain-UnchartedSync-LordBoot-ReferenceTouch-GPUDelta-Licenses-Hacks-StableFG-Signed.apk
+  FIX7_R3_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX7-R3-FractionalHD-Eden-StableFG-Signed.apk
 
 jobs:
   android-build:
-    name: Build VitaStation v0.3.0 Alpha 4 FIX7
+    name: Build VitaStation v0.3.0 Alpha 4 FIX7-R3
     runs-on: ubuntu-latest
 
     steps:
@@ -40,58 +37,44 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Guard exact FIX5 persisted source baseline
+      - name: Apply exact verified FIX7-R2 baseline
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          import subprocess
 
-          expected = {
-              "android/app/build.gradle": "bc0cdadb0534811e247ead58a99b15849af6dc55",
-              "vita3k/kernel/include/kernel/sync_primitives.h": "8374d328a1444cfc234ccc19fcd6a0cb5b40adba",
-              "vita3k/kernel/src/sync_primitives.cpp": "aa1fe323958a459c4ad3199311dffbd280f02a9c",
-              "vita3k/modules/SceLibKernel/SceLibKernel.cpp": "5a57eb1d2b1fc73a70af885e45845a5a2950eb5e",
-              "vita3k/modules/SceKernelThreadMgr/SceThreadmgr.cpp": "9acdc564bae446ba5539870dc6e93874bfc714ab",
-              "vita3k/modules/SceGxm/SceGxm.cpp": "d64a4b47475776cee9622b8cf309be489be45e6b",
-              "vita3k/renderer/src/vulkan/surface_cache.cpp": "c62b44481dad44e954014827c8dae821cc93aee8",
-              "vita3k/renderer/include/renderer/vulkan/surface_cache.h": "c30ac772a497c59f93a9b5d27c3de1edeb20f451",
-              "vita3k/renderer/src/vulkan/frame_generation.cpp": "1e7cc634f3308566b6ea3d972b73c55086f8f781",
-              "vita3k/app/src/app_init.cpp": "254aef8f8e0f079de7f5f65f5ade4b273b64c817",
-              "android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java": "4932515f2720cd668211983ea584d83f38efbdae",
-              "android/app/src/main/java/org/vita3k/emulator/overlay/OverlayStore.kt": "4a3ac6052860ad7604062421c2269a17f0d2efa2",
-              "android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/PerformanceHudView.java": "7f7f95221e9176c71789ad93468510561b7ca11e",
-              "android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsModels.kt": "f6928b7ce542b7a1bf1376771310174b61b2311e",
-              "android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsRoute.kt": "a542183abd2546b51ace8cc18338afc2a9aef055",
-              "android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsSections.kt": "1e73051c5a928cba0192ea8fd32ed943e57432bf",
-              "android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsSearch.kt": "65dfe3992df70aec58e83ddb766e8bd81a0b47a1",
-              "android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/EmulationPauseMenu.kt": "f03bbe9e83217a647f4d9520ae694662b020e52e",
-              "android/app/src/main/res/values/integers.xml": "c6f6f03378b1033fa204d9bd27c78a64116be492",
-              "android/app/src/main/res/values/strings.xml": "77d7c8a3ea1487dc00f27c211b7874615e92c34f",
-              "android/app/src/main/res/values-pt-rBR/strings.xml": "c326c02c71d1468949246483284982b253943ebd",
-          }
+          workflow = Path('.github/workflows/android-build.yml').read_text(encoding='utf-8')
 
-          for path, wanted in expected.items():
-              p = Path(path)
-              if not p.is_file():
-                  raise SystemExit(f"::error::Missing persisted FIX5 source file: {path}")
-              got = subprocess.check_output(["git", "hash-object", path], text=True).strip()
-              if got != wanted:
-                  raise SystemExit(
-                      f"::error::FIX7 source baseline drift at {path}: expected={wanted} actual={got}"
-                  )
+          def embedded_python(step_name: str) -> str:
+              marker = f'      - name: {step_name}'
+              step = workflow.find(marker)
+              if step < 0:
+                  raise SystemExit(f'::error::FIX7-R2 step not found: {step_name}')
+              begin_marker = "          python3 - <<'PY'\n"
+              begin = workflow.find(begin_marker, step)
+              if begin < 0:
+                  raise SystemExit(f'::error::Python block not found in: {step_name}')
+              begin += len(begin_marker)
+              end = workflow.find('\n          PY', begin)
+              if end < 0:
+                  raise SystemExit(f'::error::Python terminator not found in: {step_name}')
+              raw = workflow[begin:end]
+              lines = raw.splitlines()
+              return '\n'.join(line[10:] if line.startswith('          ') else line for line in lines)
 
-          gradle = Path("android/app/build.gradle").read_text(encoding="utf-8")
-          for anchor in ('versionCode = 45', 'versionName = "0.3.0-alpha4-fix5"'):
-              if anchor not in gradle:
-                  raise SystemExit(f"::error::FIX5 persisted version anchor missing: {anchor}")
-
-          print("[VS-FIX7] exact persisted FIX5 source baseline verified")
-          print("[VS-FIX7] main workflow-only commits do not affect source guard")
+          for step_name in (
+              'Guard exact FIX5 persisted source baseline',
+              'Apply one consolidated FIX7 source patch',
+              'FIX7 integrated source gates and regression audit',
+          ):
+              code = embedded_python(step_name)
+              compile(code, f'<{step_name}>', 'exec')
+              exec(code, {'__name__': '__main__'})
+              print(f'[VS-FIX7-R3] inherited verified step: {step_name}')
           PY
 
-      - name: Apply one consolidated FIX7 source patch
+      - name: Apply FIX7-R3 Fractional-HD and Eden delta
         shell: bash
         run: |
           set -euo pipefail
@@ -99,704 +82,238 @@ jobs:
           from pathlib import Path
 
           def read(path):
-              return Path(path).read_text(encoding="utf-8")
+              return Path(path).read_text(encoding='utf-8')
 
           def write(path, text):
-              Path(path).write_text(text, encoding="utf-8")
+              Path(path).write_text(text, encoding='utf-8')
 
           def replace_once(text, old, new, label):
               count = text.count(old)
               if count != 1:
-                  raise SystemExit(f"::error::{label}: expected one anchor, found {count}")
+                  raise SystemExit(f'::error::{label}: expected one anchor, found {count}')
               return text.replace(old, new, 1)
 
-          def replace_exact_count(text, old, new, wanted, label):
-              count = text.count(old)
-              if count != wanted:
-                  raise SystemExit(f"::error::{label}: expected {wanted} anchors, found {count}")
-              return text.replace(old, new)
-
-          def function_span(text, marker):
-              start = text.find(marker)
-              if start < 0:
-                  raise SystemExit(f"::error::function marker not found: {marker}")
-              brace = text.find("{", start)
-              if brace < 0:
-                  raise SystemExit(f"::error::opening brace not found: {marker}")
-              depth = 0
-              for index in range(brace, len(text)):
-                  ch = text[index]
-                  if ch == "{":
-                      depth += 1
-                  elif ch == "}":
-                      depth -= 1
-                      if depth == 0:
-                          return start, index + 1
-              raise SystemExit(f"::error::closing brace not found: {marker}")
-
-          def replace_in_function(text, marker, old, new, label):
-              start, end = function_span(text, marker)
-              body = text[start:end]
-              body = replace_once(body, old, new, label)
-              return text[:start] + body + text[end:]
-
-          def replace_function(text, marker, new_body):
-              start, end = function_span(text, marker)
-              return text[:start] + new_body + text[end:]
-
-          def append_xml_strings(text, block, label):
-              if block.strip().splitlines()[0].strip() in text:
-                  raise SystemExit(f"::error::{label}: strings already present")
-              return replace_once(text, "</resources>", block + "\n</resources>", label)
-
-          # ---------------------------------------------------------------
-          # Version 47 / Alpha 4 FIX7
-          # ---------------------------------------------------------------
-          path = "android/app/build.gradle"
+          # R3 app identity, after the inherited FIX7 patch has set 47/fix7.
+          path = 'android/app/build.gradle'
           text = read(path)
-          text = replace_once(text, "versionCode = 45", "versionCode = 47", "versionCode")
+          text = replace_once(text, 'versionCode = 47', 'versionCode = 48', 'R3 versionCode')
           text = replace_once(
               text,
-              'versionName = "0.3.0-alpha4-fix5"',
               'versionName = "0.3.0-alpha4-fix7"',
-              "versionName",
+              'versionName = "0.3.0-alpha4-fix7-r3"',
+              'R3 versionName',
           )
           write(path, text)
 
-          # ---------------------------------------------------------------
-          # Gintama PCSG01073: wait on ThreadState::status_cond with the mutex
-          # that actually protects ThreadState::status. The primitive lock is
-          # dropped before the wait and reacquired before queue inspection.
-          # This preserves primitive->thread ordering on timeout/wake races.
-          # ---------------------------------------------------------------
-          path = "vita3k/kernel/src/sync_primitives.cpp"
-          text = read(path)
-          new_handle_timeout = r'''inline static int handle_timeout(KernelState &kernel, const ThreadStatePtr &thread, std::unique_lock<std::mutex> &thread_lock,
-              std::unique_lock<std::mutex> &primitive_lock, WaitingThreadQueuePtr &queue,
-              const ThreadDataQueueInterator<WaitingThreadData> &data_it, const char *export_name,
-              SceUInt *const timeout) {
-              // [VS-KERNEL-WAIT-DOMAIN7]
-              // ThreadState::status and status_cond belong to thread->mutex. Waiting on
-              // the primitive mutex can miss/observe status changes in the wrong domain.
-              // Drop the primitive while sleeping, then restore primitive->thread order
-              // before resolving a timeout race and touching the primitive wait queue.
-              const auto start = std::chrono::steady_clock::now();
-              const SceUInt requested_timeout = timeout ? *timeout : 0;
-              bool awakened = false;
-
-              primitive_lock.unlock();
-              thread_lock.lock();
-
-              if (timeout) {
-                  if (requested_timeout > 0) {
-                      awakened = thread->status_cond.wait_for(
-                          thread_lock,
-                          std::chrono::microseconds{ requested_timeout },
-                          [&] { return thread->status == ThreadStatus::run; });
-                  } else {
-                      awakened = thread->status == ThreadStatus::run;
-                  }
-              } else {
-                  thread->status_cond.wait(thread_lock, [&] {
-                      return thread->status == ThreadStatus::run;
-                  });
-                  awakened = true;
-              }
-
-              thread_lock.unlock();
-              primitive_lock.lock();
-
-              if (!timeout)
-                  return SCE_KERNEL_OK;
-
-              if (!awakened) {
-                  // A signal can win immediately after wait_for reports timeout. Recheck
-                  // only after restoring primitive->thread ordering. If still waiting,
-                  // this path owns cancellation of its queue entry.
-                  thread_lock.lock();
-                  const bool signal_won_race = thread->status == ThreadStatus::run;
-                  if (!signal_won_race)
-                      thread->update_status(ThreadStatus::run, ThreadStatus::wait);
-                  thread_lock.unlock();
-
-                  if (!signal_won_race) {
-                      const auto queued = queue->find(thread);
-                      if (queued != queue->end())
-                          queue->erase(queued);
-                      *timeout = 0;
-                      return RET_ERROR(SCE_KERNEL_ERROR_WAIT_TIMEOUT);
-                  }
-              }
-
-              const auto elapsed = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
-                  std::chrono::steady_clock::now() - start).count());
-              *timeout = elapsed >= requested_timeout
-                  ? 0
-                  : static_cast<SceUInt>(requested_timeout - elapsed);
-              return SCE_KERNEL_OK;
-          }'''
-          text = replace_function(text, "inline static int handle_timeout(", new_handle_timeout)
-
-          # Lord: simple events must be erased from the same table used by create/find.
-          text = replace_in_function(
-              text,
-              "SceInt32 simple_event_delete(",
-              "        kernel.eventflags.erase(event_id);",
-              "        // [VS-SIMPLE-EVENT-LIFECYCLE7]\n        kernel.simple_events.erase(event_id);",
-              "simple-event UID table",
-          )
-          write(path, text)
-
-          # ---------------------------------------------------------------
-          # Lord of Apocalypse PCSG00008: callback waits remain waits, and its
-          # legacy zero-sized thread-info request receives the current ABI only
-          # for this title. Other titles still reject nonsensical tiny sizes.
-          # ---------------------------------------------------------------
-          path = "vita3k/modules/SceKernelThreadMgr/SceThreadmgr.cpp"
-          text = read(path)
-          if "#include <io/state.h>" not in text:
-              text = replace_once(
-                  text,
-                  "#include <kernel/types.h>\n",
-                  "#include <kernel/types.h>\n#include <io/state.h>\n",
-                  "ThreadMgr io state include",
-              )
-          text = replace_once(
-              text,
-              "    return simple_event_waitorpoll(emuenv.kernel, export_name, thread_id, event_id, bit_pattern, result_pattern, user_data, timeout, false);",
-              "    // [VS-EVENT-CB-WAIT7] Callback variant remains a blocking wait.\n"
-              "    return simple_event_waitorpoll(emuenv.kernel, export_name, thread_id, event_id, bit_pattern, result_pattern, user_data, timeout, true);",
-              "Lord event CB wait",
-          )
-          new_thread_info = r'''EXPORT(SceInt32, _sceKernelGetThreadInfo, SceUID threadId, Ptr<SceKernelThreadInfo> pInfo) {
-              TRACY_FUNC(_sceKernelGetThreadInfo, threadId, pInfo);
-              STUBBED("STUB");
-
-              const SceUID resolved_thread_id = threadId ? threadId : thread_id;
-              const ThreadStatePtr thread = emuenv.kernel.get_thread(resolved_thread_id);
-              if (!thread)
-                  return RET_ERROR(SCE_KERNEL_ERROR_UNKNOWN_THREAD_ID);
-
-              SceKernelThreadInfo *info = pInfo.get(emuenv.mem);
-              if (!info)
-                  return RET_ERROR(SCE_KERNEL_ERROR_ILLEGAL_ADDR);
-
-              // [VS-THREADINFO-ABI7] Size-versioned compatibility. LORD of APOCALYPSE
-              // sends a zero legacy size in this path; scope the zero->current fallback
-              // to PCSG00008 rather than weakening validation for every title.
-              const SceSize requested_size = info->size;
-              SceSize effective_size = requested_size;
-              if (effective_size == 0 && emuenv.io.app_path == "PCSG00008")
-                  effective_size = static_cast<SceSize>(sizeof(SceKernelThreadInfo));
-              if (effective_size < sizeof(SceSize))
-                  return RET_ERROR(SCE_KERNEL_ERROR_INVALID_ARGUMENT_SIZE);
-
-              SceKernelThreadInfo compat_info{};
-              compat_info.size = effective_size;
-              strncpy(compat_info.name, thread->name.c_str(), KERNELOBJECT_MAX_NAME_LENGTH);
-              compat_info.stack = Ptr<void>(thread->stack.get());
-              compat_info.stackSize = thread->stack_size;
-              compat_info.initPriority = thread->priority;
-              compat_info.currentPriority = thread->priority;
-              compat_info.initCpuAffinityMask = thread->affinity_mask;
-              compat_info.currentCpuAffinityMask = thread->affinity_mask;
-              compat_info.entry = SceKernelThreadEntry(thread->entry_point);
-              if (thread->status == ThreadStatus::dormant)
-                  compat_info.exitStatus = thread->returned_value;
-
-              const SceSize copy_size = effective_size < sizeof(compat_info)
-                  ? effective_size
-                  : static_cast<SceSize>(sizeof(compat_info));
-              memcpy(info, &compat_info, copy_size);
-              return SCE_KERNEL_OK;
-          }'''
-          text = replace_function(text, "EXPORT(SceInt32, _sceKernelGetThreadInfo,", new_thread_info)
-          write(path, text)
-
-          # ---------------------------------------------------------------
-          # Lord GXM: its second immediate-context create currently returns
-          # ALREADY_INITIALIZED, leaving the caller's context null. Rebind that
-          # caller to the already-live immediate context for PCSG00008 only.
-          # Keep a narrow null-finish safety net too.
-          # ---------------------------------------------------------------
-          path = "vita3k/modules/SceGxm/SceGxm.cpp"
-          text = read(path)
-          text = replace_in_function(
-              text,
-              "EXPORT(int, sceGxmCreateContext,",
-              "    if (emuenv.gxm.immediate_context != 0) {\n"
-              "        return RET_ERROR(SCE_GXM_ERROR_ALREADY_INITIALIZED);\n"
-              "    }",
-              "    if (emuenv.gxm.immediate_context != 0) {\n"
-              "        if (emuenv.io.app_path == \"PCSG00008\") {\n"
-              "            SceGxmContext *existing = Ptr<SceGxmContext>(emuenv.gxm.immediate_context).get(emuenv.mem);\n"
-              "            if (existing) {\n"
-              "                *context = Ptr<SceGxmContext>(emuenv.gxm.immediate_context);\n"
-              "                LOG_WARN(\"[VS-GXM-CONTEXT-REUSE7] PCSG00008 rebound duplicate create to {}\",\n"
-              "                    log_hex(emuenv.gxm.immediate_context));\n"
-              "                return 0;\n"
-              "            }\n"
-              "        }\n"
-              "        return RET_ERROR(SCE_GXM_ERROR_ALREADY_INITIALIZED);\n"
-              "    }",
-              "Lord immediate GXM context reuse",
-          )
-          text = replace_in_function(
-              text,
-              "EXPORT(int, sceGxmFinish,",
-              "    if (!context)\n        return RET_ERROR(SCE_GXM_ERROR_INVALID_THREAD);",
-              "    if (!context) {\n"
-              "        if (emuenv.io.app_path != \"PCSG00008\" || emuenv.gxm.immediate_context == 0)\n"
-              "            return RET_ERROR(SCE_GXM_ERROR_INVALID_POINTER);\n"
-              "        context = Ptr<SceGxmContext>(emuenv.gxm.immediate_context).get(emuenv.mem);\n"
-              "        if (!context)\n"
-              "            return RET_ERROR(SCE_GXM_ERROR_INVALID_POINTER);\n"
-              "        LOG_WARN(\"[VS-GXM-FINISH-RECOVER7] PCSG00008 recovered null finish with {}\",\n"
-              "            log_hex(emuenv.gxm.immediate_context));\n"
-              "    }",
-              "Lord null finish fallback",
-          )
-          write(path, text)
-
-          # ---------------------------------------------------------------
-          # Uncharted PCSA00029: user config has disable-surface-sync=true,
-          # which bypasses the Vulkan surface cache synchronization paths.
-          # Force synchronization ON for this title at renderer application time.
-          # ---------------------------------------------------------------
-          path = "vita3k/app/src/app_init.cpp"
-          text = read(path)
-          old_sync = "    r.set_surface_sync_state(cc.disable_surface_sync);"
-          new_sync = (
-              "    // [VS-UNCHARTED-SURFACE-SYNC7] PCSA00029 uses framebuffer feedback; "
-              "do not bypass surface sync.\n"
-              "    const bool vs_disable_surface_sync = emuenv.io.app_path == \"PCSA00029\"\n"
-              "        ? false\n"
-              "        : cc.disable_surface_sync;\n"
-              "    r.set_surface_sync_state(vs_disable_surface_sync);"
-          )
-          text = replace_exact_count(text, old_sync, new_sync, 2, "Uncharted renderer surface sync")
-          write(path, text)
-
-          path = "vita3k/renderer/src/vulkan/surface_cache.cpp"
+          # Fractional-HD Surface Safety. Keep the existing framebuffer extent
+          # convention and FIX4 compute reinterpret algorithm. The R3 delta only
+          # makes cropped intervals, copy bounds, and fallback raw-row pitch coherent.
+          path = 'vita3k/renderer/src/vulkan/surface_cache.cpp'
           text = read(path)
           text = replace_once(
               text,
-              "        casted->texture.transition_to(\n"
-              "            cmd_buffer, vkutil::ImageLayout::ColorAttachmentReadWrite);",
-              "        // [VS-FEEDBACK-SNAPSHOT-SAMPLED7] Feedback snapshot is sampled after resolve.\n"
-              "        casted->texture.transition_to(\n"
-              "            cmd_buffer, vkutil::ImageLayout::SampledImage);",
-              "Uncharted sampled feedback snapshot",
+              'namespace renderer::vulkan {\n\n\nstatic bool region_empty',
+              'namespace renderer::vulkan {\n\n\n'
+              '// [VS-FRACTIONAL-HD-SURFACE7R3] Canonical guest-to-scaled coordinate rule.\n'
+              'static uint32_t vs_scale_surface_floor(const uint64_t value, const float scale) {\n'
+              '    return static_cast<uint32_t>(static_cast<float>(value) * scale);\n'
+              '}\n\n'
+              'static uint32_t vs_scale_surface_interval_extent(\n'
+              '    const uint32_t native_start, const uint32_t native_extent,\n'
+              '    const float scale, const uint32_t scaled_start) {\n'
+              '    const uint32_t scaled_end = vs_scale_surface_floor(\n'
+              '        static_cast<uint64_t>(native_start) + native_extent, scale);\n'
+              '    if (scaled_end > scaled_start)\n'
+              '        return scaled_end - scaled_start;\n'
+              '    return native_extent != 0 ? 1u : 0u;\n'
+              '}\n\n'
+              'static bool region_empty',
+              'fractional helpers',
+          )
+          text = replace_once(
+              text,
+              '    const uint32_t width = static_cast<uint32_t>(original_width * state.res_multiplier);\n'
+              '    const uint32_t height = static_cast<uint32_t>(original_height * state.res_multiplier);',
+              '    uint32_t width = static_cast<uint32_t>(original_width * state.res_multiplier);\n'
+              '    uint32_t height = static_cast<uint32_t>(original_height * state.res_multiplier);',
+              'mutable cropped extent',
+          )
+          text = replace_once(
+              text,
+              '    const uint32_t data_delta = address - ite->first;\n'
+              '    uint32_t start_sourced_line = static_cast<uint32_t>((data_delta / stride_bytes) * state.res_multiplier);\n'
+              '    uint32_t start_x = static_cast<uint32_t>((data_delta % stride_bytes) / bytes_per_pixel_requested * state.res_multiplier);',
+              '    const uint32_t data_delta = address - ite->first;\n'
+              '    const uint32_t native_start_line = data_delta / stride_bytes;\n'
+              '    const uint32_t native_start_x = (data_delta % stride_bytes) / bytes_per_pixel_requested;\n'
+              '    const uint32_t start_sourced_line = vs_scale_surface_floor(native_start_line, state.res_multiplier);\n'
+              '    const uint32_t start_x = vs_scale_surface_floor(native_start_x, state.res_multiplier);\n'
+              '    if (bytes_per_pixel_requested == bytes_per_pixel_in_store)\n'
+              '        width = vs_scale_surface_interval_extent(\n'
+              '            native_start_x, original_width, state.res_multiplier, start_x);\n'
+              '    height = vs_scale_surface_interval_extent(\n'
+              '        native_start_line, original_height, state.res_multiplier, start_sourced_line);\n'
+              '    const uint32_t source_available_width =\n'
+              '        start_x < info.width ? info.width - start_x : 0u;\n'
+              '    const uint32_t source_available_height =\n'
+              '        start_sourced_line < info.height ? info.height - start_sourced_line : 0u;\n'
+              '    if (source_available_height == 0\n'
+              '        || (bytes_per_pixel_requested == bytes_per_pixel_in_store && source_available_width == 0)) {\n'
+              '        LOG_WARN_ONCE("[VS-FRACTIONAL-HD-SURFACE7R3] cropped surface origin outside cached image");\n'
+              '        return std::nullopt;\n'
+              '    }\n'
+              '    const bool fractional_surface_scale = state.res_multiplier !=\n'
+              '        static_cast<float>(static_cast<uint32_t>(state.res_multiplier));\n'
+              '    static thread_local uint64_t fractional_surface_log_counter = 0;\n'
+              '    if (fractional_surface_scale && (native_start_x != 0 || native_start_line != 0)\n'
+              '        && ((++fractional_surface_log_counter & 0x3FFu) == 1u)) {\n'
+              '        LOG_DEBUG("[VS-FRACTIONAL-HD-SURFACE7R3] native_start=({}, {}) scaled_start=({}, {}) extent={}x{} available={}x{} scale={}",\n'
+              '            native_start_x, native_start_line, start_x, start_sourced_line, width, height,\n'
+              '            source_available_width, source_available_height, state.res_multiplier);\n'
+              '    }',
+              'fractional cropped origin',
+          )
+          text = replace_once(
+              text,
+              '                    std::min<uint32_t>(width, info.width),\n'
+              '                    std::min<uint32_t>(height, info.height),',
+              '                    std::min<uint32_t>(width, source_available_width),\n'
+              '                    std::min<uint32_t>(height, source_available_height),',
+              'offset-aware equal-bpp clamp',
+          )
+          text = replace_once(
+              text,
+              '                const vk::DeviceSize buffer_size =\n'
+              '                    static_cast<vk::DeviceSize>(stride_bytes)\n'
+              '                        * static_cast<size_t>(state.res_multiplier * align(height, 4))\n'
+              '                    + static_cast<vk::DeviceSize>(start_x) * bytes_per_pixel_requested\n'
+              '                    + bytes_per_pixel_requested;\n\n'
+              '                if (!casted->transition_buffer.buffer\n'
+              '                    || casted->transition_buffer.size < buffer_size) {\n'
+              '                    state.frame().destroy_queue.add_buffer(casted->transition_buffer);\n'
+              '                    casted->transition_buffer = vkutil::Buffer(buffer_size);\n'
+              '                    casted->transition_buffer.init_buffer(\n'
+              '                        vk::BufferUsageFlagBits::eTransferDst\n'
+              '                        | vk::BufferUsageFlagBits::eTransferSrc);\n'
+              '                }\n\n'
+              '                const uint32_t src_pixel_stride = static_cast<uint32_t>(\n'
+              '                    (info.stride_bytes / bytes_per_pixel_in_store)\n'
+              '                    * state.res_multiplier);',
+              '                // [VS-FRACTIONAL-HD-ROW-PITCH7R3] One canonical scaled raw-row pitch.\n'
+              '                const uint32_t src_pixel_stride = vs_scale_surface_floor(\n'
+              '                    info.stride_bytes / bytes_per_pixel_in_store, state.res_multiplier);\n'
+              '                const vk::DeviceSize scaled_row_bytes =\n'
+              '                    static_cast<vk::DeviceSize>(src_pixel_stride) * bytes_per_pixel_in_store;\n'
+              '                const uint32_t copy_height = std::min<uint32_t>(height, source_available_height);\n'
+              '                if (src_pixel_stride == 0 || scaled_row_bytes == 0 || copy_height == 0)\n'
+              '                    return std::nullopt;\n'
+              '                const vk::DeviceSize buffer_size =\n'
+              '                    scaled_row_bytes * static_cast<vk::DeviceSize>(copy_height);\n\n'
+              '                if (!casted->transition_buffer.buffer\n'
+              '                    || casted->transition_buffer.size < buffer_size) {\n'
+              '                    state.frame().destroy_queue.add_buffer(casted->transition_buffer);\n'
+              '                    casted->transition_buffer = vkutil::Buffer(buffer_size);\n'
+              '                    casted->transition_buffer.init_buffer(\n'
+              '                        vk::BufferUsageFlagBits::eTransferDst\n'
+              '                        | vk::BufferUsageFlagBits::eTransferSrc);\n'
+              '                }',
+              'canonical source row pitch',
+          )
+          text = replace_once(
+              text,
+              '                    .bufferImageHeight = height,',
+              '                    .bufferImageHeight = copy_height,',
+              'source buffer height',
+          )
+          text = replace_once(
+              text,
+              '                        std::min<uint32_t>(\n'
+              '                            height,\n'
+              '                            info.height > start_sourced_line\n'
+              '                                ? info.height - start_sourced_line\n'
+              '                                : 0),',
+              '                        copy_height,',
+              'source copy height',
+          )
+          text = replace_once(
+              text,
+              '                const uint32_t dst_pixel_stride = static_cast<uint32_t>(\n'
+              '                    (stride_bytes / bytes_per_pixel_requested)\n'
+              '                    * state.res_multiplier);',
+              '                if ((scaled_row_bytes % bytes_per_pixel_requested) != 0)\n'
+              '                    return std::nullopt;\n'
+              '                const uint32_t dst_pixel_stride = static_cast<uint32_t>(\n'
+              '                    scaled_row_bytes / bytes_per_pixel_requested);\n'
+              '                const uint32_t dst_available_width =\n'
+              '                    start_x < dst_pixel_stride ? dst_pixel_stride - start_x : 0u;\n'
+              '                if (dst_available_width == 0)\n'
+              '                    return std::nullopt;',
+              'canonical destination row pitch',
+          )
+          text = replace_once(
+              text,
+              '                        std::min<uint32_t>(width, dst_pixel_stride),\n'
+              '                        copy_image_buffer.imageExtent.height,',
+              '                        std::min<uint32_t>(width, dst_available_width),\n'
+              '                        copy_height,',
+              'offset-aware typeless destination clamp',
           )
           write(path, text)
 
-          # ---------------------------------------------------------------
-          # Qualcomm/Adreno HUD: gpubusy is a pair of counters on many KGSL
-          # kernels. A lifetime busy/total ratio can sit at a fixed value. Use
-          # interval deltas when monotonic, then fall back safely.
-          # ---------------------------------------------------------------
-          path = "android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/PerformanceHudView.java"
+          # Eden attribution. Eden's official repository states GPLv3 or later.
+          path = 'android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsSections.kt'
           text = read(path)
           text = replace_once(
               text,
-              "    private long lastSlowUpdateMs;",
-              "    private long lastSlowUpdateMs;\n"
-              "    // [VS-GPU-DELTA7] Previous KGSL counters for interval utilization.\n"
-              "    private long previousGpuBusy = -1L;\n"
-              "    private long previousGpuTotal = -1L;",
-              "GPU delta fields",
-          )
-          gpu_start, gpu_end = function_span(text, "    private Float readGpuUsage()")
-          new_gpu = r'''    private Float readGpuUsage() {
-              // [VS-GPU-DELTA7] Prefer KGSL gpubusy and compute utilization over the
-              // interval between HUD samples instead of a process-lifetime ratio.
-              try {
-                  String raw = readText("/sys/class/kgsl/kgsl-3d0/gpubusy");
-                  if (raw != null) {
-                      String[] parts = raw.trim().split("\\s+");
-                      if (parts.length >= 2) {
-                          long busy = Long.parseLong(parts[0]);
-                          long total = Long.parseLong(parts[1]);
-                          Float value = null;
-
-                          if (previousGpuBusy >= 0L && previousGpuTotal >= 0L
-                                  && busy >= previousGpuBusy && total >= previousGpuTotal) {
-                              long deltaBusy = busy - previousGpuBusy;
-                              long deltaTotal = total - previousGpuTotal;
-                              if (deltaTotal > 0L) {
-                                  value = clamp((deltaBusy * 100f) / deltaTotal);
-                              }
-                          }
-
-                          previousGpuBusy = busy;
-                          previousGpuTotal = total;
-
-                          if (value != null) return value;
-                          if (total > 0L) return clamp((busy * 100f) / total);
-                      }
-                  }
-              } catch (Throwable ignored) {}
-
-              Float direct = readSinglePercent("/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage");
-              if (direct != null) return direct;
-
-              try {
-                  File devfreq = new File("/sys/class/devfreq");
-                  File[] devices = devfreq.listFiles();
-                  if (devices != null) {
-                      for (File device : devices) {
-                          String name = device.getName().toLowerCase(Locale.ROOT);
-                          if (!name.contains("gpu") && !name.contains("mali")) continue;
-                          for (String leaf : new String[]{"load", "utilization", "busy_percent"}) {
-                              Float value = readSinglePercent(new File(device, leaf).getAbsolutePath());
-                              if (value != null) return value;
-                          }
-                      }
-                  }
-              } catch (Throwable ignored) {}
-              return null;
-          }'''
-          text = text[:gpu_start] + new_gpu + text[gpu_end:]
-          write(path, text)
-
-          # ---------------------------------------------------------------
-          # Touch: reference-matched geometry from the supplied 1536x766 PNG.
-          # Preserve exact current active/idle opacity and authored PNG pixels.
-          # Remove Engine4 post-resize geometry so image scale is authoritative.
-          # ---------------------------------------------------------------
-          path = "android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java"
-          text = read(path)
-          text = replace_once(text, "    float scale = 0.115f;", "    float scale = 0.138f; // [VS-TOUCH-REFERENCE7] face max edge ~106/766", "face scale")
-          text = replace_once(
-              text,
-              "    if(legacyId == ButtonType.TRIGGER_L\n"
-              "            || legacyId == ButtonType.TRIGGER_R\n"
-              "            || legacyId == ButtonType.TRIGGER_L2\n"
-              "            || legacyId == ButtonType.TRIGGER_R2\n"
-              "            || legacyId == ButtonType.BUTTON_START\n"
-              "            || legacyId == ButtonType.BUTTON_SELECT)\n"
-              "      scale = 0.17f;\n"
-              "    else if(legacyId == ButtonType.BUTTON_TOUCH_SWITCH\n"
-              "            || legacyId == ButtonType.BUTTON_PS\n"
-              "            || legacyId == ButtonType.BUTTON_TOUCH_HIDE)\n"
-              "      scale = 0.075f;",
-              "    if(legacyId == ButtonType.TRIGGER_L || legacyId == ButtonType.TRIGGER_R)\n"
-              "      scale = 0.312f; // [VS-TOUCH-REFERENCE7] shoulder width ~239/766\n"
-              "    else if(legacyId == ButtonType.BUTTON_START || legacyId == ButtonType.BUTTON_SELECT)\n"
-              "      scale = 0.300f; // [VS-TOUCH-REFERENCE7] Start/Select width ~229/766\n"
-              "    else if(legacyId == ButtonType.TRIGGER_L2 || legacyId == ButtonType.TRIGGER_R2)\n"
-              "      scale = 0.17f;\n"
-              "    else if(legacyId == ButtonType.BUTTON_PS)\n"
-              "      scale = 0.146f; // [VS-TOUCH-REFERENCE7] PS max edge ~112/766\n"
-              "    else if(legacyId == ButtonType.BUTTON_TOUCH_SWITCH\n"
-              "            || legacyId == ButtonType.BUTTON_TOUCH_HIDE)\n"
-              "      scale = 0.075f;",
-              "reference button scale classes",
-          )
-          text = replace_once(text, "    float scale = 0.245f;", "    float scale = 0.366f; // [VS-TOUCH-REFERENCE7] D-pad footprint ~280/766", "D-pad scale")
-          text = replace_once(text, "    float scale = 0.205f;", "    float scale = 0.308f; // [VS-TOUCH-REFERENCE7] analog max edge ~236/766", "joystick scale")
-          text = replace_once(
-              text,
-              "    overlayDrawable.setSize(\n"
-              "            vsButtonWidth(legacyId, layoutBounds, globalScale),\n"
-              "            vsButtonHeight(legacyId, layoutBounds, globalScale));\n",
-              "    // [VS-TOUCH-PNG-AUTHORITY7] Bitmap dimensions are the visual bounds.\n",
-              "remove compact button sizing",
-          )
-          text = replace_once(
-              text,
-              "    final int dpadSize = vsDpadSize(layoutBounds, globalScale);\n"
-              "    overlayDrawable.setSize(dpadSize, dpadSize);\n",
-              "    // [VS-TOUCH-PNG-AUTHORITY7] Keep authored D-pad bitmap footprint.\n",
-              "remove compact dpad sizing",
-          )
-          text = replace_once(
-              text,
-              "    int outerSize = vsJoystickSize(layoutBounds, globalScale);",
-              "    // [VS-TOUCH-PNG-AUTHORITY7] Scaled outer PNG defines analog footprint.\n"
-              "    int outerSize = bitmapOuter.getWidth();",
-              "remove compact analog sizing",
+              '                  SettingsNote(text = stringResource(R.string.settings_license_vitastation))\n'
+              '                  SettingsNote(text = stringResource(R.string.settings_license_sgsr))',
+              '                  SettingsNote(text = stringResource(R.string.settings_license_vitastation))\n'
+              '                  SettingsNote(text = stringResource(R.string.settings_license_eden))\n'
+              '                  SettingsNote(text = stringResource(R.string.settings_license_sgsr))',
+              'Eden license UI',
           )
           write(path, text)
 
-          # Reference top-left positions (normalized x/y * 1000).
-          path = "android/app/src/main/res/values/integers.xml"
-          text = read(path)
-          positions = {
-              "BUTTON_CROSS_X": 747, "BUTTON_CROSS_Y": 521,
-              "BUTTON_CIRCLE_X": 811, "BUTTON_CIRCLE_Y": 407,
-              "BUTTON_SQUARE_X": 684, "BUTTON_SQUARE_Y": 407,
-              "BUTTON_TRIANGLE_X": 747, "BUTTON_TRIANGLE_Y": 290,
-              "BUTTON_SELECT_X": 126, "BUTTON_SELECT_Y": 705,
-              "BUTTON_START_X": 721, "BUTTON_START_Y": 702,
-              "BUTTON_PS_X": 464, "BUTTON_PS_Y": 625,
-              "DPAD_UP_X": 119, "DPAD_UP_Y": 295,
-              "STICK_LEFT_X": 282, "STICK_LEFT_Y": 516,
-              "STICK_RIGHT_X": 565, "STICK_RIGHT_Y": 516,
-              "TRIGGER_L_X": 146, "TRIGGER_L_Y": 155,
-              "TRIGGER_R_X": 695, "TRIGGER_R_Y": 157,
-          }
-          import re
-          for name, value in positions.items():
-              pattern = rf'(<integer name="{re.escape(name)}">)-?\d+(</integer>)'
-              text, count = re.subn(pattern, rf'\g<1>{value}\g<2>', text, count=1)
-              if count != 1:
-                  raise SystemExit(f"::error::touch default position anchor missing: {name}")
-          text = text.replace("<resources>", "<resources>\n    <!-- [VS-TOUCH-REFERENCE-LAYOUT7] top-left coordinates from supplied reference -->", 1)
-          write(path, text)
-
-          # Existing installations retain old SharedPreferences positions. Migrate
-          # only layout keys once; preserve opacity, scale, visibility and game config.
-          path = "android/app/src/main/java/org/vita3k/emulator/overlay/OverlayStore.kt"
+          path = 'android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsSearch.kt'
           text = read(path)
           text = replace_once(
               text,
-              '    private const val KEY_POSITION_Y_SUFFIX = ":y"',
-              '    private const val KEY_POSITION_Y_SUFFIX = ":y"\n'
-              '    private const val KEY_LAYOUT_SCHEMA_VERSION = "layout_schema_version"\n'
-              '    private const val CURRENT_LAYOUT_SCHEMA_VERSION = 7 // [VS-TOUCH-LAYOUT-MIGRATION7]',
-              "overlay schema constants",
-          )
-          text = replace_once(
-              text,
-              "    fun loadGlobalState(context: Context): OverlayState {\n"
-              "        val prefs = preferences(context)\n"
-              "        val fallback = legacyGlobalState(context)\n"
-              "        return loadScopeState(prefs, scopeId = null, fallback = fallback)\n"
-              "    }",
-              "    fun loadGlobalState(context: Context): OverlayState {\n"
-              "        val prefs = preferences(context)\n"
-              "        migrateReferenceLayoutIfNeeded(context, prefs)\n"
-              "        val fallback = legacyGlobalState(context)\n"
-              "        return loadScopeState(prefs, scopeId = null, fallback = fallback)\n"
-              "    }\n\n"
-              "    // [VS-TOUCH-LAYOUT-MIGRATION7] FIX5/FIX6 installs can carry old geometry\n"
-              "    // forever through SharedPreferences. Reset layout coordinates once, while\n"
-              "    // deliberately preserving opacity/scale/mask/controller preferences.\n"
-              "    private fun migrateReferenceLayoutIfNeeded(context: Context, prefs: SharedPreferences) {\n"
-              "        if (prefs.getInt(KEY_LAYOUT_SCHEMA_VERSION, 0) >= CURRENT_LAYOUT_SCHEMA_VERSION) return\n"
-              "        val referenceLayout = defaultLayout(context)\n"
-              "        prefs.edit().apply {\n"
-              "            prefs.all.keys\n"
-              "                .filter { it.contains(\":$KEY_LAYOUT_PREFIX:\") }\n"
-              "                .forEach { remove(it) }\n"
-              "            saveLayoutEntries(this, scopeId = \"\", layout = referenceLayout)\n"
-              "            putInt(KEY_LAYOUT_SCHEMA_VERSION, CURRENT_LAYOUT_SCHEMA_VERSION)\n"
-              "            apply()\n"
-              "        }\n"
-              "    }",
-              "overlay one-time reference migration",
+              'keywords = "license gpl mit bsd qualcomm lsfg vita3k"',
+              'keywords = "license gpl mit bsd qualcomm lsfg vita3k eden"',
+              'Eden license search',
           )
           write(path, text)
 
-          # ---------------------------------------------------------------
-          # Settings home: real Licenses + HACKs categories with matching icons.
-          # HACK entries are intentionally labelled backend-pending rather than
-          # pretending arbitrary emulator state serialization already exists.
-          # ---------------------------------------------------------------
-          path = "android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsModels.kt"
-          text = read(path)
-          text = replace_once(text, "import androidx.compose.material.icons.filled.BugReport\n", "import androidx.compose.material.icons.filled.BugReport\nimport androidx.compose.material.icons.filled.Description\nimport androidx.compose.material.icons.filled.Extension\n", "settings category icon imports")
-          text = replace_once(
-              text,
-              "    Emulator(R.string.settings_tab_emulator, Icons.Default.SettingsSuggest),\n"
-              "    Network(R.string.settings_tab_network, Icons.Default.Public),\n"
-              "    Debug(R.string.settings_tab_debug, Icons.Default.BugReport)",
-              "    Emulator(R.string.settings_tab_emulator, Icons.Default.SettingsSuggest),\n"
-              "    Network(R.string.settings_tab_network, Icons.Default.Public),\n"
-              "    Licenses(R.string.settings_tab_licenses, Icons.Default.Description), // [VS-LICENSES-UI7]\n"
-              "    Hacks(R.string.settings_tab_hacks, Icons.Default.Extension), // [VS-HACKS-UI7]\n"
-              "    Debug(R.string.settings_tab_debug, Icons.Default.BugReport)",
-              "settings category enum",
-          )
-          text = replace_once(
-              text,
-              "        SettingsCategory.Emulator,\n        SettingsCategory.Debug",
-              "        SettingsCategory.Emulator,\n        SettingsCategory.Licenses,\n        SettingsCategory.Hacks,\n        SettingsCategory.Debug",
-              "settings home category order",
-          )
-          text = replace_once(
-              text,
-              "                it != SettingsCategory.Performance\n",
-              "                it != SettingsCategory.Performance &&\n                it != SettingsCategory.Licenses\n",
-              "per-app licenses filter",
-          )
-          write(path, text)
-
-          path = "android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsRoute.kt"
+          path = 'android/app/src/main/res/values/strings.xml'
           text = read(path)
           text = replace_once(
               text,
-              "    SettingsCategory.Emulator -> R.string.settings_category_emulator_desc\n"
-              "    SettingsCategory.Debug -> R.string.settings_category_debug_desc",
-              "    SettingsCategory.Emulator -> R.string.settings_category_emulator_desc\n"
-              "    SettingsCategory.Licenses -> R.string.settings_category_licenses_desc // [VS-LICENSES-UI7]\n"
-              "    SettingsCategory.Hacks -> R.string.settings_category_hacks_desc // [VS-HACKS-UI7]\n"
-              "    SettingsCategory.Debug -> R.string.settings_category_debug_desc",
-              "settings category descriptions",
+              '<string name="settings_license_vitastation">VitaStation / Vita3K — GNU GPL v2</string>\n'
+              '              <string name="settings_license_sgsr">',
+              '<string name="settings_license_vitastation">VitaStation / Vita3K — GNU GPL v2-or-later</string>\n'
+              '              <string name="settings_license_eden">Eden emulator contributors — GNU GPL v3-or-later (compatibility/reference source: git.eden-emu.dev/eden-emu/eden)</string>\n'
+              '              <string name="settings_license_sgsr">',
+              'Eden English attribution',
           )
           write(path, text)
 
-          path = "android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsSections.kt"
+          path = 'android/app/src/main/res/values-pt-rBR/strings.xml'
           text = read(path)
           text = replace_once(
               text,
-              "        SettingsCategory.Debug -> DebugSettingsSection(",
-              "        SettingsCategory.Licenses -> LicensesSettingsSection(onShowHelp = onShowHelp)\n"
-              "        SettingsCategory.Hacks -> HacksSettingsSection(onShowHelp = onShowHelp)\n"
-              "        SettingsCategory.Debug -> DebugSettingsSection(",
-              "settings category body branches",
-          )
-          text += r'''
-
-          // [VS-LICENSES-UI7] Only components actually carried by the VitaStation tree.
-          @Composable
-          private fun LicensesSettingsSection(onShowHelp: (SettingsHelpEntry) -> Unit) {
-              SettingsSectionCard(
-                  title = stringResource(R.string.settings_licenses_title),
-                  summary = stringResource(R.string.settings_licenses_summary),
-                  help = null,
-                  onShowHelp = onShowHelp
-              ) {
-                  SettingsNote(text = stringResource(R.string.settings_license_vitastation))
-                  SettingsNote(text = stringResource(R.string.settings_license_sgsr))
-                  SettingsNote(text = stringResource(R.string.settings_license_lsfg))
-              }
-          }
-
-          // [VS-HACKS-UI7] UI contract first; backend-dependent actions stay visibly disabled
-          // until a complete CPU/memory/kernel/GXM serializer or a title-specific movie patch exists.
-          @Composable
-          private fun HacksSettingsSection(onShowHelp: (SettingsHelpEntry) -> Unit) {
-              SettingsSectionCard(
-                  title = stringResource(R.string.settings_hacks_title),
-                  summary = stringResource(R.string.settings_hacks_summary),
-                  help = null,
-                  onShowHelp = onShowHelp
-              ) {
-                  SettingsNote(text = stringResource(R.string.settings_hacks_save_state))
-                  SettingsNote(text = stringResource(R.string.settings_hacks_skip_movie))
-                  SettingsNote(text = stringResource(R.string.settings_hacks_backend_pending))
-              }
-          }
-          '''
-          write(path, text)
-
-          path = "android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsSearch.kt"
-          text = read(path)
-          text = replace_once(
-              text,
-              "        if (!isPerApp) {\n            add(entry(SettingsCategory.Debug, R.string.settings_debug_log_imports",
-              "        if (!isPerApp) {\n"
-              "            add(entry(SettingsCategory.Licenses, R.string.settings_licenses_title, keywords = \"license gpl mit bsd qualcomm lsfg vita3k\"))\n"
-              "        }\n"
-              "        add(entry(SettingsCategory.Hacks, R.string.settings_hacks_title, keywords = \"hacks save state savestate quick save quick load skip movie cutscene\"))\n"
-              "        if (!isPerApp) {\n            add(entry(SettingsCategory.Debug, R.string.settings_debug_log_imports",
-              "settings search licenses hacks",
+              '<string name="settings_license_vitastation">VitaStation / Vita3K — GNU GPL v2</string>\n'
+              '              <string name="settings_license_sgsr">',
+              '<string name="settings_license_vitastation">VitaStation / Vita3K — GNU GPL v2 ou posterior</string>\n'
+              '              <string name="settings_license_eden">Colaboradores do emulador Eden — GNU GPL v3 ou posterior (fonte de compatibilidade/referência: git.eden-emu.dev/eden-emu/eden)</string>\n'
+              '              <string name="settings_license_sgsr">',
+              'Eden PT-BR attribution',
           )
           write(path, text)
 
-          # Main settings strings, English fallback and PT-BR.
-          en_block = r'''    <!-- [VS-LICENSES-HACKS-STRINGS7] -->
-              <string name="settings_tab_licenses">Licenses</string>
-              <string name="settings_category_licenses_desc">Licenses and third-party components used by VitaStation</string>
-              <string name="settings_licenses_title">Licenses</string>
-              <string name="settings_licenses_summary">Components actually integrated in this VitaStation tree</string>
-              <string name="settings_license_vitastation">VitaStation / Vita3K — GNU GPL v2</string>
-              <string name="settings_license_sgsr">Snapdragon Game Super Resolution (Qualcomm) — BSD-3-Clause</string>
-              <string name="settings_license_lsfg">LSFG-VK Android — MIT</string>
-              <string name="settings_tab_hacks">HACKs</string>
-              <string name="settings_category_hacks_desc">Save State, Skip Movie and per-game compatibility hacks</string>
-              <string name="settings_hacks_title">HACKs</string>
-              <string name="settings_hacks_summary">Runtime tools and game-specific compatibility hacks</string>
-              <string name="settings_hacks_save_state">Save State — backend serializer under development</string>
-              <string name="settings_hacks_skip_movie">Skip Movie — requires a title-specific cutscene hook</string>
-              <string name="settings_hacks_backend_pending">FIX7 exposes the UI contract but does not fake unsafe backend actions.</string>
-              <string name="emulation_tab_hacks">HACKs</string>
-              <string name="emulation_hacks_save_state">Save State</string>
-              <string name="emulation_hacks_skip_movie">Skip Movie</string>
-              <string name="emulation_hacks_pending">Backend not ready in FIX7. These actions stay disabled to protect the running session.</string>'''
-          pt_block = r'''    <!-- [VS-LICENSES-HACKS-STRINGS7] -->
-              <string name="settings_tab_licenses">Licenças</string>
-              <string name="settings_category_licenses_desc">Licenças e componentes de terceiros usados no VitaStation</string>
-              <string name="settings_licenses_title">Licenças</string>
-              <string name="settings_licenses_summary">Componentes realmente integrados nesta árvore do VitaStation</string>
-              <string name="settings_license_vitastation">VitaStation / Vita3K — GNU GPL v2</string>
-              <string name="settings_license_sgsr">Snapdragon Game Super Resolution (Qualcomm) — BSD-3-Clause</string>
-              <string name="settings_license_lsfg">LSFG-VK Android — MIT</string>
-              <string name="settings_tab_hacks">HACKs</string>
-              <string name="settings_category_hacks_desc">Save State, Skip Movie e hacks de compatibilidade por jogo</string>
-              <string name="settings_hacks_title">HACKs</string>
-              <string name="settings_hacks_summary">Ferramentas em tempo real e hacks específicos de compatibilidade</string>
-              <string name="settings_hacks_save_state">Save State — serializador de estado ainda em desenvolvimento</string>
-              <string name="settings_hacks_skip_movie">Skip Movie — exige um hook específico para a cutscene de cada jogo</string>
-              <string name="settings_hacks_backend_pending">A FIX7 cria a interface, mas não finge ações de backend que ainda seriam inseguras.</string>
-              <string name="emulation_tab_hacks">HACKs</string>
-              <string name="emulation_hacks_save_state">Save State</string>
-              <string name="emulation_hacks_skip_movie">Skip Movie</string>
-              <string name="emulation_hacks_pending">Backend ainda não está pronto na FIX7. As ações ficam desativadas para proteger a sessão.</string>'''
-          for path, block, label in (
-              ("android/app/src/main/res/values/strings.xml", en_block, "English FIX7 strings"),
-              ("android/app/src/main/res/values-pt-rBR/strings.xml", pt_block, "PT-BR FIX7 strings"),
-          ):
-              write(path, append_xml_strings(read(path), block, label))
-
-          # In-game side drawer: HACKs lives beside Session/Controls/Controller/Settings.
-          # Save State and Skip Movie are shown at their final runtime location, disabled
-          # until their real backends exist. No fake success path is wired.
-          path = "android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/EmulationPauseMenu.kt"
-          text = read(path)
-          text = replace_once(text, "import androidx.compose.material.icons.filled.Done\n", "import androidx.compose.material.icons.filled.Done\nimport androidx.compose.material.icons.filled.Extension\n", "pause menu Hacks icon")
-          text = replace_once(
-              text,
-              "    Controller(R.string.emulation_tab_controller, Icons.Default.SportsEsports),\n"
-              "    Settings(R.string.emulation_tab_settings, Icons.Default.Settings)",
-              "    Controller(R.string.emulation_tab_controller, Icons.Default.SportsEsports),\n"
-              "    Hacks(R.string.emulation_tab_hacks, Icons.Default.Extension), // [VS-RUNTIME-HACKS7]\n"
-              "    Settings(R.string.emulation_tab_settings, Icons.Default.Settings)",
-              "pause menu Hacks tab",
-          )
-          text = replace_once(
-              text,
-              "                PauseMenuTab.Settings -> EmbeddedSettingsTab(",
-              "                PauseMenuTab.Hacks -> RuntimeHacksTab()\n"
-              "                PauseMenuTab.Settings -> EmbeddedSettingsTab(",
-              "pause menu Hacks branch",
-          )
-          text += r'''
-
-          // [VS-RUNTIME-HACKS7] Final in-game location for runtime hacks.
-          @Composable
-          private fun RuntimeHacksTab() {
-              Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                  FilledTonalButton(
-            onClick = {},
-            enabled = false,
-            modifier = Modifier.fillMaxWidth()
-                  ) {
-            Icon(Icons.Default.Save, contentDescription = null)
-            Spacer(modifier = Modifier.padding(horizontal = 4.dp))
-            Text(stringResource(R.string.emulation_hacks_save_state))
-                  }
-                  FilledTonalButton(
-            onClick = {},
-            enabled = false,
-            modifier = Modifier.fillMaxWidth()
-                  ) {
-            Icon(Icons.Default.PlayArrow, contentDescription = null)
-            Spacer(modifier = Modifier.padding(horizontal = 4.dp))
-            Text(stringResource(R.string.emulation_hacks_skip_movie))
-                  }
-                  SettingsNote(text = stringResource(R.string.emulation_hacks_pending))
-              }
-          }
-          '''
-          write(path, text)
-
-          print("[VS-FIX7] one consolidated source patch applied")
+          print('[VS-FIX7-R3] Fractional-HD Surface Safety + Eden attribution applied')
           PY
 
-      - name: FIX7 integrated source gates and regression audit
+      - name: FIX7-R3 regression gates
         shell: bash
         run: |
           set -euo pipefail
@@ -804,168 +321,53 @@ jobs:
           from pathlib import Path
           import subprocess
 
-          def text(path):
-              return Path(path).read_text(encoding="utf-8")
+          def data(path):
+              return Path(path).read_text(encoding='utf-8')
 
           def require(path, *markers):
-              data = text(path)
+              content = data(path)
               for marker in markers:
-                  if marker not in data:
-                      raise SystemExit(f"::error::FIX7 gate missing in {path}: {marker}")
+                  if marker not in content:
+                      raise SystemExit(f'::error::FIX7-R3 gate missing in {path}: {marker}')
 
-          def forbid(path, *markers):
-              data = text(path)
-              for marker in markers:
-                  if marker in data:
-                      raise SystemExit(f"::error::Forbidden regression in {path}: {marker}")
-
-          require("android/app/build.gradle", "versionCode = 47", 'versionName = "0.3.0-alpha4-fix7"')
-
+          require('android/app/build.gradle', 'versionCode = 48', 'versionName = "0.3.0-alpha4-fix7-r3"')
           require(
-              "vita3k/kernel/src/sync_primitives.cpp",
-              "[VS-KERNEL-WAIT-DOMAIN7]",
-              "primitive_lock.unlock();",
-              "thread->status_cond.wait_for(",
-              "thread_lock,",
-              "primitive_lock.lock();",
-              "queue->find(thread)",
-              "[VS-SIMPLE-EVENT-LIFECYCLE7]",
-              "kernel.simple_events.erase(event_id);",
-              "[VS-KERNEL-SYNC-FIX]",
-              "[VS-KERNEL-OWNERSHIP-WAIT]",
-              "[VS-LWMUTEX-WORKAREA]",
-          )
-          forbid("vita3k/kernel/src/sync_primitives.cpp", "[VS-EVENT-UID-MISS6]")
-
-          require(
-              "vita3k/modules/SceKernelThreadMgr/SceThreadmgr.cpp",
-              "#include <io/state.h>",
-              "[VS-EVENT-CB-WAIT7]",
-              "[VS-THREADINFO-ABI7]",
-              'emuenv.io.app_path == "PCSG00008"',
+              'vita3k/renderer/src/vulkan/surface_cache.cpp',
+              '[VS-FRACTIONAL-HD-SURFACE7R3]',
+              'vs_scale_surface_interval_extent',
+              'source_available_width',
+              '[VS-FRACTIONAL-HD-ROW-PITCH7R3]',
+              'scaled_row_bytes',
+              'dst_available_width',
+              '[VS-FEEDBACK-SNAPSHOT-SAMPLED7]',
+              '[VS-TYPELESS-HD-STAGING]',
+              'source_mutable=0',
           )
           require(
-              "vita3k/modules/SceGxm/SceGxm.cpp",
-              "[VS-GXM-CONTEXT-REUSE7]",
-              "[VS-GXM-FINISH-RECOVER7]",
-              'emuenv.io.app_path == "PCSG00008"',
+              'android/app/src/main/res/values/strings.xml',
+              'VitaStation / Vita3K — GNU GPL v2-or-later',
+              'Eden emulator contributors — GNU GPL v3-or-later',
+          )
+          require(
+              'android/app/src/main/res/values-pt-rBR/strings.xml',
+              'Colaboradores do emulador Eden — GNU GPL v3 ou posterior',
+          )
+          require(
+              'android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsSections.kt',
+              'settings_license_eden',
           )
 
-          require(
-              "vita3k/app/src/app_init.cpp",
-              "[VS-UNCHARTED-SURFACE-SYNC7]",
-              'emuenv.io.app_path == "PCSA00029"',
-              "r.set_surface_sync_state(vs_disable_surface_sync);",
-          )
-          if text("vita3k/app/src/app_init.cpp").count("[VS-UNCHARTED-SURFACE-SYNC7]") != 2:
-              raise SystemExit("::error::Uncharted surface-sync override must cover both renderer config paths")
-
-          require(
-              "vita3k/renderer/src/vulkan/surface_cache.cpp",
-              "[VS-FEEDBACK-CACHE]",
-              "const bool needs_late_resolve = is_same_image || unresolved_scene_write;",
-              "[VS-FEEDBACK-SNAPSHOT-SAMPLED7]",
-              "cmd_buffer, vkutil::ImageLayout::SampledImage);",
-              "[VS-TYPELESS-HD-STAGING]",
-              "source_mutable=0",
-          )
-          forbid("vita3k/renderer/src/vulkan/surface_cache.cpp", "reinterpret_store_view")
-          require("vita3k/renderer/include/renderer/vulkan/surface_cache.h", "[VS-TYPELESS-STAGING]", "start_word")
-
-          hud = "android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/PerformanceHudView.java"
-          require(hud, "[VS-GPU-DELTA7]", "deltaBusy", "deltaTotal", "previousGpuBusy", "previousGpuTotal")
-
-          overlay = "android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java"
-          require(
-              overlay,
-              "[VS-TOUCH-PNG5]",
-              "[VS-TOUCH-REFERENCE7]",
-              "[VS-TOUCH-PNG-AUTHORITY7]",
-              "button.draw(canvas);",
-              "dpad.draw(canvas);",
-              "joystick.draw(canvas);",
-              "OVERLAY_ACTIVE_ALPHA = 0.42f",
-              "OVERLAY_IDLE_ALPHA = 0.22f",
-              "float scale = 0.138f;",
-              "scale = 0.312f;",
-              "scale = 0.300f;",
-              "float scale = 0.366f;",
-              "float scale = 0.308f;",
-              "int outerSize = bitmapOuter.getWidth();",
-          )
-          forbid(
-              overlay,
-              "PorterDuffColorFilter",
-              "PorterDuff.Mode.MULTIPLY",
-              "tintBitmap(",
-              "overlayDrawable.setSize(\n            vsButtonWidth",
-              "final int dpadSize = vsDpadSize",
-              "int outerSize = vsJoystickSize",
-          )
-          require(
-              "android/app/src/main/java/org/vita3k/emulator/overlay/OverlayStore.kt",
-              "[VS-TOUCH-LAYOUT-MIGRATION7]",
-              "CURRENT_LAYOUT_SCHEMA_VERSION = 7",
-              "migrateReferenceLayoutIfNeeded(context, prefs)",
-          )
-          ints = text("android/app/src/main/res/values/integers.xml")
-          expected_positions = {
-              "BUTTON_CROSS_X": 747, "BUTTON_CROSS_Y": 521,
-              "BUTTON_CIRCLE_X": 811, "BUTTON_CIRCLE_Y": 407,
-              "BUTTON_SQUARE_X": 684, "BUTTON_SQUARE_Y": 407,
-              "BUTTON_TRIANGLE_X": 747, "BUTTON_TRIANGLE_Y": 290,
-              "BUTTON_SELECT_X": 126, "BUTTON_SELECT_Y": 705,
-              "BUTTON_START_X": 721, "BUTTON_START_Y": 702,
-              "BUTTON_PS_X": 464, "BUTTON_PS_Y": 625,
-              "DPAD_UP_X": 119, "DPAD_UP_Y": 295,
-              "STICK_LEFT_X": 282, "STICK_LEFT_Y": 516,
-              "STICK_RIGHT_X": 565, "STICK_RIGHT_Y": 516,
-              "TRIGGER_L_X": 146, "TRIGGER_L_Y": 155,
-              "TRIGGER_R_X": 695, "TRIGGER_R_Y": 157,
-          }
-          for name, value in expected_positions.items():
-              marker = f'<integer name="{name}">{value}</integer>'
-              if marker not in ints:
-                  raise SystemExit(f"::error::reference touch coordinate missing: {marker}")
-
-          for path in (
-              "android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsModels.kt",
-              "android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsRoute.kt",
-              "android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsSections.kt",
-          ):
-              require(path, "VS-LICENSES-UI7", "VS-HACKS-UI7")
-          require(
-              "android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/EmulationPauseMenu.kt",
-              "[VS-RUNTIME-HACKS7]",
-              "PauseMenuTab.Hacks -> RuntimeHacksTab()",
-              "enabled = false",
-          )
-          require(
-              "android/app/src/main/res/values/strings.xml",
-              "[VS-LICENSES-HACKS-STRINGS7]",
-              "VitaStation / Vita3K — GNU GPL v2",
-              "Snapdragon Game Super Resolution (Qualcomm) — BSD-3-Clause",
-              "LSFG-VK Android — MIT",
-          )
-          require(
-              "android/app/src/main/res/values-pt-rBR/strings.xml",
-              "[VS-LICENSES-HACKS-STRINGS7]",
-              "Licenças",
-              "Backend ainda não está pronto na FIX7",
-          )
-
-          # FrameGen and typeless staging header stay byte-identical to persisted FIX5.
           frozen = {
-              "vita3k/renderer/src/vulkan/frame_generation.cpp": "1e7cc634f3308566b6ea3d972b73c55086f8f781",
-              "vita3k/renderer/include/renderer/vulkan/surface_cache.h": "c30ac772a497c59f93a9b5d27c3de1edeb20f451",
+              'vita3k/renderer/src/vulkan/frame_generation.cpp': '1e7cc634f3308566b6ea3d972b73c55086f8f781',
+              'vita3k/renderer/include/renderer/vulkan/surface_cache.h': 'c30ac772a497c59f93a9b5d27c3de1edeb20f451',
           }
           for path, wanted in frozen.items():
-              got = subprocess.check_output(["git", "hash-object", path], text=True).strip()
+              got = subprocess.check_output(['git', 'hash-object', path], text=True).strip()
               if got != wanted:
-                  raise SystemExit(f"::error::Frozen component changed: {path} expected={wanted} actual={got}")
+                  raise SystemExit(f'::error::Frozen component changed: {path} expected={wanted} actual={got}')
 
-          print("[VS-FIX7] integrated source gates passed")
-          print("[VS-FIX7] FrameGen + FIX4 typeless staging remain frozen")
+          print('[VS-FIX7-R3] regression gates passed')
+          print('[VS-FIX7-R3] FrameGen and FIX4 typeless staging header remain byte-identical')
           PY
 
       - name: Set up Java 17
@@ -1015,21 +417,16 @@ jobs:
               exit 1
             fi
           done
-
           SIGNING_FILE="$RUNNER_TEMP/vitastation-permanent-release.jks"
           umask 077
           printf '%s' "$KEYSTORE_B64" | base64 --decode > "$SIGNING_FILE"
-          keytool -list -v \
-            -keystore "$SIGNING_FILE" \
-            -storepass "$STORE_PASSWORD" \
-            -alias "$KEY_ALIAS" > "$RUNNER_TEMP/vitastation-keytool.txt"
-
+          keytool -list -v -keystore "$SIGNING_FILE" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" > "$RUNNER_TEMP/vitastation-keytool.txt"
           echo "SIGNING_STORE_PATH=$SIGNING_FILE" >> "$GITHUB_ENV"
           echo "SIGNING_STORE_PASSWORD=$STORE_PASSWORD" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build signed VitaStation FIX7 APK
+      - name: Build signed VitaStation FIX7-R3 APK
         shell: bash
         run: |
           set -euo pipefail
@@ -1041,58 +438,46 @@ jobs:
           set -euo pipefail
           APK='artifacts/vitastation-android/app.apk'
           test -s "$APK"
-
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           test -x "$APKSIGNER"
           "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/vitastation-apksigner.txt"
-
           python3 - <<'PY'
           from pathlib import Path
-          import os
-          import re
-          import subprocess
-
-          report = Path(os.environ["RUNNER_TEMP"]) / "vitastation-apksigner.txt"
-          data = report.read_text(encoding="utf-8", errors="replace")
-          m = re.search(r"certificate SHA-256 digest:\s*([0-9A-Fa-f:]+)", data)
-          if not m:
-              raise SystemExit("::error::apksigner certificate SHA-256 digest not found")
-          actual = m.group(1).replace(":", "").lower()
-          expected = os.environ["VITASTATION_SIGNING_CERT_SHA256"].lower()
+          import os, re, subprocess
+          report = Path(os.environ['RUNNER_TEMP']) / 'vitastation-apksigner.txt'
+          content = report.read_text(encoding='utf-8', errors='replace')
+          match = re.search(r'certificate SHA-256 digest:\s*([0-9A-Fa-f:]+)', content)
+          if not match:
+              raise SystemExit('::error::apksigner certificate SHA-256 digest not found')
+          actual = match.group(1).replace(':', '').lower()
+          expected = os.environ['VITASTATION_SIGNING_CERT_SHA256'].lower()
           if actual != expected:
-              raise SystemExit(
-                  f"::error::Signing certificate mismatch expected={expected} actual={actual}"
-              )
-
-          frozen = {
-              "vita3k/renderer/src/vulkan/frame_generation.cpp": "1e7cc634f3308566b6ea3d972b73c55086f8f781",
-          }
-          for path, wanted in frozen.items():
-              got = subprocess.check_output(["git", "hash-object", path], text=True).strip()
-              if got != wanted:
-                  raise SystemExit(f"::error::Frozen component drift after build: {path}")
-
-          print(f"[VS-FIX7] permanent signing certificate verified: {actual}")
-          print("[VS-FIX7] FrameGen remained byte-identical")
+              raise SystemExit(f'::error::Signing certificate mismatch expected={expected} actual={actual}')
+          got = subprocess.check_output(['git', 'hash-object', 'vita3k/renderer/src/vulkan/frame_generation.cpp'], text=True).strip()
+          wanted = '1e7cc634f3308566b6ea3d972b73c55086f8f781'
+          if got != wanted:
+              raise SystemExit(f'::error::FrameGen drift expected={wanted} actual={got}')
+          print(f'[VS-FIX7-R3] permanent signing certificate verified: {actual}')
+          print('[VS-FIX7-R3] FrameGen remained byte-identical')
           PY
 
-      - name: Rename and hash FIX7 APK
+      - name: Rename and hash FIX7-R3 APK
         shell: bash
         run: |
           set -euo pipefail
           SRC='artifacts/vitastation-android/app.apk'
-          DST="artifacts/vitastation-android/$FIX7_APK_NAME"
+          DST="artifacts/vitastation-android/$FIX7_R3_APK_NAME"
           test -s "$SRC"
           mv "$SRC" "$DST"
-          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX7_APK_NAME.sha256"
+          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX7_R3_APK_NAME.sha256"
           ls -lh "$DST"
 
-      - name: Upload VitaStation FIX7 APK
+      - name: Upload VitaStation FIX7-R3 APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.3.0-Alpha4-FIX7-Android-Signed
+          name: VitaStation-v0.3.0-Alpha4-FIX7-R3-Android-Signed
           path: |
-            artifacts/vitastation-android/${{ env.FIX7_APK_NAME }}
-            artifacts/vitastation-android/${{ env.FIX7_APK_NAME }}.sha256
+            artifacts/vitastation-android/${{ env.FIX7_R3_APK_NAME }}
+            artifacts/vitastation-android/${{ env.FIX7_R3_APK_NAME }}.sha256
           if-no-files-found: error
           retention-days: 30

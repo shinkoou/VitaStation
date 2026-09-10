@@ -1,9 +1,10 @@
-# VitaStation Alpha 4 FIX5 continuation workflow
-# Upload/rename this file to: .github/workflows/android-build.yml
-# IMPORTANT: this workflow intentionally DOES NOT run vitastation-bootstrap.yml.
-# It builds the FIX5 source already persisted on main and hard-gates the critical fixes.
+# VitaStation Alpha 4 FIX6
+# Upload this file as .github/workflows/android-build.yml
+# One consolidated build: Gintama wait-domain synchronization, Uncharted framebuffer-feedback
+# snapshot visibility, Lord of Apocalypse GXM/event lifecycle compatibility, and original-size PNG touch.
+# FrameGen and the known-good GPU reader are hard-frozen.
 
-name: VitaStation Android APK - Alpha 4 FIX5 Final
+name: VitaStation Android APK - Alpha 4 FIX6
 
 "on":
   workflow_dispatch:
@@ -13,6 +14,7 @@ name: VitaStation Android APK - Alpha 4 FIX5 Final
     paths:
       - '.github/workflows/android-build.yml'
 
+# Keep the same non-persisting behavior as the current FIX5 workflow.
 permissions:
   contents: read
 
@@ -23,11 +25,11 @@ concurrency:
 env:
   VCPKG_ROOT: /usr/local/share/vcpkg
   VITASTATION_SIGNING_CERT_SHA256: fc57542b62221ad0c0550d12b2791e4e40794e980c9f26a86d83250d67ed5d30
-  FIX5_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX5-KernelWorkarea-BlackAtlas-PNGTouch-GPU026-StableFG-Signed.apk
+  FIX6_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX6-KernelWait-FeedbackSnapshot-ThreadInfo-GxmFinish-Events-OriginalPNGTouch-GPU026-StableFG-Signed.apk
 
 jobs:
   android-build:
-    name: Build VitaStation v0.3.0 Alpha 4 FIX5
+    name: Build VitaStation v0.3.0 Alpha 4 FIX6
     runs-on: ubuntu-latest
 
     steps:
@@ -37,153 +39,486 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Guard persisted FIX5 baseline and frozen FrameGen
+      - name: Guard exact FIX5 main baseline and frozen components
         shell: bash
         run: |
           set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          import sys
 
-          # Critical source objects from the persisted FIX5 main baseline.
-          declare -A expected=(
-            ["android/app/build.gradle"]="bc0cdadb0534811e247ead58a99b15849af6dc55"
-            ["vita3k/kernel/include/kernel/sync_primitives.h"]="8374d328a1444cfc234ccc19fcd6a0cb5b40adba"
-            ["vita3k/kernel/src/sync_primitives.cpp"]="aa1fe323958a459c4ad3199311dffbd280f02a9c"
-            ["vita3k/modules/SceLibKernel/SceLibKernel.cpp"]="5a57eb1d2b1fc73a70af885e45845a5a2950eb5e"
-            ["vita3k/modules/SceKernelThreadMgr/SceThreadmgr.cpp"]="9acdc564bae446ba5539870dc6e93874bfc714ab"
-            ["vita3k/renderer/src/vulkan/surface_cache.cpp"]="c62b44481dad44e954014827c8dae821cc93aee8"
-            ["vita3k/renderer/src/vulkan/frame_generation.cpp"]="1e7cc634f3308566b6ea3d972b73c55086f8f781"
-            ["android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/PerformanceHudView.java"]="7f7f95221e9176c71789ad93468510561b7ca11e"
-            ["android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java"]="4932515f2720cd668211983ea584d83f38efbdae"
+          expected = {
+              "android/app/build.gradle": "bc0cdadb0534811e247ead58a99b15849af6dc55",
+              "vita3k/kernel/include/kernel/sync_primitives.h": "8374d328a1444cfc234ccc19fcd6a0cb5b40adba",
+              "vita3k/kernel/src/sync_primitives.cpp": "aa1fe323958a459c4ad3199311dffbd280f02a9c",
+              "vita3k/modules/SceLibKernel/SceLibKernel.cpp": "5a57eb1d2b1fc73a70af885e45845a5a2950eb5e",
+              "vita3k/modules/SceKernelThreadMgr/SceThreadmgr.cpp": "9acdc564bae446ba5539870dc6e93874bfc714ab",
+              "vita3k/modules/SceGxm/SceGxm.cpp": "d64a4b47475776cee9622b8cf309be489be45e6b",
+              "vita3k/renderer/src/vulkan/surface_cache.cpp": "c62b44481dad44e954014827c8dae821cc93aee8",
+              "vita3k/renderer/include/renderer/vulkan/surface_cache.h": "c30ac772a497c59f93a9b5d27c3de1edeb20f451",
+              "vita3k/renderer/src/vulkan/frame_generation.cpp": "1e7cc634f3308566b6ea3d972b73c55086f8f781",
+              "android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java": "4932515f2720cd668211983ea584d83f38efbdae",
+              "android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/PerformanceHudView.java": "7f7f95221e9176c71789ad93468510561b7ca11e",
+          }
+
+          for path, wanted in expected.items():
+              p = Path(path)
+              if not p.is_file():
+                  raise SystemExit(f"::error::Missing FIX5 baseline file: {path}")
+              got = subprocess.check_output(["git", "hash-object", path], text=True).strip()
+              if got != wanted:
+                  raise SystemExit(
+                      f"::error::FIX6 baseline drift at {path}: expected={wanted} actual={got}"
+                  )
+
+          gradle = Path("android/app/build.gradle").read_text(encoding="utf-8")
+          required = [
+              'versionCode = 45',
+              'versionName = "0.3.0-alpha4-fix5"',
+          ]
+          for marker in required:
+              if marker not in gradle:
+                  raise SystemExit(f"::error::FIX5 version anchor missing: {marker}")
+
+          print("[VS-FIX6] exact persisted FIX5 baseline verified")
+          print("[VS-FIX6] FrameGen and historical GPU reader are frozen")
+          PY
+
+      - name: Apply one consolidated FIX6 source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def read(path):
+              return Path(path).read_text(encoding="utf-8")
+
+          def write(path, text):
+              Path(path).write_text(text, encoding="utf-8")
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(
+                      f"::error::{label}: expected exactly one main anchor, found {count}"
+                  )
+              return text.replace(old, new, 1)
+
+          def function_span(text, marker):
+              start = text.find(marker)
+              if start < 0:
+                  raise SystemExit(f"::error::function marker not found: {marker}")
+              brace = text.find("{", start)
+              if brace < 0:
+                  raise SystemExit(f"::error::opening brace not found: {marker}")
+              depth = 0
+              for index in range(brace, len(text)):
+                  if text[index] == "{":
+                      depth += 1
+                  elif text[index] == "}":
+                      depth -= 1
+                      if depth == 0:
+                          return start, index + 1
+              raise SystemExit(f"::error::closing brace not found: {marker}")
+
+          def replace_in_function(text, marker, old, new, label):
+              start, end = function_span(text, marker)
+              body = text[start:end]
+              body = replace_once(body, old, new, label)
+              return text[:start] + body + text[end:]
+
+          # ---------------------------------------------------------------
+          # Version 46 / Alpha 4 FIX6
+          # ---------------------------------------------------------------
+          path = "android/app/build.gradle"
+          text = read(path)
+          text = replace_once(text, "versionCode = 45", "versionCode = 46", "versionCode")
+          text = replace_once(
+              text,
+              'versionName = "0.3.0-alpha4-fix5"',
+              'versionName = "0.3.0-alpha4-fix6"',
+              "versionName",
+          )
+          write(path, text)
+
+          # ---------------------------------------------------------------
+          # Gintama PCSG01073
+          # handle_timeout() waits with the primitive mutex, while the state
+          # being tested belongs to ThreadState and is written under thread->mutex.
+          # Read it in the same synchronization domain. Existing FIX2 timeout
+          # reacquire and FIX5 LwMutex workarea handoff are intentionally kept.
+          # ---------------------------------------------------------------
+          path = "vita3k/kernel/src/sync_primitives.cpp"
+          text = read(path)
+          text = replace_once(
+              text,
+              "    SceUInt *const timeout) {\n    if (timeout) {",
+              "    SceUInt *const timeout) {\n"
+              "    // [VS-KERNEL-WAIT-DOMAIN6] ThreadState::status is protected by thread->mutex.\n"
+              "    // primitive_lock -> thread->mutex matches the existing wake-side lock order.\n"
+              "    const auto thread_is_runnable = [&]() {\n"
+              "        std::lock_guard<std::mutex> status_lock(thread->mutex);\n"
+              "        return thread->status == ThreadStatus::run;\n"
+              "    };\n\n"
+              "    if (timeout) {",
+              "Gintama wait-domain predicate",
+          )
+          text = replace_once(
+              text,
+              "status = thread->status_cond.wait_for(primitive_lock, std::chrono::microseconds{ *timeout }, [&] { return thread->status == ThreadStatus::run; });",
+              "status = thread->status_cond.wait_for(primitive_lock, std::chrono::microseconds{ *timeout }, thread_is_runnable);",
+              "Gintama timed wait predicate",
+          )
+          text = replace_once(
+              text,
+              "thread->status_cond.wait(primitive_lock, [&] { return thread->status == ThreadStatus::run; });",
+              "thread->status_cond.wait(primitive_lock, thread_is_runnable);",
+              "Gintama infinite wait predicate",
           )
 
-          for path in "${!expected[@]}"; do
-            test -f "$path" || { echo "::error::Missing FIX5 source: $path"; exit 1; }
-            actual="$(git hash-object "$path")"
-            if [ "$actual" != "${expected[$path]}" ]; then
-              echo "::error::FIX5 baseline drift at $path expected=${expected[$path]} actual=$actual"
-              exit 1
-            fi
-          done
+          # Lord of Apocalypse: simple-event objects are created/looked up in
+          # kernel.simple_events, but main currently deletes from eventflags.
+          text = replace_in_function(
+              text,
+              "SceInt32 simple_event_delete(",
+              "        kernel.eventflags.erase(event_id);",
+              "        // [VS-SIMPLE-EVENT-LIFECYCLE6] Erase from the same UID table used by create/find.\n"
+              "        kernel.simple_events.erase(event_id);",
+              "simple-event delete table",
+          )
 
-          # Version gate.
-          grep -Fq 'versionCode = 45' android/app/build.gradle
-          grep -Fq 'versionName = "0.3.0-alpha4-fix5"' android/app/build.gradle
+          # Keep unknown-event failures visible in the next test without changing
+          # their return value. This is support instrumentation, not the fix itself.
+          text = replace_once(
+              text,
+              "    if (!event) {\n"
+              "        // this may also be a timer event\n"
+              "        return timer_waitorpoll(kernel, export_name, thread_id, event_id, wait_pattern, result_pattern, user_data, timeout, is_wait);\n"
+              "    }",
+              "    if (!event) {\n"
+              "        // this may also be a timer event\n"
+              "        const SceInt32 result = timer_waitorpoll(\n"
+              "            kernel, export_name, thread_id, event_id, wait_pattern,\n"
+              "            result_pattern, user_data, timeout, is_wait);\n"
+              "        if (static_cast<SceUInt32>(result) == SCE_KERNEL_ERROR_UNKNOWN_EVENT_ID) {\n"
+              "            LOG_WARN(\"[VS-EVENT-UID-MISS6] tid={} event={} pattern={} wait={}\",\n"
+              "                thread_id, event_id, wait_pattern, is_wait);\n"
+              "        }\n"
+              "        return result;\n"
+              "    }",
+              "Lord unknown-event trace",
+          )
+          write(path, text)
 
-          # FrameGen is frozen. FIX5 must not touch it.
-          test "$(git hash-object vita3k/renderer/src/vulkan/frame_generation.cpp)" = \
-            "1e7cc634f3308566b6ea3d972b73c55086f8f781"
+          # ---------------------------------------------------------------
+          # Lord of Apocalypse PCSG00008
+          # 1) _sceKernelWaitEventCB currently turns into a poll after callbacks.
+          # 2) The game asks _sceKernelGetThreadInfo with a size-versioned ABI
+          #    smaller than our newest SceKernelThreadInfo and main rejects it.
+          # Preserve wait semantics and fill only the caller-advertised prefix.
+          # ---------------------------------------------------------------
+          path = "vita3k/modules/SceKernelThreadMgr/SceThreadmgr.cpp"
+          text = read(path)
+          text = replace_once(
+              text,
+              "    return simple_event_waitorpoll(emuenv.kernel, export_name, thread_id, event_id, bit_pattern, result_pattern, user_data, timeout, false);",
+              "    // [VS-EVENT-CB-WAIT6] Callback variant remains a wait after callbacks.\n"
+              "    return simple_event_waitorpoll(emuenv.kernel, export_name, thread_id, event_id, bit_pattern, result_pattern, user_data, timeout, true);",
+              "Lord event-CB wait semantics",
+          )
 
-          echo "[VS-FIX5] persisted source baseline verified"
-          echo "[VS-FIX5] FrameGen frozen and bit-identical"
+          thread_info_start, thread_info_end = function_span(
+              text, "EXPORT(SceInt32, _sceKernelGetThreadInfo,"
+          )
+          old_thread_info = text[thread_info_start:thread_info_end]
+          if "if (info->size != sizeof(*info))" not in old_thread_info:
+              raise SystemExit("::error::Lord thread-info strict-size anchor missing")
+          new_thread_info = r'''EXPORT(SceInt32, _sceKernelGetThreadInfo, SceUID threadId, Ptr<SceKernelThreadInfo> pInfo) {
+              TRACY_FUNC(_sceKernelGetThreadInfo, threadId, pInfo);
+              STUBBED("STUB");
+          
+              const SceUID resolved_thread_id = threadId ? threadId : thread_id;
+              const ThreadStatePtr thread = emuenv.kernel.get_thread(resolved_thread_id);
+              if (!thread)
+                  return RET_ERROR(SCE_KERNEL_ERROR_UNKNOWN_THREAD_ID);
+          
+              SceKernelThreadInfo *info = pInfo.get(emuenv.mem);
+              if (!info)
+                  return RET_ERROR(SCE_KERNEL_ERROR_ILLEGAL_ADDR);
+          
+              // [VS-THREADINFO-ABI6] Vita thread-info structs are size-versioned.
+              // Build the fields known by this HLE and copy only the caller's prefix.
+              const SceSize requested_size = info->size;
+              if (requested_size < sizeof(SceSize))
+                  return RET_ERROR(SCE_KERNEL_ERROR_INVALID_ARGUMENT_SIZE);
+          
+              SceKernelThreadInfo compat_info{};
+              compat_info.size = requested_size;
+              strncpy(compat_info.name, thread->name.c_str(), KERNELOBJECT_MAX_NAME_LENGTH);
+              compat_info.stack = Ptr<void>(thread->stack.get());
+              compat_info.stackSize = thread->stack_size;
+              compat_info.initPriority = thread->priority;
+              compat_info.currentPriority = thread->priority;
+              compat_info.initCpuAffinityMask = thread->affinity_mask;
+              compat_info.currentCpuAffinityMask = thread->affinity_mask;
+              compat_info.entry = SceKernelThreadEntry(thread->entry_point);
+              if (thread->status == ThreadStatus::dormant)
+                  compat_info.exitStatus = thread->returned_value;
+          
+              const SceSize copy_size = requested_size < sizeof(compat_info)
+                  ? requested_size
+                  : static_cast<SceSize>(sizeof(compat_info));
+              memcpy(info, &compat_info, copy_size);
+              return SCE_KERNEL_OK;
+          }'''
+          text = text[:thread_info_start] + new_thread_info + text[thread_info_end:]
+          write(path, text)
 
-      - name: Gate Kernel Sync 4.0 LwMutex workarea coherence
+          # ---------------------------------------------------------------
+          # Lord of Apocalypse GXM compatibility
+          # The first immediate context is still alive when the game attempts
+          # another create; keep the normal ALREADY_INITIALIZED rule intact.
+          # The failed create leaves the caller with a null context, then main's
+          # sceGxmFinish reports INVALID_THREAD for that null pointer. Recover
+          # that narrow case by finishing the already-registered immediate context
+          # rather than destroying/replacing it.
+          # ---------------------------------------------------------------
+          path = "vita3k/modules/SceGxm/SceGxm.cpp"
+          text = read(path)
+          text = replace_in_function(
+              text,
+              "EXPORT(int, sceGxmFinish,",
+              "    if (!context)\n"
+              "        return RET_ERROR(SCE_GXM_ERROR_INVALID_THREAD);",
+              "    if (!context) {\n"
+              "        if (emuenv.gxm.immediate_context == 0)\n"
+              "            return RET_ERROR(SCE_GXM_ERROR_INVALID_POINTER);\n\n"
+              "        context = Ptr<SceGxmContext>(emuenv.gxm.immediate_context).get(emuenv.mem);\n"
+              "        if (!context)\n"
+              "            return RET_ERROR(SCE_GXM_ERROR_INVALID_POINTER);\n\n"
+              "        LOG_WARN(\"[VS-GXM-FINISH-RECOVER6] recovered null finish with immediate context {}\",\n"
+              "            log_hex(emuenv.gxm.immediate_context));\n"
+              "    }",
+              "Lord null GXM finish recovery",
+          )
+          write(path, text)
+
+          # ---------------------------------------------------------------
+          # Uncharted PCSA00029
+          # FIX5 already forces same-image/scene RAW to late-resolve after the
+          # producer commands. The resolved casted image is a sampled texture,
+          # so finish the snapshot in shader-readable layout instead of leaving
+          # it in ColorAttachmentReadWrite.
+          # ---------------------------------------------------------------
+          path = "vita3k/renderer/src/vulkan/surface_cache.cpp"
+          text = read(path)
+          text = replace_once(
+              text,
+              "        casted->texture.transition_to(\n"
+              "            cmd_buffer, vkutil::ImageLayout::ColorAttachmentReadWrite);",
+              "        // [VS-FEEDBACK-SNAPSHOT-SAMPLED6] Snapshot is consumed as a sampled texture.\n"
+              "        // Publish transfer/storage writes to shader reads before cache reuse.\n"
+              "        casted->texture.transition_to(\n"
+              "            cmd_buffer, vkutil::ImageLayout::SampledImage);",
+              "Uncharted framebuffer-feedback snapshot layout",
+          )
+          write(path, text)
+
+          # ---------------------------------------------------------------
+          # Touch
+          # FIX5 already uses the user's PNGs without tint and retains the old
+          # historical scale values. Touch Engine4 shrank them afterwards with
+          # explicit compact setSize()/vsJoystickSize overrides. Remove only
+          # those overrides so the already-resized bitmap dimensions become the
+          # visual bounds again, matching the pre-Engine4 footprint.
+          # ---------------------------------------------------------------
+          path = "android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java"
+          text = read(path)
+          text = replace_once(
+              text,
+              "    overlayDrawable.setSize(\n"
+              "            vsButtonWidth(legacyId, layoutBounds, globalScale),\n"
+              "            vsButtonHeight(legacyId, layoutBounds, globalScale));\n",
+              "    // [VS-TOUCH-ORIGINAL-FOOTPRINT6] Keep the historical bitmap-scaled button size.\n",
+              "touch button original footprint",
+          )
+          text = replace_once(
+              text,
+              "    final int dpadSize = vsDpadSize(layoutBounds, globalScale);\n"
+              "    overlayDrawable.setSize(dpadSize, dpadSize);\n",
+              "    // [VS-TOUCH-ORIGINAL-FOOTPRINT6] Keep the historical 0.245 bitmap-scaled D-pad size.\n",
+              "touch D-pad original footprint",
+          )
+          text = replace_once(
+              text,
+              "    int outerSize = vsJoystickSize(layoutBounds, globalScale);",
+              "    // [VS-TOUCH-ORIGINAL-FOOTPRINT6] Pre-Engine4 used the scaled PNG width.\n"
+              "    int outerSize = bitmapOuter.getWidth();",
+              "touch joystick original footprint",
+          )
+          write(path, text)
+
+          print("[VS-FIX6] one consolidated source patch applied")
+          PY
+
+      - name: FIX6 combined source gates and frozen-regression audit
         shell: bash
         run: |
           set -euo pipefail
-          CPP='vita3k/kernel/src/sync_primitives.cpp'
-          HDR='vita3k/kernel/include/kernel/sync_primitives.h'
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
 
-          grep -Fq '[VS-LWMUTEX-WORKAREA]' "$CPP"
-          grep -Fq 'inline static int mutex_unlock_impl(KernelState &kernel, MemState &mem' "$CPP"
-          grep -Fq 'int mutex_unlock(KernelState &kernel, MemState &mem' "$CPP"
-          grep -Fq 'SceKernelLwMutexWork *work = mutex->workarea.get(mem);' "$CPP"
-          grep -Fq 'work->lockCount = mutex->lock_count;' "$CPP"
-          grep -Fq 'work->owner = mutex->owner ? mutex->owner->id : 0;' "$CPP"
-          grep -Fq 'mutex->lock_count = waiting_lock_count;' "$CPP"
-          grep -Fq 'mutex->owner = waiting_thread;' "$CPP"
-          grep -Fq 'sync_lw_workarea();' "$CPP"
-          grep -Fq 'mutex_unlock_impl(kernel, mem, export_name, thread_id, 1, condvar->associated_mutex, weight)' "$CPP"
+          def text(path):
+              return Path(path).read_text(encoding="utf-8")
 
-          # FIX2 timeout reacquire and FIX4 ownership wake guard remain present.
-          grep -Fq '[VS-KERNEL-SYNC-FIX]' "$CPP"
-          grep -Fq '[VS-KERNEL-OWNERSHIP-WAIT]' "$CPP"
+          def require(path, *markers):
+              data = text(path)
+              for marker in markers:
+                  if marker not in data:
+                      raise SystemExit(f"::error::Post-patch gate missing in {path}: {marker}")
 
-          # Header and exported callsites must carry MemState too.
-          grep -Eq 'mutex_unlock\([^;]*MemState[[:space:]]*&mem' "$HDR" || \
-            grep -Fq 'MemState &mem' "$HDR"
-          grep -Fq 'emuenv.mem' vita3k/modules/SceLibKernel/SceLibKernel.cpp
-          grep -Fq 'emuenv.mem' vita3k/modules/SceKernelThreadMgr/SceThreadmgr.cpp
+          def forbid(path, *markers):
+              data = text(path)
+              for marker in markers:
+                  if marker in data:
+                      raise SystemExit(f"::error::Forbidden regression in {path}: {marker}")
 
-          echo "[VS-FIX5] Kernel Sync 4.0 gates passed"
+          require(
+              "android/app/build.gradle",
+              "versionCode = 46",
+              'versionName = "0.3.0-alpha4-fix6"',
+          )
 
-      - name: Gate Uncharted feedback resolve and HD Typeless staging
-        shell: bash
-        run: |
-          set -euo pipefail
-          SRC='vita3k/renderer/src/vulkan/surface_cache.cpp'
-          HDR='vita3k/renderer/include/renderer/vulkan/surface_cache.h'
+          # Gintama. Preserve all earlier proven synchronization work.
+          require(
+              "vita3k/kernel/src/sync_primitives.cpp",
+              "[VS-KERNEL-WAIT-DOMAIN6]",
+              "thread_is_runnable",
+              "[VS-KERNEL-SYNC-FIX]",
+              "[VS-KERNEL-OWNERSHIP-WAIT]",
+              "[VS-LWMUTEX-WORKAREA]",
+          )
 
-          # Black-atlas / framebuffer feedback: generation equality may not bypass a required late resolve.
-          grep -Fq '[VS-FEEDBACK-CACHE]' "$SRC"
-          grep -Fq 'const bool needs_late_resolve = is_same_image || unresolved_scene_write;' "$SRC"
-          grep -Fq 'if (!needs_late_resolve && casted->source_generation == source_generation)' "$SRC"
+          # Lord. Real lifecycle/semantic changes plus a targeted UID miss trace.
+          require(
+              "vita3k/kernel/src/sync_primitives.cpp",
+              "[VS-SIMPLE-EVENT-LIFECYCLE6]",
+              "kernel.simple_events.erase(event_id);",
+              "[VS-EVENT-UID-MISS6]",
+          )
+          require(
+              "vita3k/modules/SceKernelThreadMgr/SceThreadmgr.cpp",
+              "[VS-EVENT-CB-WAIT6]",
+              "[VS-THREADINFO-ABI6]",
+              "const SceSize requested_size = info->size;",
+              "memcpy(info, &compat_info, copy_size);",
+          )
+          require(
+              "vita3k/modules/SceGxm/SceGxm.cpp",
+              "[VS-GXM-FINISH-RECOVER6]",
+              "Ptr<SceGxmContext>(emuenv.gxm.immediate_context).get(emuenv.mem)",
+          )
+          forbid(
+              "vita3k/modules/SceGxm/SceGxm.cpp",
+              "[VS-GXM-INACTIVE-RECYCLE6]",
+          )
 
-          # FIX4 isolated HD Typeless staging stays intact.
-          grep -Fq '[VS-TYPELESS-HD-STAGING]' "$SRC"
-          grep -Fq 'source_mutable=0' "$SRC"
-          grep -Fq '[VS-TYPELESS-STAGING]' "$HDR"
-          grep -Fq 'start_word' "$HDR"
-          if grep -q 'reinterpret_store_view' "$SRC" "$HDR"; then
-            echo "::error::Global mutable64/old reinterpret_store_view regression detected"
-            exit 1
-          fi
+          # Uncharted. Keep FIX5 late-resolve and FIX4 isolated typeless staging.
+          require(
+              "vita3k/renderer/src/vulkan/surface_cache.cpp",
+              "[VS-FEEDBACK-CACHE]",
+              "const bool needs_late_resolve = is_same_image || unresolved_scene_write;",
+              "if (!needs_late_resolve && casted->source_generation == source_generation)",
+              "[VS-FEEDBACK-SNAPSHOT-SAMPLED6]",
+              "cmd_buffer, vkutil::ImageLayout::SampledImage);",
+              "[VS-TYPELESS-HD-STAGING]",
+              "source_mutable=0",
+          )
+          forbid(
+              "vita3k/renderer/src/vulkan/surface_cache.cpp",
+              "reinterpret_store_view",
+          )
+          require(
+              "vita3k/renderer/include/renderer/vulkan/surface_cache.h",
+              "[VS-TYPELESS-STAGING]",
+              "start_word",
+          )
 
-          echo "[VS-FIX5] framebuffer feedback + Typeless staging gates passed"
+          # Touch. PNG remains visual authority, exact old scale code survives,
+          # and compact Engine4 size overrides are no longer used by init paths.
+          overlay = "android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java"
+          require(
+              overlay,
+              "[VS-TOUCH-PNG5]",
+              "[VS-TOUCH-ORIGINAL-FOOTPRINT6]",
+              "button.draw(canvas);",
+              "dpad.draw(canvas);",
+              "joystick.draw(canvas);",
+              "float scale = 0.115f;",
+              "scale = 0.17f;",
+              "float scale = 0.245f;",
+              "float scale = 0.205f;",
+              "int outerSize = bitmapOuter.getWidth();",
+              "OVERLAY_ACTIVE_ALPHA = 0.42f",
+              "OVERLAY_IDLE_ALPHA = 0.22f",
+          )
+          forbid(
+              overlay,
+              "PorterDuffColorFilter",
+              "PorterDuff.Mode.MULTIPLY",
+              "tintBitmap(",
+              "overlayDrawable.setSize(\n            vsButtonWidth",
+              "final int dpadSize = vsDpadSize",
+              "int outerSize = vsJoystickSize",
+          )
 
-      - name: Gate historical GPU reader and PNG touch path
-        shell: bash
-        run: |
-          set -euo pipefail
-          HUD='android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/PerformanceHudView.java'
-          OVERLAY='android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java'
-          DRAWABLE='android/app/src/main/res/drawable'
+          # Pressed PNG state reaches ~68% from active 42%; edit mode is 100%.
+          for path in (
+              "android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlayDrawableButton.java",
+              "android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlayDrawableDpad.java",
+              "android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlayDrawableJoystick.java",
+          ):
+              require(path, "value * 1.62f")
+          require(overlay, "? 1.0f")
 
-          # Known-good v0.2.6 GPU reader. No fake zero state machine.
-          grep -Fq '[VS-GPU-HUD-HISTORICAL]' "$HUD"
-          grep -Fq '/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage' "$HUD"
-          grep -Fq '/sys/class/kgsl/kgsl-3d0/gpubusy' "$HUD"
-          grep -Fq 'File devfreq = new File("/sys/class/devfreq")' "$HUD"
-          if grep -Eq 'zeroCandidate|previousGpuBusy|GPU_DELTA|PRIMED' "$HUD"; then
-            echo "::error::Old GPU zero/delta heuristic survived FIX5"
-            exit 1
-          fi
+          drawables = Path("android/app/src/main/res/drawable")
+          required_pngs = [
+              "button_cross.png", "button_cross_pressed.png",
+              "button_circle.png", "button_circle_pressed.png",
+              "button_square.png", "button_square_pressed.png",
+              "button_triangle.png", "button_triangle_pressed.png",
+              "button_l.png", "button_l_pressed.png",
+              "button_r.png", "button_r_pressed.png",
+              "button_select.png", "button_select_pressed.png",
+              "button_start.png", "button_start_pressed.png",
+              "button_ps.png", "button_ps_pressed.png",
+              "dpad_idle.png", "dpad_up.png", "dpad_up_left.png",
+              "joystick_range.png", "joystick.png", "joystick_pressed.png",
+          ]
+          for name in required_pngs:
+              p = drawables / name
+              if not p.is_file() or p.stat().st_size <= 0:
+                  raise SystemExit(f"::error::Missing/empty touch PNG: {p}")
 
-          # PNG art is the normal visual path; hitbox/input backend remains unchanged.
-          grep -Fq '[VS-TOUCH-PNG5]' "$OVERLAY"
-          grep -Fq 'button.draw(canvas);' "$OVERLAY"
-          grep -Fq 'dpad.draw(canvas);' "$OVERLAY"
-          grep -Fq 'joystick.draw(canvas);' "$OVERLAY"
-          grep -Fq 'OVERLAY_ACTIVE_ALPHA = 0.42f' "$OVERLAY"
-          grep -Fq 'OVERLAY_IDLE_ALPHA = 0.22f' "$OVERLAY"
-          grep -Fq 'setButton(' "$OVERLAY"
-          grep -Fq 'setAxis(' "$OVERLAY"
+          # Frozen modules are byte-identical to FIX5.
+          frozen = {
+              "vita3k/renderer/src/vulkan/frame_generation.cpp": "1e7cc634f3308566b6ea3d972b73c55086f8f781",
+              "android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/PerformanceHudView.java": "7f7f95221e9176c71789ad93468510561b7ca11e",
+              "vita3k/renderer/include/renderer/vulkan/surface_cache.h": "c30ac772a497c59f93a9b5d27c3de1edeb20f451",
+          }
+          for path, wanted in frozen.items():
+              got = subprocess.check_output(["git", "hash-object", path], text=True).strip()
+              if got != wanted:
+                  raise SystemExit(
+                      f"::error::Frozen component changed: {path} expected={wanted} actual={got}"
+                  )
 
-          # Runtime tint must not destroy the authored neon/white PNG pixels.
-          if grep -Eq 'PorterDuffColorFilter|PorterDuff\.Mode\.MULTIPLY|tintBitmap\(' "$OVERLAY"; then
-            echo "::error::Destructive runtime PNG tint detected"
-            exit 1
-          fi
-
-          # Core reference-derived PNGs must exist in resources.
-          for png in \
-            button_cross.png button_cross_pressed.png \
-            button_circle.png button_circle_pressed.png \
-            button_square.png button_square_pressed.png \
-            button_triangle.png button_triangle_pressed.png \
-            button_l.png button_l_pressed.png \
-            button_r.png button_r_pressed.png \
-            button_select.png button_select_pressed.png \
-            button_start.png button_start_pressed.png \
-            button_ps.png button_ps_pressed.png \
-            dpad_idle.png dpad_up.png dpad_up_left.png \
-            joystick_range.png joystick.png joystick_pressed.png; do
-            test -s "$DRAWABLE/$png" || { echo "::error::Missing FIX5 touch PNG: $png"; exit 1; }
-          done
-
-          grep -Fq 'value * 1.62f' android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlayDrawableButton.java
-          grep -Fq 'value * 1.62f' android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlayDrawableDpad.java
-          grep -Fq 'value * 1.62f' android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlayDrawableJoystick.java
-
-          echo "[VS-FIX5] GPU026 + PNG touch gates passed"
+          print("[VS-FIX6] combined patch gates passed")
+          print("[VS-FIX6] Typeless staging, GPU reader and FrameGen remain frozen")
+          PY
 
       - name: Set up Java 17
         uses: actions/setup-java@v5
@@ -226,7 +561,6 @@ jobs:
           KEY_PASSWORD: ${{ secrets.VITASTATION_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-
           for name in KEYSTORE_B64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
             if [ -z "${!name:-}" ]; then
               echo "::error::Missing permanent signing secret: $name"
@@ -247,13 +581,13 @@ jobs:
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build signed VitaStation FIX5 APK
+      - name: Build signed VitaStation FIX6 APK
         shell: bash
         run: |
           set -euo pipefail
           bash ./.ci/build-android.sh artifacts/vitastation-android
 
-      - name: Verify APK signature and frozen FrameGen
+      - name: Verify permanent APK signature and frozen components
         shell: bash
         run: |
           set -euo pipefail
@@ -264,35 +598,54 @@ jobs:
           test -x "$APKSIGNER"
           "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/vitastation-apksigner.txt"
 
-          actual="$(grep -m1 'certificate SHA-256 digest:' "$RUNNER_TEMP/vitastation-apksigner.txt" \
-            | sed 's/.*digest: //' | tr -d ':' | tr '[:upper:]' '[:lower:]')"
-          if [ "$actual" != "$VITASTATION_SIGNING_CERT_SHA256" ]; then
-            echo "::error::Signing certificate mismatch expected=$VITASTATION_SIGNING_CERT_SHA256 actual=$actual"
-            exit 1
-          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+          import subprocess
 
-          test "$(git hash-object vita3k/renderer/src/vulkan/frame_generation.cpp)" = \
-            "1e7cc634f3308566b6ea3d972b73c55086f8f781"
+          report = Path(os.environ["RUNNER_TEMP"]) / "vitastation-apksigner.txt"
+          data = report.read_text(encoding="utf-8", errors="replace")
+          m = re.search(r"certificate SHA-256 digest:\s*([0-9A-Fa-f:]+)", data)
+          if not m:
+              raise SystemExit("::error::apksigner certificate SHA-256 digest not found")
+          actual = m.group(1).replace(":", "").lower()
+          expected = os.environ["VITASTATION_SIGNING_CERT_SHA256"].lower()
+          if actual != expected:
+              raise SystemExit(
+                  f"::error::Signing certificate mismatch expected={expected} actual={actual}"
+              )
 
-          echo "[VS-FIX5] signature and FrameGen verification passed"
+          frozen = {
+              "vita3k/renderer/src/vulkan/frame_generation.cpp": "1e7cc634f3308566b6ea3d972b73c55086f8f781",
+              "android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/PerformanceHudView.java": "7f7f95221e9176c71789ad93468510561b7ca11e",
+          }
+          for path, wanted in frozen.items():
+              got = subprocess.check_output(["git", "hash-object", path], text=True).strip()
+              if got != wanted:
+                  raise SystemExit(f"::error::Frozen component drift after build: {path}")
 
-      - name: Rename and hash FIX5 APK
+          print(f"[VS-FIX6] permanent signing certificate verified: {actual}")
+          print("[VS-FIX6] FrameGen and GPU reader remained byte-identical")
+          PY
+
+      - name: Rename and hash FIX6 APK
         shell: bash
         run: |
           set -euo pipefail
           SRC='artifacts/vitastation-android/app.apk'
-          DST="artifacts/vitastation-android/$FIX5_APK_NAME"
+          DST="artifacts/vitastation-android/$FIX6_APK_NAME"
           test -s "$SRC"
           mv "$SRC" "$DST"
-          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX5_APK_NAME.sha256"
+          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX6_APK_NAME.sha256"
           ls -lh "$DST"
 
-      - name: Upload VitaStation FIX5 APK
+      - name: Upload VitaStation FIX6 APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.3.0-Alpha4-FIX5-Android-Signed
+          name: VitaStation-v0.3.0-Alpha4-FIX6-Android-Signed
           path: |
-            artifacts/vitastation-android/${{ env.FIX5_APK_NAME }}
-            artifacts/vitastation-android/${{ env.FIX5_APK_NAME }}.sha256
+            artifacts/vitastation-android/${{ env.FIX6_APK_NAME }}
+            artifacts/vitastation-android/${{ env.FIX6_APK_NAME }}.sha256
           if-no-files-found: error
           retention-days: 30

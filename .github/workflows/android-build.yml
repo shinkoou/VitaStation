@@ -1,4 +1,4 @@
-name: VitaStation Android APK - Alpha 4 FIX5 R2
+name: VitaStation Android APK - Alpha 4 FIX5 R3
 
 "on":
   workflow_dispatch:
@@ -22,7 +22,7 @@ env:
 
 jobs:
   android-build:
-    name: Build VitaStation v0.3.0 Alpha 4 FIX5 R2
+    name: Build VitaStation v0.3.0 Alpha 4 FIX5 R3
     runs-on: ubuntu-latest
 
     steps:
@@ -3601,11 +3601,60 @@ jobs:
           grep -Fq 'mutex_unlock_impl(kernel, mem, export_name, thread_id, 1, condvar->associated_mutex, weight)' vita3k/kernel/src/sync_primitives.cpp
           grep -Fq 'mutex->owner = waiting_thread;' vita3k/kernel/src/sync_primitives.cpp
           grep -Fq 'sync_lw_workarea();' vita3k/kernel/src/sync_primitives.cpp
-          mapfile -t unlock_sites < <(rg -n --glob '*.cpp' --glob '*.h' --glob '*.hpp' '\bmutex_unlock\s*\(' vita3k)
-          mapfile -t impl_sites < <(rg -n --glob '*.cpp' --glob '*.h' --glob '*.hpp' '\bmutex_unlock_impl\s*\(' vita3k)
-          test "${#unlock_sites[@]}" -eq 5
-          test "${#impl_sites[@]}" -eq 3
-          ! rg -n 'mutex_unlock\(emuenv\.kernel, export_name' vita3k/modules/SceLibKernel/SceLibKernel.cpp vita3k/modules/SceKernelThreadMgr/SceThreadmgr.cpp
+          # R3: keep source gates self-contained. Ubuntu runners are not guaranteed to have ripgrep.
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          root = Path("vita3k")
+          specs = {
+              "mutex_unlock": (re.compile(r"\bmutex_unlock\s*\("), 5),
+              "mutex_unlock_impl": (re.compile(r"\bmutex_unlock_impl\s*\("), 3),
+          }
+
+          for symbol, (pattern, expected) in specs.items():
+              sites = []
+              for path in root.rglob("*"):
+                  if path.suffix not in {".cpp", ".h", ".hpp"}:
+                      continue
+                  try:
+                      lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+                  except OSError:
+                      continue
+                  for line_no, line in enumerate(lines, 1):
+                      if pattern.search(line):
+                          sites.append(f"{path}:{line_no}:{line.strip()}")
+
+              print(f"[VS-FIX5-GATE] {symbol}: {len(sites)} occurrence(s)")
+              for site in sites:
+                  print(site)
+              if len(sites) != expected:
+                  print(
+                      f"::error::Expected exactly {expected} {symbol} occurrences after FIX5 patch, got {len(sites)}",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
+
+          module_paths = [
+              Path("vita3k/modules/SceLibKernel/SceLibKernel.cpp"),
+              Path("vita3k/modules/SceKernelThreadMgr/SceThreadmgr.cpp"),
+          ]
+          stale = "mutex_unlock(emuenv.kernel, export_name"
+          stale_hits = []
+          for path in module_paths:
+              for line_no, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+                  if stale in line:
+                      stale_hits.append(f"{path}:{line_no}:{line.strip()}")
+
+          if stale_hits:
+              print("::error::Old mutex_unlock call signature survived FIX5:", file=sys.stderr)
+              for hit in stale_hits:
+                  print(hit, file=sys.stderr)
+              sys.exit(1)
+
+          print("[VS-FIX5-GATE] mutex callsite audit passed without ripgrep")
+          PY
 
           # Uncharted: mandatory late resolve can no longer be bypassed by cast-cache generation equality.
           grep -q '\[VS-FEEDBACK-CACHE\]' vita3k/renderer/src/vulkan/surface_cache.cpp

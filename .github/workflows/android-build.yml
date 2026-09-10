@@ -267,16 +267,16 @@ jobs:
           )
           write(path, text)
 
-          # Eden attribution. Eden's official repository states GPLv3 or later.
+          # Eden attribution. Anchor only on semantic tokens, never whitespace.
+          # [VS-EDEN-ATTRIBUTION7R3] This intentionally survives formatting changes
+          # made by the inherited FIX7-R2 build-time patch.
           path = 'android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsSections.kt'
           text = read(path)
+          eden_ui_anchor = 'SettingsNote(text = stringResource(R.string.settings_license_vitastation))'
           text = replace_once(
               text,
-              '                  SettingsNote(text = stringResource(R.string.settings_license_vitastation))\n'
-              '                  SettingsNote(text = stringResource(R.string.settings_license_sgsr))',
-              '                  SettingsNote(text = stringResource(R.string.settings_license_vitastation))\n'
-              '                  SettingsNote(text = stringResource(R.string.settings_license_eden))\n'
-              '                  SettingsNote(text = stringResource(R.string.settings_license_sgsr))',
+              eden_ui_anchor,
+              eden_ui_anchor + '\n                  SettingsNote(text = stringResource(R.string.settings_license_eden))',
               'Eden license UI',
           )
           write(path, text)
@@ -293,26 +293,24 @@ jobs:
 
           path = 'android/app/src/main/res/values/strings.xml'
           text = read(path)
+          eden_en_anchor = '<string name="settings_license_vitastation">VitaStation / Vita3K — GNU GPL v2</string>'
           text = replace_once(
               text,
-              '<string name="settings_license_vitastation">VitaStation / Vita3K — GNU GPL v2</string>\n'
-              '              <string name="settings_license_sgsr">',
+              eden_en_anchor,
               '<string name="settings_license_vitastation">VitaStation / Vita3K — GNU GPL v2-or-later</string>\n'
-              '              <string name="settings_license_eden">Eden emulator contributors — GNU GPL v3-or-later (compatibility/reference source: git.eden-emu.dev/eden-emu/eden)</string>\n'
-              '              <string name="settings_license_sgsr">',
+              '              <string name="settings_license_eden">Eden emulator contributors — GNU GPL v3-or-later (compatibility/reference source: git.eden-emu.dev/eden-emu/eden)</string>',
               'Eden English attribution',
           )
           write(path, text)
 
           path = 'android/app/src/main/res/values-pt-rBR/strings.xml'
           text = read(path)
+          eden_pt_anchor = '<string name="settings_license_vitastation">VitaStation / Vita3K — GNU GPL v2</string>'
           text = replace_once(
               text,
-              '<string name="settings_license_vitastation">VitaStation / Vita3K — GNU GPL v2</string>\n'
-              '              <string name="settings_license_sgsr">',
+              eden_pt_anchor,
               '<string name="settings_license_vitastation">VitaStation / Vita3K — GNU GPL v2 ou posterior</string>\n'
-              '              <string name="settings_license_eden">Colaboradores do emulador Eden — GNU GPL v3 ou posterior (fonte de compatibilidade/referência: git.eden-emu.dev/eden-emu/eden)</string>\n'
-              '              <string name="settings_license_sgsr">',
+              '              <string name="settings_license_eden">Colaboradores do emulador Eden — GNU GPL v3 ou posterior (fonte de compatibilidade/referência: git.eden-emu.dev/eden-emu/eden)</string>',
               'Eden PT-BR attribution',
           )
           write(path, text)

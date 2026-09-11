@@ -3597,6 +3597,29 @@ jobs:
               content = content[:insert_at] + joystick_resize + content[insert_at:]
           write(path, content)
           
+          # Extend the FIX9 Emulator bridge so the in-game editor keeps the same
+          # Grade + per-control resize features even though its palette call uses defaults.
+          path = 'android/app/src/main/java/org/vita3k/emulator/Emulator.java'
+          content = read(path)
+          bridge_marker = '    public void releaseControllerOverlayInputs() {'
+          bridge_count = content.count(bridge_marker)
+          if bridge_count != 1:
+              raise SystemExit(f'::error::FIX11 Emulator overlay bridge marker count={bridge_count}')
+          bridge_methods = '''    // [VS-TOUCH-EDITOR-BRIDGE11] In-game editor bridge.
+              public void resizeSelectedControllerOverlayControl(float factor) {
+                  InputOverlay overlay = getmOverlay();
+                  if (overlay != null) overlay.resizeSelectedControl(factor);
+              }
+          
+              public void resetSelectedControllerOverlayScale() {
+                  InputOverlay overlay = getmOverlay();
+                  if (overlay != null) overlay.resetSelectedControlScale();
+              }
+          
+          '''
+          content = content.replace(bridge_marker, bridge_methods + bridge_marker, 1)
+          write(path, content)
+          
           path = 'android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/OverlayLayoutEditorDialog.kt'
           content = read(path)
           content = replace_once(
@@ -3648,12 +3671,13 @@ jobs:
           internal fun OverlayEditorPalette(
               onDone: () -> Unit,
               onReset: () -> Unit,
-              onGridChanged: (Boolean) -> Unit,
-              onScaleSelected: (Float) -> Unit,
-              onResetSelectedScale: () -> Unit,
+              onGridChanged: ((Boolean) -> Unit)? = null,
+              onScaleSelected: ((Float) -> Unit)? = null,
+              onResetSelectedScale: (() -> Unit)? = null,
               modifier: Modifier = Modifier
           ) {
-              var gridEnabled by rememberSaveable { mutableStateOf(true) }
+              val emulator = LocalContext.current as? Emulator
+              var gridEnabled by rememberSaveable { mutableStateOf(emulator?.isControllerEditGridEnabled() ?: true) }
           
               BoxWithConstraints(modifier = modifier.fillMaxSize()) {
                   var offsetX by rememberSaveable { mutableIntStateOf(0) }
@@ -3688,7 +3712,7 @@ jobs:
                               FilledTonalButton(
                                   onClick = {
                                       gridEnabled = !gridEnabled
-                                      onGridChanged(gridEnabled)
+                                      onGridChanged?.invoke(gridEnabled) ?: emulator?.setControllerEditGridEnabled(gridEnabled)
                                   },
                                   modifier = Modifier.weight(1.2f)
                               ) {
@@ -3699,13 +3723,13 @@ jobs:
                                   }
                                   Text("${stringResource(R.string.emulation_controls_grid)}: $gridState")
                               }
-                              OutlinedButton(onClick = { onScaleSelected(0.90f) }, modifier = Modifier.weight(1f)) {
+                              OutlinedButton(onClick = { onScaleSelected?.invoke(0.90f) ?: emulator?.resizeSelectedControllerOverlayControl(0.90f) }, modifier = Modifier.weight(1f)) {
                                   Text(stringResource(R.string.emulation_controls_smaller))
                               }
-                              OutlinedButton(onClick = { onScaleSelected(1.10f) }, modifier = Modifier.weight(1f)) {
+                              OutlinedButton(onClick = { onScaleSelected?.invoke(1.10f) ?: emulator?.resizeSelectedControllerOverlayControl(1.10f) }, modifier = Modifier.weight(1f)) {
                                   Text(stringResource(R.string.emulation_controls_larger))
                               }
-                              OutlinedButton(onClick = onResetSelectedScale, modifier = Modifier.weight(1f)) {
+                              OutlinedButton(onClick = { onResetSelectedScale?.invoke() ?: emulator?.resetSelectedControllerOverlayScale() }, modifier = Modifier.weight(1f)) {
                                   Text(stringResource(R.string.emulation_controls_reset_size))
                               }
                           }
@@ -3828,6 +3852,8 @@ jobs:
           require('android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java', '[VS-TOUCH-GRADE11]', '[VS-TOUCH-RESIZE11]', '[VS-TOUCH-SCALE-APPLY11]', 'resizeSelectedControl')
           require('android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlayDrawableJoystick.java', '[VS-TOUCH-JOYSTICK-RESIZE11]', 'public void setSize(int width, int height)')
           require('android/app/src/main/java/org/vita3k/emulator/ui/components/OverlayEditorPalette.kt', 'onGridChanged', 'onScaleSelected', 'emulation_controls_smaller')
+          require('android/app/src/main/java/org/vita3k/emulator/Emulator.java', '[VS-TOUCH-EDITOR-BRIDGE11]', 'resizeSelectedControllerOverlayControl', 'resetSelectedControllerOverlayScale')
+          require('android/app/src/main/java/org/vita3k/emulator/ui/components/OverlayEditorPalette.kt', 'onGridChanged: ((Boolean) -> Unit)? = null', 'onScaleSelected: ((Float) -> Unit)? = null', 'onResetSelectedScale: (() -> Unit)? = null')
           require('android/app/src/main/res/values-pt-rBR/strings.xml', 'Reiniciar agora', 'Compilação assíncrona', 'O driver personalizado selecionado está carregado e ativo.', 'Tamanho padrão')
 
           framegen = subprocess.check_output(['git', 'hash-object', 'vita3k/renderer/src/vulkan/frame_generation.cpp'], text=True).strip()

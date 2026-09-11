@@ -1368,7 +1368,15 @@ jobs:
           )
           text = replace_once(text, '                PauseMenuTab.Hacks -> RuntimeHacksTab()\n', '', 'fake HACKs branch')
           start, end = function_span(text, 'private fun RuntimeHacksTab()')
+          # [VS-PAUSE-HACKS-CLEAN8] Remove the @Composable annotation that belongs
+          # to RuntimeHacksTab too. Leaving it behind creates an orphan annotation
+          # and breaks Kotlin parsing at EOF.
+          annotation_start = text.rfind('@Composable', 0, start)
+          if annotation_start >= 0 and text[annotation_start:start].strip() == '@Composable':
+              start = annotation_start
           text = text[:start] + text[end:]
+          if text.rstrip().endswith('@Composable'):
+              raise SystemExit('::error::orphan @Composable left in EmulationPauseMenu.kt')
           write(path, text)
           
           for strings_path, old_summary, new_summary, old_pending, new_pending in (
@@ -1613,6 +1621,9 @@ jobs:
               'RuntimeHacksTab()',
               'Icons.Default.Extension',
           )
+          pause_menu = data('android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/EmulationPauseMenu.kt')
+          if pause_menu.rstrip().endswith('@Composable'):
+              raise SystemExit('::error::FIX8 orphan @Composable in EmulationPauseMenu.kt')
           
           require(
               'android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/PerformanceHudView.java',

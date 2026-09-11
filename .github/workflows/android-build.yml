@@ -921,18 +921,18 @@ jobs:
           text = read(path)
           text = replace_once(
               text,
-              '              if (effective_size == 0 && emuenv.io.app_path == "PCSG00008")\n'
-              '                  effective_size = static_cast<SceSize>(sizeof(SceKernelThreadInfo));\n'
-              '              if (effective_size < sizeof(SceSize))',
-              '              const bool lord_tiny_info = emuenv.io.app_path == "PCSG00008"\n'
-              '                  && effective_size > 0 && effective_size < sizeof(SceSize);\n'
-              '              if (lord_tiny_info) {\n'
-              '                  LOG_WARN_ONCE("[VS-THREADINFO-LEGACY8] PCSG00008 accepting tiny ThreadInfo prefix size={}",\n'
-              '                      requested_size);\n'
-              '              }\n'
-              '              if (effective_size == 0 && emuenv.io.app_path == "PCSG00008")\n'
-              '                  effective_size = static_cast<SceSize>(sizeof(SceKernelThreadInfo));\n'
-              '              if (effective_size < sizeof(SceSize) && !lord_tiny_info)',
+              '    if (effective_size == 0 && emuenv.io.app_path == "PCSG00008")\n'
+              '        effective_size = static_cast<SceSize>(sizeof(SceKernelThreadInfo));\n'
+              '    if (effective_size < sizeof(SceSize))',
+              '    const bool lord_tiny_info = emuenv.io.app_path == "PCSG00008"\n'
+              '        && effective_size > 0 && effective_size < sizeof(SceSize);\n'
+              '    if (lord_tiny_info) {\n'
+              '        LOG_WARN_ONCE("[VS-THREADINFO-LEGACY8] PCSG00008 accepting tiny ThreadInfo prefix size={}",\n'
+              '            requested_size);\n'
+              '    }\n'
+              '    if (effective_size == 0 && emuenv.io.app_path == "PCSG00008")\n'
+              '        effective_size = static_cast<SceSize>(sizeof(SceKernelThreadInfo));\n'
+              '    if (effective_size < sizeof(SceSize) && !lord_tiny_info)',
               'Lord tiny ThreadInfo ABI',
           )
           text = replace_once(

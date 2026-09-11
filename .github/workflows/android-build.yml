@@ -772,7 +772,13 @@ jobs:
           )
           text = replace_once(
               text,
+              '    case MappingMethod::PageTable: {\n'
+              '        // add 4 KiB because we can as an easy way to prevent crashes due to memory accesses right after the memory boundary\n'
+              '        // also make sure later the mapped address is 4K aligned\n'
               '        vkutil::Buffer buffer(size + KiB(4));',
+              '    case MappingMethod::PageTable: {\n'
+              '        // add one host-page alignment window so the mapped address can be aligned safely.\n'
+              '        // [VS-MEMMAP-HOSTPAGE8] The guest-visible size remains unchanged.\n'
               '        vkutil::Buffer buffer(mapping_allocation_size);',
               'page-table allocation size',
           )

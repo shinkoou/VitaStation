@@ -3469,50 +3469,132 @@ jobs:
               '  }\n',
               'resize public API',
           )
-          # Geometry calls can carry different indentation/comments after the FIX7/FIX8/FIX9
-          # replay. Patch the function calls themselves instead of brittle whole-line anchors.
-          button_scaled = 'vsButtonWidth(legacyId, layoutBounds, globalScale * layout.scaleFor(legacyId))'
-          if button_scaled not in content:
-              content, count = re.subn(
-                  r'vsButtonWidth\(legacyId,\s*layoutBounds,\s*globalScale\)',
-                  button_scaled,
-                  content,
-                  count=1,
-              )
-              if count != 1:
-                  raise SystemExit(f'::error::FIX11 button width scale: expected one function call, found {count}')
-          button_height_scaled = 'vsButtonHeight(legacyId, layoutBounds, globalScale * layout.scaleFor(legacyId))'
-          if button_height_scaled not in content:
-              content, count = re.subn(
-                  r'vsButtonHeight\(legacyId,\s*layoutBounds,\s*globalScale\)',
-                  button_height_scaled,
-                  content,
-                  count=1,
-              )
-              if count != 1:
-                  raise SystemExit(f'::error::FIX11 button height scale: expected one function call, found {count}')
+          # [VS-TOUCH-SCALE-APPLY11] Apply per-control scale after each overlay rebuild.
+          # This deliberately does NOT rewrite the initializer call signatures. Earlier FIX
+          # layers can change those expressions, which made the old FIX11 anchor fragile.
+          def java_function_span(source, marker):
+              start = source.find(marker)
+              if start < 0:
+                  raise SystemExit(f'::error::FIX11 Java function marker missing: {marker}')
+              brace = source.find('{', start)
+              if brace < 0:
+                  raise SystemExit(f'::error::FIX11 Java opening brace missing: {marker}')
+              depth = 0
+              in_string = False
+              quote = ''
+              escape = False
+              for index in range(brace, len(source)):
+                  ch = source[index]
+                  if in_string:
+                      if escape:
+                          escape = False
+                      elif ch == '\\':
+                          escape = True
+                      elif ch == quote:
+                          in_string = False
+                      continue
+                  if ch in ('\"', "'"):
+                      in_string = True
+                      quote = ch
+                      continue
+                  if ch == '{':
+                      depth += 1
+                  elif ch == '}':
+                      depth -= 1
+                      if depth == 0:
+                          return start, index + 1
+              raise SystemExit(f'::error::FIX11 Java function end missing: {marker}')
 
-          dpad_scaled = 'vsDpadSize(layoutBounds, globalScale * layout.scaleFor(legacyId))'
-          if dpad_scaled not in content:
-              content, count = re.subn(
-                  r'vsDpadSize\(layoutBounds,\s*globalScale\)',
-                  dpad_scaled,
-                  content,
-                  count=1,
+          scale_helper = r'''  // [VS-TOUCH-SCALE-APPLY11] Persisted individual geometry scale.
+            private void applyIndividualControlScales()
+            {
+              if (mLayout == null)
+                return;
+          
+              for (InputOverlayDrawableButton button : overlayButtons) {
+                final float factor = mLayout.scaleFor(button.getLegacyId());
+                if (Math.abs(factor - 1.0f) > 0.001f) {
+                  button.setSize(
+                Math.max(1, Math.round(button.getWidth() * factor)),
+                Math.max(1, Math.round(button.getHeight() * factor)));
+                }
+              }
+          
+              for (InputOverlayDrawableDpad dpad : overlayDpads) {
+                final float factor = mLayout.scaleFor(dpad.getLegacyId());
+                if (Math.abs(factor - 1.0f) > 0.001f) {
+                  dpad.setSize(
+                Math.max(1, Math.round(dpad.getWidth() * factor)),
+                Math.max(1, Math.round(dpad.getHeight() * factor)));
+                }
+              }
+          
+              for (InputOverlayDrawableJoystick joystick : overlayJoysticks) {
+                final float factor = mLayout.scaleFor(joystick.getLegacyId());
+                if (Math.abs(factor - 1.0f) > 0.001f) {
+                  joystick.setSize(
+                Math.max(1, Math.round(joystick.getWidth() * factor)),
+                Math.max(1, Math.round(joystick.getHeight() * factor)));
+                }
+              }
+            }
+          
+          '''
+          refresh_marker = '  public void refreshControls()'
+          refresh_start, refresh_end = java_function_span(content, refresh_marker)
+          refresh_block = content[refresh_start:refresh_end]
+          if 'applyIndividualControlScales();' not in refresh_block:
+              closing = refresh_block.rfind('}')
+              if closing < 0:
+                  raise SystemExit('::error::FIX11 refreshControls closing brace missing')
+              refresh_block = (
+                  refresh_block[:closing]
+                  + '    applyIndividualControlScales(); // [VS-TOUCH-SCALE-APPLY11]\n'
+                  + refresh_block[closing:]
               )
-              if count != 1:
-                  raise SystemExit(f'::error::FIX11 dpad scale: expected one function call, found {count}')
+              content = content[:refresh_start] + refresh_block + content[refresh_end:]
 
-          joystick_scaled = 'vsJoystickSize(layoutBounds, globalScale * layout.scaleFor(legacyId))'
-          if joystick_scaled not in content:
-              content, count = re.subn(
-                  r'vsJoystickSize\(layoutBounds,\s*globalScale\)',
-                  joystick_scaled,
-                  content,
-                  count=1,
-              )
-              if count != 1:
-                  raise SystemExit(f'::error::FIX11 joystick scale: expected one function call, found {count}')
+          if '[VS-TOUCH-SCALE-APPLY11] Persisted individual geometry scale.' not in content:
+              refresh_start, _ = java_function_span(content, refresh_marker)
+              content = content[:refresh_start] + scale_helper + content[refresh_start:]
+          write(path, content)
+
+          # Joysticks did not have a public geometry resize API. Add one once, keeping
+          # the knob, hit bounds and original/recentering bounds coherent.
+          path = 'android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlayDrawableJoystick.java'
+          content = read(path)
+          if '[VS-TOUCH-JOYSTICK-RESIZE11]' not in content:
+              insert_at = content.find('  public int getTrackId()')
+              if insert_at < 0:
+                  raise SystemExit('::error::FIX11 joystick resize insertion marker missing')
+              joystick_resize = r'''  // [VS-TOUCH-JOYSTICK-RESIZE11] Runtime geometry for the per-control editor.
+            public void setSize(int width, int height)
+            {
+              final int oldWidth = Math.max(1, mWidth);
+              final int oldHeight = Math.max(1, mHeight);
+              final int innerWidth = Math.max(1, Math.round(
+            mPressedStateInnerBitmap.getBounds().width() * (width / (float) oldWidth)));
+              final int innerHeight = Math.max(1, Math.round(
+            mPressedStateInnerBitmap.getBounds().height() * (height / (float) oldHeight)));
+          
+              mWidth = Math.max(1, width);
+              mHeight = Math.max(1, height);
+              final Rect bounds = new Rect(
+            mControlPositionX,
+            mControlPositionY,
+            mControlPositionX + mWidth,
+            mControlPositionY + mHeight);
+              setBounds(bounds);
+              setVirtBounds(new Rect(bounds));
+              setOrigBounds(new Rect(bounds));
+              mBoundsBoxBitmap.setBounds(bounds);
+              mDefaultStateInnerBitmap.setBounds(0, 0, innerWidth, innerHeight);
+              mPressedStateInnerBitmap.setBounds(0, 0, innerWidth, innerHeight);
+              SetInnerBounds();
+            }
+          
+          '''
+              content = content[:insert_at] + joystick_resize + content[insert_at:]
           write(path, content)
           
           path = 'android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/OverlayLayoutEditorDialog.kt'
@@ -3743,7 +3825,8 @@ jobs:
           require('android/app/src/main/java/org/vita3k/emulator/ui/screens/AppsListScreen.kt', '[VS-UNIFORM-CARDS11]', '.height(286.dp)')
           require('android/app/src/main/java/org/vita3k/emulator/overlay/OverlayLayout.kt', '[VS-TOUCH-RESIZE11]', 'withScale', 'scaleFor')
           require('android/app/src/main/java/org/vita3k/emulator/overlay/OverlayStore.kt', '[VS-TOUCH-RESIZE11]', 'KEY_SCALE_SUFFIX')
-          require('android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java', '[VS-TOUCH-GRADE11]', '[VS-TOUCH-RESIZE11]', 'resizeSelectedControl')
+          require('android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java', '[VS-TOUCH-GRADE11]', '[VS-TOUCH-RESIZE11]', '[VS-TOUCH-SCALE-APPLY11]', 'resizeSelectedControl')
+          require('android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlayDrawableJoystick.java', '[VS-TOUCH-JOYSTICK-RESIZE11]', 'public void setSize(int width, int height)')
           require('android/app/src/main/java/org/vita3k/emulator/ui/components/OverlayEditorPalette.kt', 'onGridChanged', 'onScaleSelected', 'emulation_controls_smaller')
           require('android/app/src/main/res/values-pt-rBR/strings.xml', 'Reiniciar agora', 'Compilação assíncrona', 'O driver personalizado selecionado está carregado e ativo.', 'Tamanho padrão')
 

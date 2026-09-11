@@ -1,9 +1,9 @@
-# VitaStation Alpha 4 FIX10 TYPELESS HD
-# Replays the verified FIX8/FIX9 stack, then applies the title-scoped FIX10 Typeless HD delta.
-# Uncharted gets dual-layout 64->32 reinterpretation; Gintama sync, Double Buffer anchor
-# and frozen FrameGen remain protected. No Bootstrap.
+# VitaStation Alpha 4 FIX10-R2 UNCHARTED PHASE VIEW
+# Replays the verified FIX9 stack, then applies one title-scoped Uncharted Typeless phase-view delta.
+# FIX10-R2 recompiles and verifies the SPIR-V actually packaged in the APK.
+# No Bootstrap. Gintama sync and frozen FrameGen remain protected.
 
-name: VitaStation Android APK - Alpha 4 FIX10 TYPELESS HD
+name: VitaStation Android APK - Alpha 4 FIX10-R2 UNCHARTED PHASE VIEW
 
 "on":
   workflow_dispatch:
@@ -17,17 +17,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: vitastation-android-fix10-typeless-${{ github.ref }}
+  group: vitastation-android-fix10-r2-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   VCPKG_ROOT: /usr/local/share/vcpkg
   VITASTATION_SIGNING_CERT_SHA256: fc57542b62221ad0c0550d12b2791e4e40794e980c9f26a86d83250d67ed5d30
-  FIX10_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX10-TypelessHD-Uncharted-ProtectedGintama-StableFG-Signed.apk
+  FIX10R2_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX10-R2-Uncharted-PhaseView-ProtectedGintama-StableFG-Signed.apk
 
 jobs:
   android-build:
-    name: Build VitaStation v0.3.0 Alpha 4 FIX10 TYPELESS HD
+    name: Build VitaStation v0.3.0 Alpha 4 FIX10-R2 UNCHARTED PHASE VIEW
     runs-on: ubuntu-latest
 
     steps:
@@ -2492,135 +2492,282 @@ jobs:
           print('[VS-FIX9] Gintama sync + FrameGen preserved; Uncharted change hard-gated to PCSA00029')
           PY
 
-      - name: Apply FIX10 Uncharted mature Typeless 64-to-32 delta
+      - name: Apply FIX10-R2 Uncharted phase-view Typeless delta
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
           import subprocess
-
+          
+          
           def read(path):
               return Path(path).read_text(encoding='utf-8')
-
-          def write(path, content):
-              Path(path).write_text(content, encoding='utf-8')
-
-          def replace_once(content, old, new, label):
-              count = content.count(old)
+          
+          
+          def write(path, text):
+              Path(path).write_text(text, encoding='utf-8')
+          
+          
+          def replace_once(text, old, new, label):
+              count = text.count(old)
               if count != 1:
-                  raise SystemExit(f'::error::FIX10 {label}: expected one anchor, found {count}')
-              return content.replace(old, new, 1)
-
+                  raise SystemExit(f'::error::FIX10-R2 {label}: expected one anchor, found {count}')
+              return text.replace(old, new, 1)
+          
+          
           def git_hash(path):
               return subprocess.check_output(['git', 'hash-object', path], text=True).strip()
-
-          # Gintama's stable synchronization and FrameGen are immutable for this renderer delta.
+          
+          
           protected_before = {
               'gintama_sync': git_hash('vita3k/kernel/src/sync_primitives.cpp'),
               'framegen': git_hash('vita3k/renderer/src/vulkan/frame_generation.cpp'),
           }
-
-          # FIX10 version.
+          
           path = 'android/app/build.gradle'
-          content = read(path)
-          content = replace_once(content, 'versionCode = 50', 'versionCode = 51', 'versionCode')
-          content = replace_once(content, 'versionName = "0.3.0-alpha4-fix9"', 'versionName = "0.3.0-alpha4-fix10"', 'versionName')
-          write(path, content)
-
-          # Add an explicit mode. Mode 0 preserves the legacy VitaStation algorithm byte-for-byte
-          # for every non-Uncharted consumer. Mode 1 is packed word0/word1 interleave. Mode 2 is
-          # the +4-byte phase view where every output texel selects the same 32-bit half.
+          text = read(path)
+          text = replace_once(text, 'versionCode = 50', 'versionCode = 53', 'versionCode')
+          text = replace_once(text, 'versionName = "0.3.0-alpha4-fix9"', 'versionName = "0.3.0-alpha4-fix10-r2"', 'versionName')
+          write(path, text)
+          
           path = 'vita3k/renderer/include/renderer/vulkan/surface_cache.h'
-          content = read(path)
-          content = replace_once(
-              content,
-              '''    uint32_t ratio;\n    uint32_t start_word;\n};''',
-              '''    uint32_t ratio;\n    uint32_t start_word;\n    uint32_t mode; // [VS-UNCHARTED-TYPELESS-MODE10] 0 legacy, 1 interleave, 2 fixed half\n};''',
+          text = read(path)
+          text = replace_once(
+              text,
+              '    std::vector<CastedTexture> casted_textures;\n',
+              '    std::vector<CastedTexture> casted_textures;\n'
+              '    bool typeless_phase_view = false; // [VS-UNCHARTED-PHASE10R2] PCSA00029 +4 alias observed\n',
+              'phase-view state')
+          text = replace_once(
+              text,
+              '    uint32_t ratio;\n    uint32_t start_word;\n};',
+              '    uint32_t ratio;\n'
+              '    uint32_t start_word;\n'
+              '    uint32_t mode; // [VS-UNCHARTED-PHASE10R2] 0 legacy, 1 packed interleave, 2 fixed half\n'
+              '};',
               'reinterpret push mode')
-          write(path, content)
-
-          # Hybrid shader: keep the pre-FIX10 linear global-word path as mode 0, and expose
-          # the mature Vita3K-Plus consumer layouts only when the caller explicitly selects them.
-          path = 'vita3k/shaders-builtin/vulkan/surface_cast_reinterpret.comp'
-          content = read(path)
-          content = replace_once(
-              content,
-              '''    uint ratio;\n    uint start_word;\n} pc;''',
-              '''    uint ratio;\n    uint start_word;\n    uint mode; // [VS-UNCHARTED-TYPELESS-MODE10]\n} pc;''',
-              'shader push mode')
-          old_shader = '''    uint global_word = pc.start_word + dst.y * words_per_row + dst.x;\n    uint source_row = global_word / words_per_row;\n    uint word_in_row = global_word % words_per_row;\n    if (source_row >= pc.scaled_store_h) {\n        imageStore(out_img, ivec2(dst), uvec4(0u));\n        return;\n    }\n\n    uint source_x = word_in_row / pc.ratio;\n    uint lane = word_in_row % pc.ratio;\n    uvec2 raw = texelFetch(store_img, ivec2(source_x, source_row), 0).xy;\n    uint value = lane == 0u ? raw.x : raw.y;\n'''
-          new_shader = '''    uint source_row = dst.y;\n    uint source_x = 0u;\n    uint lane = 0u;\n\n    if (pc.mode == 1u) { // [VS-UNCHARTED-TYPELESS-MODE10] packed interleave\n        source_x = dst.x / pc.ratio;\n        lane = dst.x % pc.ratio;\n    } else if (pc.mode == 2u) { // +4-byte phase view: word[half] from every store texel\n        source_x = dst.x;\n        lane = pc.start_word;\n    } else {\n        // Legacy VitaStation behavior for every other title. Do not globalize FIX10.\n        uint global_word = pc.start_word + dst.y * words_per_row + dst.x;\n        source_row = global_word / words_per_row;\n        uint word_in_row = global_word % words_per_row;\n        source_x = word_in_row / pc.ratio;\n        lane = word_in_row % pc.ratio;\n    }\n\n    if (source_row >= pc.scaled_store_h || source_x >= pc.scaled_store_w || lane >= pc.ratio) {\n        imageStore(out_img, ivec2(dst), uvec4(0u));\n        return;\n    }\n\n    uvec2 raw = texelFetch(store_img, ivec2(source_x, source_row), 0).xy;\n    uint value = lane == 0u ? raw.x : raw.y;\n'''
-          content = replace_once(content, old_shader, new_shader, 'shader dual-mode body')
-          write(path, content)
-
-          # Select the mature layout using facts observed in the real PCSA00029 FIX9 log:
-          #  raw +0 : output width is 2x stored width -> packed/interleaved words.
-          #  raw +4 : output width equals stored width -> a separate phase view of word1.
-          # Anything that does not exactly match these shapes falls back to legacy mode 0.
+          write(path, text)
+          
           path = 'vita3k/renderer/src/vulkan/surface_cache.cpp'
-          content = read(path)
-          half_anchor = '''                const uint32_t half_index =\n                    sub_texel_byte / bytes_per_pixel_requested;\n'''
-          half_new = half_anchor + '''\n                uint32_t typeless_mode = 0u;\n                if (state.app_title_id == "PCSA00029") { // [VS-UNCHARTED-TYPELESS-MODE10]\n                    const bool packed_interleave =\n                        native_byte_offset == 0u\n                        && width == info.texture.width * ratio;\n                    const bool phase_half_view =\n                        native_byte_offset == 4u\n                        && width == info.texture.width\n                        && half_index == 1u;\n                    if (packed_interleave)\n                        typeless_mode = 1u;\n                    else if (phase_half_view)\n                        typeless_mode = 2u;\n                }\n'''
-          content = replace_once(content, half_anchor, half_new, 'Uncharted mode selection')
-          content = replace_once(
-              content,
-              '''                    .ratio = ratio,\n                    .start_word = half_index\n                };''',
-              '''                    .ratio = ratio,\n                    .start_word = half_index,\n                    .mode = typeless_mode\n                };''',
-              'push mode value')
-          content = replace_once(
-              content,
-              '''"[VS-TYPELESS-HD] raw_offset={} start_word={} ratio={} size={}x{} scale={} staging=1",\n                        native_byte_offset,\n                        half_index,\n                        ratio,\n                        width,\n                        height,\n                        state.res_multiplier);''',
-              '''"[VS-TYPELESS-HD] raw_offset={} start_word={} ratio={} mode={} size={}x{} scale={} staging=1",\n                        native_byte_offset,\n                        half_index,\n                        ratio,\n                        typeless_mode,\n                        width,\n                        height,\n                        state.res_multiplier);''',
-              'Typeless mode diagnostic')
-          write(path, content)
-
-          # Hard protection: this FIX10 step must not touch the proven Gintama sync or FrameGen.
+          text = read(path)
+          text = replace_once(
+              text,
+              '    info_added.data = color->data;\n    info_added.total_bytes = total_surface_size;',
+              '    info_added.data = color->data;\n'
+              '    info_added.typeless_phase_view = false; // [VS-UNCHARTED-PHASE10R2]\n'
+              '    info_added.total_bytes = total_surface_size;',
+              'phase-view reset')
+          
+          phase_anchor = '''    const uint32_t vs_uncharted_typeless_word9 =
+                  (vs_uncharted_typeless_origin9 && bytes_per_pixel_requested != 0)
+                      ? (guard_sub_texel_byte / bytes_per_pixel_requested)
+                      : 0u; // [VS-UNCHARTED-TYPELESS-CACHE9]
+          
+              const bool hd_typeless_candidate ='''
+          phase_new = '''    const uint32_t vs_uncharted_typeless_word9 =
+                  (vs_uncharted_typeless_origin9 && bytes_per_pixel_requested != 0)
+                      ? (guard_sub_texel_byte / bytes_per_pixel_requested)
+                      : 0u; // [VS-UNCHARTED-TYPELESS-CACHE9]
+          
+              if (vs_uncharted_typeless_origin9
+                  && vs_uncharted_typeless_word9 == 1u
+                  && !info.typeless_phase_view) {
+                  info.typeless_phase_view = true; // [VS-UNCHARTED-PHASE10R2]
+                  for (CastedTexture &old_cast : info.casted_textures)
+                      old_cast.source_generation = ~uint64_t{0};
+                  LOG_INFO("[VS-UNCHARTED-PHASE10R2] +4 phase view detected; invalidated cached word views");
+              }
+          
+              const bool hd_typeless_candidate ='''
+          text = replace_once(text, phase_anchor, phase_new, 'phase-view detection')
+          
+          half_anchor = '''                const uint32_t half_index =
+                              sub_texel_byte / bytes_per_pixel_requested;
+          '''
+          half_new = half_anchor + '''
+                          uint32_t typeless_mode = 0u;
+                          if (state.app_title_id == "PCSA00029") { // [VS-UNCHARTED-PHASE10R2]
+                              if (info.typeless_phase_view) {
+                                  typeless_mode = 2u;
+                              } else if (native_byte_offset == 0u
+                                  && width == info.texture.width * ratio) {
+                                  typeless_mode = 1u;
+                              }
+                          }
+          '''
+          text = replace_once(text, half_anchor, half_new, 'mature layout selection')
+          text = replace_once(
+              text,
+              '''                    .ratio = ratio,
+                              .start_word = half_index
+                          };''',
+              '''                    .ratio = ratio,
+                              .start_word = half_index,
+                              .mode = typeless_mode
+                          };''',
+              'push mode')
+          text = replace_once(
+              text,
+              '''"[VS-TYPELESS-HD] raw_offset={} start_word={} ratio={} size={}x{} scale={} staging=1",
+                                  native_byte_offset,
+                                  half_index,
+                                  ratio,
+                                  width,
+                                  height,
+                                  state.res_multiplier);''',
+              '''"[VS-TYPELESS-HD] raw_offset={} start_word={} ratio={} mode={} phase={} size={}x{} scale={} staging=1",
+                                  native_byte_offset,
+                                  half_index,
+                                  ratio,
+                                  typeless_mode,
+                                  info.typeless_phase_view,
+                                  width,
+                                  height,
+                                  state.res_multiplier);''',
+              'mode diagnostic')
+          write(path, text)
+          
+          path = 'vita3k/shaders-builtin/vulkan/surface_cast_reinterpret.comp'
+          text = read(path)
+          text = replace_once(
+              text,
+              '''    uint ratio;
+              uint start_word;
+          } pc;''',
+              '''    uint ratio;
+              uint start_word;
+              uint mode; // [VS-UNCHARTED-PHASE10R2]
+          } pc;''',
+              'shader push mode')
+          old_body = '''    uint global_word = pc.start_word + dst.y * words_per_row + dst.x;
+              uint source_row = global_word / words_per_row;
+              uint word_in_row = global_word % words_per_row;
+              if (source_row >= pc.scaled_store_h) {
+                  imageStore(out_img, ivec2(dst), uvec4(0u));
+                  return;
+              }
+          
+              uint source_x = word_in_row / pc.ratio;
+              uint lane = word_in_row % pc.ratio;
+              uvec2 raw = texelFetch(store_img, ivec2(source_x, source_row), 0).xy;
+              uint value = lane == 0u ? raw.x : raw.y;
+          '''
+          new_body = '''    uint source_row = dst.y;
+              uint source_x = 0u;
+              uint lane = 0u;
+          
+              if (pc.mode == 1u) {
+                  source_x = dst.x / pc.ratio;
+                  lane = dst.x % pc.ratio;
+              } else if (pc.mode == 2u) {
+                  source_x = dst.x / pc.ratio;
+                  lane = pc.start_word;
+              } else {
+                  // Legacy algorithm for every non-PCSA00029 consumer.
+                  uint global_word = pc.start_word + dst.y * words_per_row + dst.x;
+                  source_row = global_word / words_per_row;
+                  uint word_in_row = global_word % words_per_row;
+                  source_x = word_in_row / pc.ratio;
+                  lane = word_in_row % pc.ratio;
+              }
+          
+              if (source_row >= pc.scaled_store_h
+                  || source_x >= pc.scaled_store_w
+                  || lane >= pc.ratio) {
+                  imageStore(out_img, ivec2(dst), uvec4(0u));
+                  return;
+              }
+          
+              uvec2 raw = texelFetch(store_img, ivec2(source_x, source_row), 0).xy;
+              uint value = lane == 0u ? raw.x : raw.y;
+          '''
+          text = replace_once(text, old_body, new_body, 'mature shader body')
+          write(path, text)
+          
           if git_hash('vita3k/kernel/src/sync_primitives.cpp') != protected_before['gintama_sync']:
-              raise SystemExit('::error::FIX10 touched Gintama kernel sync baseline')
+              raise SystemExit('::error::FIX10-R2 touched Gintama kernel sync baseline')
           if git_hash('vita3k/renderer/src/vulkan/frame_generation.cpp') != protected_before['framegen']:
-              raise SystemExit('::error::FIX10 touched frozen FrameGen')
-
-          print('[VS-FIX10] Uncharted dual-layout Typeless delta applied')
-          print('[VS-FIX10] mode=1 packed interleave; mode=2 +4 fixed-half; non-PCSA00029 remains legacy')
+              raise SystemExit('::error::FIX10-R2 touched frozen FrameGen')
+          
+          print('[VS-FIX10-R2] PCSA00029 phase-view semantics applied')
+          print('[VS-FIX10-R2] FIX9 cache identity preserved; non-Uncharted shader mode remains legacy')
           PY
 
-      - name: FIX10 protected regression gates
+      - name: Compile and validate FIX10-R2 Typeless SPIR-V
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC='vita3k/shaders-builtin/vulkan/surface_cast_reinterpret.comp'
+          SPV='vita3k/shaders-builtin/vulkan/surface_cast_reinterpret.comp.spv'
+          OLD_SHA="$(sha256sum "$SPV" | awk '{print $1}')"
+          sudo apt-get update -y
+          sudo apt-get install -y glslang-tools
+          glslangValidator -V "$SRC" -o "$SPV"
+          test -s "$SPV"
+          if command -v spirv-val >/dev/null 2>&1; then
+            spirv-val "$SPV"
+          fi
+          NEW_SHA="$(sha256sum "$SPV" | awk '{print $1}')"
+          if [[ "$NEW_SHA" == "$OLD_SHA" ]]; then
+            echo '::error::FIX10-R2 SPIR-V did not change after compiling the new shader'
+            exit 1
+          fi
+          echo "FIX10R2_SPV_SHA256=$NEW_SHA" >> "$GITHUB_ENV"
+          echo "[VS-FIX10-R2] shader SPIR-V old=$OLD_SHA new=$NEW_SHA"
+
+      - name: FIX10-R2 protected regression gates
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          import os
           import subprocess
-
+          
+          
           def data(path):
               return Path(path).read_text(encoding='utf-8')
-
+          
+          
           def require(path, *markers):
-              content = data(path)
+              text = data(path)
               for marker in markers:
-                  if marker not in content:
-                      raise SystemExit(f'::error::FIX10 gate missing in {path}: {marker}')
-
-          require('android/app/build.gradle', 'versionCode = 51', 'versionName = "0.3.0-alpha4-fix10"')
-          require('vita3k/renderer/include/renderer/vulkan/surface_cache.h', '[VS-UNCHARTED-TYPELESS-CACHE9]', '[VS-UNCHARTED-TYPELESS-MODE10]', 'uint32_t mode;')
-          require('vita3k/shaders-builtin/vulkan/surface_cast_reinterpret.comp', '[VS-UNCHARTED-TYPELESS-MODE10]', 'pc.mode == 1u', 'pc.mode == 2u', 'Legacy VitaStation behavior')
-          require('vita3k/renderer/src/vulkan/surface_cache.cpp', '[VS-UNCHARTED-TYPELESS-ORIGIN9]', '[VS-UNCHARTED-TYPELESS-CACHE9]', '[VS-UNCHARTED-TYPELESS-MODE10]', 'state.app_title_id == "PCSA00029"', 'packed_interleave', 'phase_half_view', '.mode = typeless_mode')
-          require('vita3k/kernel/src/sync_primitives.cpp', '[VS-KERNEL-WAIT-DOMAIN7]', '[VS-KERNEL-OWNERSHIP-WAIT]', '[VS-LWMUTEX-WORKAREA]')
-
+                  if marker not in text:
+                      raise SystemExit(f'::error::FIX10-R2 missing marker in {path}: {marker}')
+          
+          
+          require('android/app/build.gradle', 'versionCode = 53', 'versionName = "0.3.0-alpha4-fix10-r2"')
+          require('vita3k/renderer/include/renderer/vulkan/surface_cache.h',
+                  '[VS-UNCHARTED-TYPELESS-CACHE9]', '[VS-UNCHARTED-PHASE10R2]',
+                  'typeless_phase_view', 'uint32_t mode;')
+          require('vita3k/renderer/src/vulkan/surface_cache.cpp',
+                  'state.app_title_id == "PCSA00029"', '[VS-UNCHARTED-PHASE10R2]',
+                  'info.typeless_phase_view', 'old_cast.source_generation = ~uint64_t{0}',
+                  '.mode = typeless_mode')
+          require('vita3k/shaders-builtin/vulkan/surface_cast_reinterpret.comp',
+                  '[VS-UNCHARTED-PHASE10R2]', 'source_x = dst.x / pc.ratio;',
+                  'lane = pc.start_word;', 'Legacy algorithm for every non-PCSA00029 consumer.')
+          require('vita3k/kernel/src/sync_primitives.cpp',
+                  '[VS-KERNEL-WAIT-DOMAIN7]', '[VS-KERNEL-OWNERSHIP-WAIT]', '[VS-LWMUTEX-WORKAREA]')
+          
+          spv = Path('vita3k/shaders-builtin/vulkan/surface_cast_reinterpret.comp.spv')
+          if not spv.is_file() or spv.stat().st_size < 256:
+              raise SystemExit('::error::FIX10-R2 compiled SPIR-V missing or too small')
+          got = subprocess.check_output(['sha256sum', str(spv)], text=True).split()[0]
+          wanted = os.environ.get('FIX10R2_SPV_SHA256', '')
+          if not wanted or got != wanted:
+              raise SystemExit(f'::error::FIX10-R2 SPIR-V hash mismatch wanted={wanted} got={got}')
+          
           framegen = subprocess.check_output(['git','hash-object','vita3k/renderer/src/vulkan/frame_generation.cpp'], text=True).strip()
-          wanted = '1e7cc634f3308566b6ea3d972b73c55086f8f781'
-          if framegen != wanted:
-              raise SystemExit(f'::error::FIX10 FrameGen drift expected={wanted} actual={framegen}')
-
-          # Bootstrap is permanently forbidden from the active build route.
+          if framegen != '1e7cc634f3308566b6ea3d972b73c55086f8f781':
+              raise SystemExit(f'::error::FIX10-R2 FrameGen drift actual={framegen}')
+          
           workflow = data('.github/workflows/android-build.yml')
-          forbidden_bootstrap = 'vitastation-' + 'bootstrap.yml'
-          if forbidden_bootstrap in workflow:
-              raise SystemExit('::error::FIX10 forbidden Bootstrap workflow reference found in active workflow')
-
-          print('[VS-FIX10] protected regression gates passed')
-          print('[VS-FIX10] Gintama sync + FrameGen preserved; Uncharted dual-mode path remains PCSA00029-only')
+          if 'vitastation-' + 'bootstrap.yml' in workflow:
+              raise SystemExit('::error::FIX10-R2 forbidden Bootstrap reference')
+          
+          print('[VS-FIX10-R2] source/SPIR-V/protection gates passed')
           PY
 
       - name: Set up Java 17
@@ -2679,11 +2826,27 @@ jobs:
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build signed VitaStation FIX9 APK
+      - name: Build signed VitaStation FIX10-R2 APK
         shell: bash
         run: |
           set -euo pipefail
           bash ./.ci/build-android.sh artifacts/vitastation-android
+
+      - name: Verify FIX10-R2 shader is actually packaged in APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK='artifacts/vitastation-android/app.apk'
+          TMP_SPV="$RUNNER_TEMP/fix10r2-packaged-reinterpret.spv"
+          test -s "$APK"
+          unzip -p "$APK" 'assets/shaders-builtin/vulkan/surface_cast_reinterpret.comp.spv' > "$TMP_SPV"
+          test -s "$TMP_SPV"
+          APK_SHA="$(sha256sum "$TMP_SPV" | awk '{print $1}')"
+          if [[ "$APK_SHA" != "$FIX10R2_SPV_SHA256" ]]; then
+            echo "::error::APK contains wrong Typeless SPIR-V expected=$FIX10R2_SPV_SHA256 actual=$APK_SHA"
+            exit 1
+          fi
+          echo "[VS-FIX10-R2] APK contains verified Typeless SPIR-V $APK_SHA"
 
       - name: Verify permanent APK signature and frozen FrameGen
         shell: bash
@@ -2710,27 +2873,27 @@ jobs:
           wanted = '1e7cc634f3308566b6ea3d972b73c55086f8f781'
           if got != wanted:
               raise SystemExit(f'::error::FrameGen drift expected={wanted} actual={got}')
-          print(f'[VS-FIX9] permanent signing certificate verified: {actual}')
-          print('[VS-FIX9] FrameGen remained byte-identical')
+          print(f'[VS-FIX10-R2] permanent signing certificate verified: {actual}')
+          print('[VS-FIX10-R2] FrameGen remained byte-identical')
           PY
 
-      - name: Rename and hash FIX9 APK
+      - name: Rename and hash FIX10-R2 APK
         shell: bash
         run: |
           set -euo pipefail
           SRC='artifacts/vitastation-android/app.apk'
-          DST="artifacts/vitastation-android/$FIX10_APK_NAME"
+          DST="artifacts/vitastation-android/$FIX10R2_APK_NAME"
           test -s "$SRC"
           mv "$SRC" "$DST"
-          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX10_APK_NAME.sha256"
+          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX10R2_APK_NAME.sha256"
           ls -lh "$DST"
 
-      - name: Upload VitaStation FIX9 APK
+      - name: Upload VitaStation FIX10-R2 APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.3.0-Alpha4-FIX9-Protected-Android-Signed
+          name: VitaStation-v0.3.0-Alpha4-FIX10-R2-Uncharted-PhaseView-Android-Signed
           path: |
-            artifacts/vitastation-android/${{ env.FIX10_APK_NAME }}
-            artifacts/vitastation-android/${{ env.FIX10_APK_NAME }}.sha256
+            artifacts/vitastation-android/${{ env.FIX10R2_APK_NAME }}
+            artifacts/vitastation-android/${{ env.FIX10R2_APK_NAME }}.sha256
           if-no-files-found: error
           retention-days: 30

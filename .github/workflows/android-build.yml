@@ -2841,6 +2841,8 @@ jobs:
           # -----------------------------------------------------------------------------
           path = 'vita3k/renderer/include/renderer/vulkan/surface_cache.h'
           content = read(path)
+          if '#include <map>\n' not in content:
+              content = replace_once(content, '#include <optional>\n', '#include <map>\n#include <optional>\n', 'surface phase map include')
           content = replace_once(
               content,
               '    ColorSurfaceCacheInfo *last_written_surface = nullptr;\n',
@@ -2872,11 +2874,11 @@ jobs:
           )
           content = replace_once(
               content,
-              '                info.typeless_phase_view = true; // [VS-UNCHARTED-PHASE10R2]\n'
-              '                for (CastedTexture &old_cast : info.casted_textures)',
-              '                info.typeless_phase_view = true; // [VS-UNCHARTED-PHASE10R2]\n'
-              '                uncharted_phase_memory[ite->first] = true; // [VS-UNCHARTED-PHASE11-PERSIST]\n'
-              '                for (CastedTexture &old_cast : info.casted_textures)',
+              '        info.typeless_phase_view = true; // [VS-UNCHARTED-PHASE10R2]\n'
+              '        for (CastedTexture &old_cast : info.casted_textures)',
+              '        info.typeless_phase_view = true; // [VS-UNCHARTED-PHASE10R2]\n'
+              '        uncharted_phase_memory[ite->first] = true; // [VS-UNCHARTED-PHASE11-PERSIST]\n'
+              '        for (CastedTexture &old_cast : info.casted_textures)',
               'Uncharted remember phase state',
           )
           write(path, content)
@@ -2914,7 +2916,7 @@ jobs:
           content = read(path)
           content = replace_once(
               content,
-              '    LOG_INFO("[VS-TEXADDR] axis=U safe=1 type={} mode={} supported={} old_u={} old_v={}",\n'
+              '    LOG_DEBUG("[VS-TEXADDR] axis=U safe=1 type={} mode={} supported={} old_u={} old_v={}",\n'
               '        log_hex(texture_type), static_cast<uint32_t>(mode), supported,\n'
               '        static_cast<uint32_t>(texture->uaddr_mode), static_cast<uint32_t>(texture->vaddr_mode));',
               '    static thread_local uint64_t vs_texaddr_u11 = 0;\n'
@@ -2926,7 +2928,7 @@ jobs:
           )
           content = replace_once(
               content,
-              '    LOG_INFO("[VS-TEXADDR] axis=V safe=1 type={} mode={} supported={} old_u={} old_v={}",\n'
+              '    LOG_DEBUG("[VS-TEXADDR] axis=V safe=1 type={} mode={} supported={} old_u={} old_v={}",\n'
               '        log_hex(texture_type), static_cast<uint32_t>(mode), supported,\n'
               '        static_cast<uint32_t>(texture->uaddr_mode), static_cast<uint32_t>(texture->vaddr_mode));',
               '    static thread_local uint64_t vs_texaddr_v11 = 0;\n'
@@ -2940,43 +2942,34 @@ jobs:
           
           path = 'vita3k/mem/src/mem.cpp'
           content = read(path)
+          # FIX8 already hardened unknown external-mapping removal and protect-tree iteration.
+          # FIX11 keeps that behavior and adds explicit markers plus low-volume LORD lifetime data.
           content = replace_once(
               content,
-              '    // remove all protections on this range\n'
-              '    unprotect_inner(mem, mapping.address, mapping.size);',
-              '    // [VS-LORD-MEMMAP11] Compact lifetime diagnostic for the crash that occurs\n'
-              '    // while LORD rebuilds character resources near gameplay entry.\n'
-              '    static thread_local uint64_t vs_unmap_diag11 = 0;\n'
+              'LOG_ERROR("[VS-MEMMAP-UNMAP8] missing mapping host={} requested_size={}",\n'
+              '      log_hex(host_address), size);',
+              'LOG_WARN("[VS-MEMMAP-HARDEN11] missing mapping host={} requested_size={}",\n'
+              '      log_hex(host_address), size);',
+              'external mapping existing hardening marker',
+          )
+          content = replace_once(
+              content,
+              '    // Remove only overlapping guest protection nodes. Never dereference end().\n',
+              '    // [VS-MEMMAP-HARDEN11] FIX8 safe iteration retained: never dereference end().\n'
+              '    // Remove only overlapping guest protection nodes. Never dereference end().\n',
+              'protect-tree existing hardening marker',
+          )
+          content = replace_once(
+              content,
+              '    LOG_DEBUG("[VS-MEMMAP-UNMAP8] unmapped guest={} size={} host={}",\n'
+              '        log_hex(mapping.address), mapping.size, log_hex(host_address));',
+              '    static thread_local uint64_t vs_unmap_diag11 = 0; // [VS-LORD-MEMMAP11]\n'
               '    if (((++vs_unmap_diag11 & 0x3Fu) == 1u))\n'
               '        LOG_DEBUG("[VS-LORD-MEMMAP11] host={} guest={} size={}",\n'
-              '            log_hex(addr_value), log_hex(mapping.address), mapping.size);\n\n'
-              '    // remove all protections on this range\n'
-              '    unprotect_inner(mem, mapping.address, mapping.size);',
+              '            log_hex(host_address), log_hex(mapping.address), mapping.size);\n\n'
+              '    LOG_DEBUG("[VS-MEMMAP-UNMAP8] unmapped guest={} size={} host={}",\n'
+              '        log_hex(mapping.address), mapping.size, log_hex(host_address));',
               'LORD mapping diagnostic',
-          )
-          content = replace_once(
-              content,
-              '        auto it = mem.external_mapping.find(addr_value);\n'
-              '        assert(it != mem.external_mapping.end());\n\n'
-              '        mapping = it->second;\n'
-              '        mem.external_mapping.erase(it);',
-              '        auto it = mem.external_mapping.find(addr_value);\n'
-              '        if (it == mem.external_mapping.end()) {\n'
-              '            LOG_WARN("[VS-MEMMAP-HARDEN11] ignoring removal of unknown external mapping host={}", log_hex(addr_value));\n'
-              '            return;\n'
-              '        }\n\n'
-              '        mapping = it->second;\n'
-              '        mem.external_mapping.erase(it);',
-              'external mapping missing-entry hardening',
-          )
-          content = replace_once(
-              content,
-              '        auto prot_it = mem.protect_tree.lower_bound(mapping.address);\n'
-              '        if (prot_it->first + prot_it->second.size <= mapping.address) {',
-              '        auto prot_it = mem.protect_tree.lower_bound(mapping.address);\n'
-              '        // [VS-MEMMAP-HARDEN11] lower_bound may legitimately return end().\n'
-              '        if (prot_it != mem.protect_tree.end() && prot_it->first + prot_it->second.size <= mapping.address) {',
-              'protect-tree end hardening',
           )
           write(path, content)
           

@@ -3469,26 +3469,50 @@ jobs:
               '  }\n',
               'resize public API',
           )
-          content = replace_once(
-              content,
-              '            vsButtonWidth(legacyId, layoutBounds, globalScale),\n'
-              '            vsButtonHeight(legacyId, layoutBounds, globalScale));',
-              '            vsButtonWidth(legacyId, layoutBounds, globalScale * layout.scaleFor(legacyId)),\n'
-              '            vsButtonHeight(legacyId, layoutBounds, globalScale * layout.scaleFor(legacyId)));',
-              'button individual geometry scale',
-          )
-          content = replace_once(
-              content,
-              '    final int dpadSize = vsDpadSize(layoutBounds, globalScale);',
-              '    final int dpadSize = vsDpadSize(layoutBounds, globalScale * layout.scaleFor(legacyId));',
-              'dpad individual geometry scale',
-          )
-          content = replace_once(
-              content,
-              '    int outerSize = vsJoystickSize(layoutBounds, globalScale);',
-              '    int outerSize = vsJoystickSize(layoutBounds, globalScale * layout.scaleFor(legacyId));',
-              'joystick individual geometry scale',
-          )
+          # Geometry calls can carry different indentation/comments after the FIX7/FIX8/FIX9
+          # replay. Patch the function calls themselves instead of brittle whole-line anchors.
+          button_scaled = 'vsButtonWidth(legacyId, layoutBounds, globalScale * layout.scaleFor(legacyId))'
+          if button_scaled not in content:
+              content, count = re.subn(
+                  r'vsButtonWidth\(legacyId,\s*layoutBounds,\s*globalScale\)',
+                  button_scaled,
+                  content,
+                  count=1,
+              )
+              if count != 1:
+                  raise SystemExit(f'::error::FIX11 button width scale: expected one function call, found {count}')
+          button_height_scaled = 'vsButtonHeight(legacyId, layoutBounds, globalScale * layout.scaleFor(legacyId))'
+          if button_height_scaled not in content:
+              content, count = re.subn(
+                  r'vsButtonHeight\(legacyId,\s*layoutBounds,\s*globalScale\)',
+                  button_height_scaled,
+                  content,
+                  count=1,
+              )
+              if count != 1:
+                  raise SystemExit(f'::error::FIX11 button height scale: expected one function call, found {count}')
+
+          dpad_scaled = 'vsDpadSize(layoutBounds, globalScale * layout.scaleFor(legacyId))'
+          if dpad_scaled not in content:
+              content, count = re.subn(
+                  r'vsDpadSize\(layoutBounds,\s*globalScale\)',
+                  dpad_scaled,
+                  content,
+                  count=1,
+              )
+              if count != 1:
+                  raise SystemExit(f'::error::FIX11 dpad scale: expected one function call, found {count}')
+
+          joystick_scaled = 'vsJoystickSize(layoutBounds, globalScale * layout.scaleFor(legacyId))'
+          if joystick_scaled not in content:
+              content, count = re.subn(
+                  r'vsJoystickSize\(layoutBounds,\s*globalScale\)',
+                  joystick_scaled,
+                  content,
+                  count=1,
+              )
+              if count != 1:
+                  raise SystemExit(f'::error::FIX11 joystick scale: expected one function call, found {count}')
           write(path, content)
           
           path = 'android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/OverlayLayoutEditorDialog.kt'

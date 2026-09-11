@@ -2469,8 +2469,15 @@ jobs:
           require('android/app/src/main/res/values/strings.xml', 'Accelerate the game', 'Show Accelerate button')
           require('android/app/src/main/res/values-pt-rBR/strings.xml', 'Acelerar o jogo', 'Mostrar botão Acelerar')
           settings = data('android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsSections.kt')
-          if settings.count('title = stringResource(R.string.settings_gpu_fps_hack)') != 1:
-              raise SystemExit('::error::FIX9 FPS Hack must appear exactly once, only in HACKs')
+          # One FPS-Hack control is expected in HACKs. Its help entry legitimately repeats
+          # the title resource, so counting the title string produces a false failure.
+          fps_toggle_count = settings.count('checked = cfg.fpsHack')
+          if fps_toggle_count != 1:
+              raise SystemExit(f'::error::FIX9 FPS Hack toggle count expected=1 actual={fps_toggle_count}')
+          hacks_pos = settings.find('private fun HacksSettingsSection(')
+          fps_pos = settings.find('checked = cfg.fpsHack')
+          if hacks_pos < 0 or fps_pos < hacks_pos:
+              raise SystemExit('::error::FIX9 FPS Hack toggle is not inside HACKs')
           for name in ('button_cross.png','button_circle.png','button_square.png','button_triangle.png','button_accelerate.png'):
               p = Path('android/app/src/main/res/drawable') / name
               if not p.is_file() or p.stat().st_size < 4096:

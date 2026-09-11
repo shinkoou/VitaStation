@@ -2981,9 +2981,11 @@ jobs:
           content = read(path)
           content = replace_once(
               content,
+              '    Card(\n'
               '        modifier = Modifier\n'
               '            .fillMaxWidth()\n'
               '            .combinedClickable(',
+              '    Card(\n'
               '        modifier = Modifier\n'
               '            .fillMaxWidth()\n'
               '            .height(286.dp) // [VS-UNIFORM-CARDS11]\n'

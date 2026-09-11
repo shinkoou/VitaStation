@@ -1,9 +1,10 @@
-# VitaStation Alpha 4 FIX7-R3
-# Builds from the exact successful FIX7-R2 patch baseline, then applies only the
-# Fractional-HD Surface Safety + Eden attribution delta. No Bootstrap.
-# FrameGen and FIX4 HD typeless compute staging remain frozen.
+# VitaStation Alpha 4 FIX8 MEGA
+# Builds from the exact successful FIX7-R2 + green FIX7-R3 behavior, then applies one
+# consolidated Mega Update: memory-map safety, Uncharted typeless isolation, Lord ABI
+# compatibility, original-size PNG touch, real HACK controls, UI cleanup and telemetry.
+# No Bootstrap. Gintama sync/Fractional-HD and FrameGen remain protected baselines.
 
-name: VitaStation Android APK - Alpha 4 FIX7-R3
+name: VitaStation Android APK - Alpha 4 FIX8 MEGA
 
 "on":
   workflow_dispatch:
@@ -17,17 +18,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: vitastation-android-fix7-r3-${{ github.ref }}
+  group: vitastation-android-fix8-mega-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   VCPKG_ROOT: /usr/local/share/vcpkg
   VITASTATION_SIGNING_CERT_SHA256: fc57542b62221ad0c0550d12b2791e4e40794e980c9f26a86d83250d67ed5d30
-  FIX7_R3_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX7-R3-FractionalHD-Eden-StableFG-Signed.apk
+  FIX8_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX8-Mega-MemMap-Typeless-Lord-Touch-SkipCutscene-StableFG-Signed.apk
 
 jobs:
   android-build:
-    name: Build VitaStation v0.3.0 Alpha 4 FIX7-R3
+    name: Build VitaStation v0.3.0 Alpha 4 FIX8 MEGA
     runs-on: ubuntu-latest
 
     steps:
@@ -375,6 +376,1272 @@ jobs:
           print('[VS-FIX7-R3] FrameGen and FIX4 typeless staging header remain byte-identical')
           PY
 
+      - name: Apply FIX8 Mega Update
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          
+          def read(path):
+              return Path(path).read_text(encoding='utf-8')
+          
+          def write(path, text):
+              Path(path).write_text(text, encoding='utf-8')
+          
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'::error::FIX8 {label}: expected one anchor, found {count}')
+              return text.replace(old, new, 1)
+          
+          def replace_first(text, old, new, label):
+              if old not in text:
+                  raise SystemExit(f'::error::FIX8 {label}: anchor not found')
+              return text.replace(old, new, 1)
+          
+          def function_span(text, marker):
+              start = text.find(marker)
+              if start < 0:
+                  raise SystemExit(f'::error::FIX8 function marker missing: {marker}')
+              brace = text.find('{', start)
+              if brace < 0:
+                  raise SystemExit(f'::error::FIX8 opening brace missing: {marker}')
+              depth = 0
+              in_string = False
+              quote = ''
+              escape = False
+              for index in range(brace, len(text)):
+                  ch = text[index]
+                  if in_string:
+                      if escape:
+                          escape = False
+                      elif ch == '\\':
+                          escape = True
+                      elif ch == quote:
+                          in_string = False
+                      continue
+                  if ch in ('"', "'"):
+                      in_string = True
+                      quote = ch
+                      continue
+                  if ch == '{':
+                      depth += 1
+                  elif ch == '}':
+                      depth -= 1
+                      if depth == 0:
+                          return start, index + 1
+              raise SystemExit(f'::error::FIX8 closing brace missing: {marker}')
+          
+          def replace_function(text, marker, new_body):
+              start, end = function_span(text, marker)
+              return text[:start] + new_body + text[end:]
+          
+          # ---------------------------------------------------------------
+          # Version identity.
+          # ---------------------------------------------------------------
+          path = 'android/app/build.gradle'
+          text = read(path)
+          text = replace_once(text, 'versionCode = 48', 'versionCode = 49', 'versionCode')
+          text = replace_once(
+              text,
+              'versionName = "0.3.0-alpha4-fix7-r3"',
+              'versionName = "0.3.0-alpha4-fix8"',
+              'versionName',
+          )
+          write(path, text)
+          
+          # ---------------------------------------------------------------
+          # Memory Mapping FIX8
+          # Double Buffer does not enable MemState::use_page_table, so the
+          # Gintama-stable Double Buffer path remains outside these changes.
+          # ---------------------------------------------------------------
+          path = 'vita3k/mem/src/mem.cpp'
+          text = read(path)
+          
+          new_unprotect = r'''// [VS-MEMMAP-PROTECT8] Protect one translated host run.
+          static void vs_apply_host_protection(MemState &state, uint8_t *target, const size_t size, const MemPerm perm) {
+              if (!target || size == 0)
+                  return;
+          
+              uint8_t *aligned_start = reinterpret_cast<uint8_t *>(
+                  align_down(reinterpret_cast<uintptr_t>(target), state.host_page_size));
+              uint8_t *aligned_end = reinterpret_cast<uint8_t *>(
+                  align(reinterpret_cast<uintptr_t>(target + size), state.host_page_size));
+              const size_t aligned_size = static_cast<size_t>(aligned_end - aligned_start);
+          
+          #ifdef _WIN32
+              DWORD old_protect = 0;
+              const DWORD host_perm = (perm == MemPerm::None)
+                  ? PAGE_NOACCESS
+                  : ((perm == MemPerm::ReadOnly) ? PAGE_READONLY : PAGE_READWRITE);
+              const BOOL ret = VirtualProtect(aligned_start, aligned_size, host_perm, &old_protect);
+              LOG_CRITICAL_IF(!ret, "VirtualProtect failed: {}", get_error_msg());
+          #else
+              const int host_perm = (perm == MemPerm::None)
+                  ? PROT_NONE
+                  : ((perm == MemPerm::ReadOnly) ? PROT_READ : (PROT_READ | PROT_WRITE));
+              const int ret = mprotect(aligned_start, aligned_size, host_perm);
+              LOG_CRITICAL_IF(ret == -1, "mprotect failed: {}", get_error_msg());
+          #endif
+          }
+          
+          // [VS-MEMMAP-PROTECT8] A guest range may cross separate translated buffers.
+          // Group pages that share one translation base before changing host protection.
+          static void vs_apply_guest_protection(MemState &state, Address addr, const uint32_t size, const MemPerm perm) {
+              if (size == 0)
+                  return;
+          
+              if (!state.use_page_table) {
+                  vs_apply_host_protection(state, &state.memory[addr], size, perm);
+                  return;
+              }
+          
+              uint64_t cursor = addr;
+              const uint64_t guest_end = static_cast<uint64_t>(addr) + size;
+              while (cursor < guest_end) {
+                  const uint64_t page_index = cursor / STANDARD_PAGE_SIZE;
+                  uint8_t *const translation_base = state.page_table[page_index];
+                  uint64_t run_end = std::min<uint64_t>((page_index + 1) * STANDARD_PAGE_SIZE, guest_end);
+                  while (run_end < guest_end) {
+            const uint64_t next_page = run_end / STANDARD_PAGE_SIZE;
+            if (state.page_table[next_page] != translation_base)
+                break;
+            run_end = std::min<uint64_t>(run_end + STANDARD_PAGE_SIZE, guest_end);
+                  }
+                  vs_apply_host_protection(
+            state,
+            translation_base + cursor,
+            static_cast<size_t>(run_end - cursor),
+            perm);
+                  cursor = run_end;
+              }
+          }
+          
+          void unprotect_inner(MemState &state, Address addr, uint32_t size) {
+              vs_apply_guest_protection(state, addr, size, MemPerm::ReadWrite);
+          }'''
+          text = replace_function(text, 'void unprotect_inner(', new_unprotect)
+          
+          new_protect = r'''void protect_inner(MemState &state, Address addr, uint32_t size, const MemPerm perm) {
+              vs_apply_guest_protection(state, addr, size, perm);
+          }'''
+          text = replace_function(text, 'void protect_inner(', new_protect)
+          
+          new_add_mapping = r'''void add_external_mapping(MemState &mem, Address addr, uint32_t size, uint8_t *addr_ptr) {
+              if (!mem.use_page_table)
+                  return;
+              if ((size & (STANDARD_PAGE_SIZE - 1)) != 0 || addr_ptr == nullptr) {
+                  LOG_ERROR("[VS-MEMMAP-HOSTPAGE8] invalid external mapping guest={} size={}", log_hex(addr), size);
+                  return;
+              }
+          
+              const uint32_t first_page = addr / STANDARD_PAGE_SIZE;
+              const uint32_t page_count = size / STANDARD_PAGE_SIZE;
+              uint8_t *const page_table_entry = addr_ptr - addr;
+              uint8_t *const original_address = &mem.memory[addr];
+          
+              // Copy while all page-table entries still point to original Vita memory.
+              for (uint32_t block = 0; block < page_count; ++block) {
+                  memcpy(
+            addr_ptr + static_cast<size_t>(block) * STANDARD_PAGE_SIZE,
+            original_address + static_cast<size_t>(block) * STANDARD_PAGE_SIZE,
+            STANDARD_PAGE_SIZE);
+              }
+          
+              // Protect original backing BEFORE changing translations. The old code changed
+              // every entry and temporarily restored only page zero, which is unsafe once a
+              // range spans translated host runs or a 16 KiB Android host page.
+              protect_inner(mem, addr, size, MemPerm::None);
+              for (uint32_t block = 0; block < page_count; ++block)
+                  mem.page_table[first_page + block] = page_table_entry;
+          
+              const uint64_t host_address = std::bit_cast<uint64_t>(addr_ptr);
+              {
+                  const std::unique_lock<std::mutex> lock(mem.protect_mutex);
+                  mem.external_mapping[host_address] = { addr, size };
+              }
+              LOG_DEBUG("[VS-MEMMAP-HOSTPAGE8] map guest={} size={} host={} host_page={}",
+                  log_hex(addr), size, log_hex(host_address), mem.host_page_size);
+          }'''
+          text = replace_function(text, 'void add_external_mapping(', new_add_mapping)
+          
+          new_remove_mapping = r'''void remove_external_mapping(MemState &mem, uint8_t *addr_ptr, uint32_t size) {
+              const uint64_t host_address = std::bit_cast<uint64_t>(addr_ptr);
+              MemExternalMapping mapping{};
+          
+              if (mem.use_page_table) {
+                  const std::unique_lock<std::mutex> lock(mem.protect_mutex);
+                  const auto it = mem.external_mapping.find(host_address);
+                  if (it == mem.external_mapping.end()) {
+            LOG_ERROR("[VS-MEMMAP-UNMAP8] missing mapping host={} requested_size={}",
+                log_hex(host_address), size);
+            return;
+                  }
+                  mapping = it->second;
+                  mem.external_mapping.erase(it);
+              } else {
+                  mapping.address = static_cast<Address>(addr_ptr - mem.memory.get());
+                  mapping.size = size;
+              }
+          
+              // Unprotect the current translated range first.
+              unprotect_inner(mem, mapping.address, mapping.size);
+          
+              // Remove only overlapping guest protection nodes. Never dereference end().
+              {
+                  const std::unique_lock<std::mutex> lock(mem.protect_mutex);
+                  const uint64_t map_begin = mapping.address;
+                  const uint64_t map_end = map_begin + mapping.size;
+                  for (auto it = mem.protect_tree.begin(); it != mem.protect_tree.end();) {
+            const uint64_t segment_begin = it->first;
+            const uint64_t segment_end = segment_begin + it->second.size;
+            if (segment_begin < map_end && segment_end > map_begin)
+                it = mem.protect_tree.erase(it);
+            else
+                ++it;
+                  }
+              }
+          
+              if (mem.use_page_table) {
+                  const uint32_t first_page = mapping.address / STANDARD_PAGE_SIZE;
+                  const uint32_t page_count = mapping.size / STANDARD_PAGE_SIZE;
+          
+                  // Restore the whole translation, not only page zero.
+                  for (uint32_t block = 0; block < page_count; ++block)
+            mem.page_table[first_page + block] = mem.memory.get();
+          
+                  unprotect_inner(mem, mapping.address, mapping.size);
+                  for (uint32_t block = 0; block < page_count; ++block) {
+            memcpy(
+                &mem.memory[mapping.address] + static_cast<size_t>(block) * STANDARD_PAGE_SIZE,
+                addr_ptr + static_cast<size_t>(block) * STANDARD_PAGE_SIZE,
+                STANDARD_PAGE_SIZE);
+                  }
+              }
+          
+              LOG_DEBUG("[VS-MEMMAP-UNMAP8] unmapped guest={} size={} host={}",
+                  log_hex(mapping.address), mapping.size, log_hex(host_address));
+          }'''
+          text = replace_function(text, 'void remove_external_mapping(', new_remove_mapping)
+          write(path, text)
+          
+          path = 'vita3k/renderer/include/renderer/vulkan/types.h'
+          text = read(path)
+          text = replace_once(
+              text,
+              '    uint32_t size;\n'
+              '    uint64_t buffer_address;',
+              '    uint32_t size;\n'
+              '    uint32_t buffer_offset; // [VS-MEMMAP-BUFFER-OFFSET8] Vulkan binding offset inside aligned host buffer\n'
+              '    uint64_t buffer_address;',
+              'mapped-memory buffer offset field',
+          )
+          write(path, text)
+
+          path = 'vita3k/renderer/src/vulkan/renderer.cpp'
+          text = read(path)
+          text = replace_once(
+              text,
+              '#include <sys/mman.h>\n',
+              '#include <sys/mman.h>\n#include <unistd.h> // [VS-MEMMAP-FD-OWNERSHIP8] dup imported AHB fd\n',
+              'native fd ownership include',
+          )
+          text = replace_once(
+              text,
+              '    constexpr vk::BufferUsageFlags mapped_memory_flags = vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eTransferDst;\n',
+              '    constexpr vk::BufferUsageFlags mapped_memory_flags = vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eTransferDst;\n'
+              '    // [VS-MEMMAP-HOSTPAGE8] Map on the real Android host-page boundary.\n'
+              '    const uint64_t mapping_alignment = std::max<uint64_t>(KiB(4), mem.host_page_size);\n'
+              '    const uint64_t mapping_allocation_size = static_cast<uint64_t>(size) + mapping_alignment;\n',
+              'mapping alignment constants',
+          )
+          text = replace_once(
+              text,
+              '            .width = static_cast<uint32_t>(size + KiB(4)),',
+              '            .width = static_cast<uint32_t>(mapping_allocation_size),',
+              'native AHB size',
+          )
+          text = replace_once(
+              text,
+              '                vk::MemoryAllocateInfo{\n'
+              '                    .allocationSize = size + KiB(4),\n'
+              '                    .memoryTypeIndex = mapped_memory_type },\n'
+              '                vk::ImportAndroidHardwareBufferInfoANDROID{',
+              '                vk::MemoryAllocateInfo{\n'
+              '                    .allocationSize = hardware_props.allocationSize, // [VS-MEMMAP-AHB-SIZE8] Vulkan import requirement\n'
+              '                    .memoryTypeIndex = mapped_memory_type },\n'
+              '                vk::ImportAndroidHardwareBufferInfoANDROID{',
+              'Android hardware-buffer allocation size',
+          )
+          text = replace_once(
+              text,
+              '                vk::MemoryAllocateInfo{\n'
+              '                    .allocationSize = size + KiB(4),\n'
+              '                    .memoryTypeIndex = mapped_memory_type },\n'
+              '                vk::ImportMemoryFdInfoKHR{',
+              '                vk::MemoryAllocateInfo{\n'
+              '                    .allocationSize = mapping_allocation_size,\n'
+              '                    .memoryTypeIndex = mapped_memory_type },\n'
+              '                vk::ImportMemoryFdInfoKHR{',
+              'native fd allocation size',
+          )
+          text = replace_once(
+              text,
+              '                .size = size + KiB(4),\n'
+              '                .usage = mapped_memory_flags,',
+              '                .size = mapping_allocation_size,\n'
+              '                .usage = mapped_memory_flags,',
+              'native Vulkan buffer size',
+          )
+          text = replace_once(
+              text,
+              '        if (err != 0) {\n'
+              '            LOG_ERROR("Failed to lock Android hardware buffer, error {}", err);\n'
+              '            return false;\n'
+              '        }',
+              '        if (err != 0) {\n'
+              '            LOG_ERROR("Failed to lock Android hardware buffer, error {}", err);\n'
+              '            _AHardwareBuffer_release(buffer);\n'
+              '            return false;\n'
+              '        }',
+              'native lock cleanup',
+          )
+          text = replace_once(
+              text,
+              '            if (handle == nullptr || handle->numFds == 0 || handle->data[0] == -1) {\n'
+              '                LOG_ERROR("Failed to get native handle");\n'
+              '                return false;\n'
+              '            }',
+              '            if (handle == nullptr || handle->numFds == 0 || handle->data[0] == -1) {\n'
+              '                LOG_ERROR("Failed to get native handle");\n'
+              '                _AHardwareBuffer_unlock(buffer, nullptr);\n'
+              '                _AHardwareBuffer_release(buffer);\n'
+              '                return false;\n'
+              '            }',
+              'native handle cleanup',
+          )
+          text = replace_once(
+              text,
+              '            int fd = handle->data[0];',
+              '            // [VS-MEMMAP-FD-OWNERSHIP8] Vulkan owns an imported OPAQUE_FD.\n'
+              '            // Import a duplicate, never the AHardwareBuffer-owned descriptor itself.\n'
+              '            int fd = dup(handle->data[0]);\n'
+              '            if (fd < 0) {\n'
+              '                LOG_ERROR("Failed to duplicate native buffer fd");\n'
+              '                _AHardwareBuffer_unlock(buffer, nullptr);\n'
+              '                _AHardwareBuffer_release(buffer);\n'
+              '                return false;\n'
+              '            }',
+              'native fd ownership',
+          )
+          text = replace_once(
+              text,
+              '        _AHardwareBuffer_unlock(hardware_buffer, nullptr);\n'
+              '        // When using external fd, it takes ownership of the handle, so don\'t release it in this case\n'
+              '        if (support_android_buffer_import)\n'
+              '            _AHardwareBuffer_release(hardware_buffer);',
+              '        _AHardwareBuffer_unlock(hardware_buffer, nullptr);\n'
+              '        // [VS-MEMMAP-FD-OWNERSHIP8] Imported OPAQUE_FD is a dup; the AHB object remains ours.\n'
+              '        _AHardwareBuffer_release(hardware_buffer);',
+              'native AHB release ownership',
+          )
+          text = replace_once(
+              text,
+              '        const uint64_t buffer_address = device.getBufferAddress(address_info);\n\n'
+              '        add_external_mapping(mem, address.address(), size, reinterpret_cast<uint8_t *>(mapped_location));\n'
+              '        mapped_memories[address.address()] = { address.address(), ExternalBuffer{ device_memory, buffer }, mapped_buffer, size, buffer_address };',
+              '        const uint64_t mapped_ptr = std::bit_cast<uint64_t>(mapped_location);\n'
+              '        const uint64_t buffer_offset = align(mapped_ptr, mapping_alignment) - mapped_ptr;\n'
+              '        if (buffer_offset + size > mapping_allocation_size) {\n'
+              '            LOG_ERROR("[VS-MEMMAP-HOSTPAGE8] NativeBuffer alignment overflow offset={} size={} alloc={}",\n'
+              '                buffer_offset, size, mapping_allocation_size);\n'
+              '            device.destroyBuffer(mapped_buffer);\n'
+              '            device.freeMemory(device_memory);\n'
+              '            _AHardwareBuffer_unlock(buffer, nullptr);\n'
+              '            _AHardwareBuffer_release(buffer);\n'
+              '            return false;\n'
+              '        }\n'
+              '        uint8_t *const aligned_location = reinterpret_cast<uint8_t *>(mapped_ptr + buffer_offset);\n'
+              '        const uint64_t buffer_address = device.getBufferAddress(address_info) + buffer_offset;\n\n'
+              '        add_external_mapping(mem, address.address(), size, aligned_location);\n'
+              '        mapped_memories[address.address()] = { address.address(), ExternalBuffer{ device_memory, buffer }, mapped_buffer, size, static_cast<uint32_t>(buffer_offset), buffer_address };\n'
+              '        LOG_DEBUG("[VS-MEMMAP-HOSTPAGE8] NativeBuffer guest={} size={} offset={} host_page={}",\n'
+              '            log_hex(address.address()), size, buffer_offset, mem.host_page_size);',
+              'native aligned mapping',
+          )
+          text = replace_once(
+              text,
+              '        vkutil::Buffer buffer(size + KiB(4));',
+              '        vkutil::Buffer buffer(mapping_allocation_size);',
+              'page-table allocation size',
+          )
+          text = replace_once(
+              text,
+              '        const uint64_t buffer_offset = align(buffer_ptr_val, KiB(4)) - buffer_ptr_val;',
+              '        const uint64_t buffer_offset = align(buffer_ptr_val, mapping_alignment) - buffer_ptr_val;',
+              'page-table host alignment',
+          )
+          text = replace_once(
+              text,
+              '        const uint64_t buffer_address = device.getBufferAddress(address_info) + buffer_offset;\n'
+              '        const vk::Buffer mapped_buffer = buffer.buffer;\n\n'
+              '        add_external_mapping(mem, address.address(), size, static_cast<uint8_t *>(buffer.mapped_data));',
+              '        if (buffer_offset + size > mapping_allocation_size) {\n'
+              '            LOG_ERROR("[VS-MEMMAP-HOSTPAGE8] PageTable alignment overflow offset={} size={} alloc={}",\n'
+              '                buffer_offset, size, mapping_allocation_size);\n'
+              '            return false;\n'
+              '        }\n'
+              '        const uint64_t buffer_address = device.getBufferAddress(address_info) + buffer_offset;\n'
+              '        const vk::Buffer mapped_buffer = buffer.buffer;\n\n'
+              '        add_external_mapping(mem, address.address(), size, static_cast<uint8_t *>(buffer.mapped_data));\n'
+              '        LOG_DEBUG("[VS-MEMMAP-HOSTPAGE8] PageTable guest={} size={} offset={} host_page={}",\n'
+              '            log_hex(address.address()), size, buffer_offset, mem.host_page_size);',
+              'page-table aligned mapping',
+          )
+          text = replace_first(
+              text,
+              '        mapped_memories[address.address()] = { address.address(), std::move(buffer), mapped_buffer, size, buffer_address };',
+              '        mapped_memories[address.address()] = { address.address(), std::move(buffer), mapped_buffer, size, static_cast<uint32_t>(buffer_offset), buffer_address };',
+              'page-table Vulkan binding offset',
+          )
+          text = replace_once(
+              text,
+              '        mapped_memories[address.address()] = { address.address(), ExternalBuffer{ device_memory, nullptr }, mapped_buffer, size, buffer_address };',
+              '        mapped_memories[address.address()] = { address.address(), ExternalBuffer{ device_memory, nullptr }, mapped_buffer, size, 0, buffer_address };',
+              'external-host zero binding offset',
+          )
+          text = replace_once(
+              text,
+              '        mapped_memories[address.address()] = { address.address(), std::move(buffer), mapped_buffer, size, buffer_address };',
+              '        mapped_memories[address.address()] = { address.address(), std::move(buffer), mapped_buffer, size, 0, buffer_address };',
+              'double-buffer zero binding offset',
+          )
+          text = replace_once(
+              text,
+              '        || mapped_memory->first + mapped_memory->second.size < address.address()) {',
+              '        || static_cast<uint64_t>(mapped_memory->first) + mapped_memory->second.size <= address.address()) { // [VS-MEMMAP-END-BOUND8]',
+              'vertex mapping bound',
+          )
+          text = replace_once(
+              text,
+              '        || mapped_memory->first + mapped_memory->second.size < address) {',
+              '        || static_cast<uint64_t>(mapped_memory->first) + mapped_memory->second.size <= address) { // [VS-MEMMAP-END-BOUND8]',
+              'device mapping bound',
+          )
+          text = replace_once(
+              text,
+              '    return std::make_tuple(mapped_memory->second.buffer, address.address() - mapped_memory->first);',
+              '    return std::make_tuple(\n'
+              '        mapped_memory->second.buffer,\n'
+              '        mapped_memory->second.buffer_offset + address.address() - mapped_memory->first); // [VS-MEMMAP-BUFFER-OFFSET8]',
+              'mapped vertex binding offset',
+          )
+          write(path, text)
+          
+          # ---------------------------------------------------------------
+          # Uncharted Typeless isolation.
+          # Keep R3 fractional interval math for equal-BPP surfaces only and
+          # restore the proven FIX4/R2 raw 8->4 staging math.
+          # ---------------------------------------------------------------
+          path = 'vita3k/renderer/src/vulkan/surface_cache.cpp'
+          text = read(path)
+          text = replace_once(
+              text,
+              '    if (bytes_per_pixel_requested == bytes_per_pixel_in_store)\n'
+              '        width = vs_scale_surface_interval_extent(\n'
+              '            native_start_x, original_width, state.res_multiplier, start_x);\n'
+              '    height = vs_scale_surface_interval_extent(\n'
+              '        native_start_line, original_height, state.res_multiplier, start_sourced_line);',
+              '    // [VS-UNCHARTED-TYPELESS-RESTORE8] Fractional extents are equal-BPP only.\n'
+              '    if (bytes_per_pixel_requested == bytes_per_pixel_in_store) {\n'
+              '        width = vs_scale_surface_interval_extent(\n'
+              '            native_start_x, original_width, state.res_multiplier, start_x);\n'
+              '        height = vs_scale_surface_interval_extent(\n'
+              '            native_start_line, original_height, state.res_multiplier, start_sourced_line);\n'
+              '    }',
+              'equal-BPP-only fractional extents',
+          )
+          
+          r3_pitch = '''                // [VS-FRACTIONAL-HD-ROW-PITCH7R3] One canonical scaled raw-row pitch.\n                const uint32_t src_pixel_stride = vs_scale_surface_floor(\n                    info.stride_bytes / bytes_per_pixel_in_store, state.res_multiplier);\n                const vk::DeviceSize scaled_row_bytes =\n                    static_cast<vk::DeviceSize>(src_pixel_stride) * bytes_per_pixel_in_store;\n                const uint32_t copy_height = std::min<uint32_t>(height, source_available_height);\n                if (src_pixel_stride == 0 || scaled_row_bytes == 0 || copy_height == 0)\n                    return std::nullopt;\n                const vk::DeviceSize buffer_size =\n                    scaled_row_bytes * static_cast<vk::DeviceSize>(copy_height);\n\n                if (!casted->transition_buffer.buffer\n                    || casted->transition_buffer.size < buffer_size) {\n                    state.frame().destroy_queue.add_buffer(casted->transition_buffer);\n                    casted->transition_buffer = vkutil::Buffer(buffer_size);\n                    casted->transition_buffer.init_buffer(\n                        vk::BufferUsageFlagBits::eTransferDst\n                        | vk::BufferUsageFlagBits::eTransferSrc);\n                }'''
+          r2_pitch = '''                // [VS-UNCHARTED-TYPELESS-RESTORE8] Exact FIX4/R2 raw staging pitch.\n                const vk::DeviceSize buffer_size =\n                    static_cast<vk::DeviceSize>(stride_bytes)\n                        * static_cast<size_t>(state.res_multiplier * align(height, 4))\n                    + static_cast<vk::DeviceSize>(start_x) * bytes_per_pixel_requested\n                    + bytes_per_pixel_requested;\n\n                if (!casted->transition_buffer.buffer\n                    || casted->transition_buffer.size < buffer_size) {\n                    state.frame().destroy_queue.add_buffer(casted->transition_buffer);\n                    casted->transition_buffer = vkutil::Buffer(buffer_size);\n                    casted->transition_buffer.init_buffer(\n                        vk::BufferUsageFlagBits::eTransferDst\n                        | vk::BufferUsageFlagBits::eTransferSrc);\n                }\n\n                const uint32_t src_pixel_stride = static_cast<uint32_t>(\n                    (info.stride_bytes / bytes_per_pixel_in_store)\n                    * state.res_multiplier);'''
+          text = replace_once(text, r3_pitch, r2_pitch, 'typeless raw pitch restore')
+          text = replace_once(
+              text,
+              '                    .bufferImageHeight = copy_height,',
+              '                    .bufferImageHeight = height,',
+              'typeless buffer height restore',
+          )
+          text = replace_first(
+              text,
+              '                        copy_height,',
+              '                        std::min<uint32_t>(\n'
+              '                            height,\n'
+              '                            info.height > start_sourced_line\n'
+              '                                ? info.height - start_sourced_line\n'
+              '                                : 0),',
+              'typeless source height restore',
+          )
+          text = replace_once(
+              text,
+              '                if ((scaled_row_bytes % bytes_per_pixel_requested) != 0)\n'
+              '                    return std::nullopt;\n'
+              '                const uint32_t dst_pixel_stride = static_cast<uint32_t>(\n'
+              '                    scaled_row_bytes / bytes_per_pixel_requested);\n'
+              '                const uint32_t dst_available_width =\n'
+              '                    start_x < dst_pixel_stride ? dst_pixel_stride - start_x : 0u;\n'
+              '                if (dst_available_width == 0)\n'
+              '                    return std::nullopt;',
+              '                const uint32_t dst_pixel_stride = static_cast<uint32_t>(\n'
+              '                    (stride_bytes / bytes_per_pixel_requested)\n'
+              '                    * state.res_multiplier);',
+              'typeless destination pitch restore',
+          )
+          text = replace_once(
+              text,
+              '                        std::min<uint32_t>(width, dst_available_width),\n'
+              '                        copy_height,',
+              '                        std::min<uint32_t>(width, dst_pixel_stride),\n'
+              '                        copy_image_buffer.imageExtent.height,',
+              'typeless destination extent restore',
+          )
+          write(path, text)
+          
+          # ---------------------------------------------------------------
+          # Lord of Apocalypse: broaden FIX7's title-scoped zero-size ABI repair
+          # to any tiny legacy ThreadInfo prefix, and log the single unknown event.
+          # ---------------------------------------------------------------
+          path = 'vita3k/modules/SceKernelThreadMgr/SceThreadmgr.cpp'
+          text = read(path)
+          text = replace_once(
+              text,
+              '              if (effective_size == 0 && emuenv.io.app_path == "PCSG00008")\n'
+              '                  effective_size = static_cast<SceSize>(sizeof(SceKernelThreadInfo));\n'
+              '              if (effective_size < sizeof(SceSize))',
+              '              const bool lord_tiny_info = emuenv.io.app_path == "PCSG00008"\n'
+              '                  && effective_size > 0 && effective_size < sizeof(SceSize);\n'
+              '              if (lord_tiny_info) {\n'
+              '                  LOG_WARN_ONCE("[VS-THREADINFO-LEGACY8] PCSG00008 accepting tiny ThreadInfo prefix size={}",\n'
+              '                      requested_size);\n'
+              '              }\n'
+              '              if (effective_size == 0 && emuenv.io.app_path == "PCSG00008")\n'
+              '                  effective_size = static_cast<SceSize>(sizeof(SceKernelThreadInfo));\n'
+              '              if (effective_size < sizeof(SceSize) && !lord_tiny_info)',
+              'Lord tiny ThreadInfo ABI',
+          )
+          text = replace_once(
+              text,
+              'EXPORT(SceInt32, _sceKernelWaitEvent, SceUID event_id, SceUInt32 bit_pattern, SceUInt32 *result_pattern, SceUInt64 *user_data, SceUInt32 *timeout) {\n'
+              '    TRACY_FUNC(_sceKernelWaitEvent, event_id, bit_pattern, result_pattern, user_data, timeout);\n'
+              '    return simple_event_waitorpoll(emuenv.kernel, export_name, thread_id, event_id, bit_pattern, result_pattern, user_data, timeout, true);\n'
+              '}',
+              'EXPORT(SceInt32, _sceKernelWaitEvent, SceUID event_id, SceUInt32 bit_pattern, SceUInt32 *result_pattern, SceUInt64 *user_data, SceUInt32 *timeout) {\n'
+              '    TRACY_FUNC(_sceKernelWaitEvent, event_id, bit_pattern, result_pattern, user_data, timeout);\n'
+              '    const SceInt32 result = simple_event_waitorpoll(\n'
+              '        emuenv.kernel, export_name, thread_id, event_id, bit_pattern, result_pattern, user_data, timeout, true);\n'
+              '    if (result == SCE_KERNEL_ERROR_UNKNOWN_EVENT_ID && emuenv.io.app_path == "PCSG00008") {\n'
+              '        LOG_WARN("[VS-LORD-EVENT8] PCSG00008 unknown event={} bits={:#x}", event_id, bit_pattern);\n'
+              '    }\n'
+              '    return result;\n'
+              '}',
+              'Lord event diagnostics',
+          )
+          write(path, text)
+          
+          # ---------------------------------------------------------------
+          # Touch: exact original VitaStation scale factors from v0.1.0.
+          # Keep the user's PNG pixels, PNG-authority drawing and opacity/fade.
+          # ---------------------------------------------------------------
+          path = 'android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java'
+          text = read(path)
+          for old, new in (
+              ('    float scale = 0.138f; // [VS-TOUCH-REFERENCE7] face max edge ~106/766',
+               '    float scale = 0.15f; // [VS-TOUCH-ORIGINAL-SIZE8] original face scale'),
+              ('      scale = 0.312f; // [VS-TOUCH-REFERENCE7] shoulder width ~239/766',
+               '      scale = 0.25f; // [VS-TOUCH-ORIGINAL-SIZE8] original L/R scale'),
+              ('      scale = 0.300f; // [VS-TOUCH-REFERENCE7] Start/Select width ~229/766',
+               '      scale = 0.25f; // [VS-TOUCH-ORIGINAL-SIZE8] original Start/Select scale'),
+              ('      scale = 0.17f;',
+               '      scale = 0.25f; // [VS-TOUCH-ORIGINAL-SIZE8] original L2/R2 scale'),
+              ('      scale = 0.146f; // [VS-TOUCH-REFERENCE7] PS max edge ~112/766',
+               '      scale = 0.11f; // [VS-TOUCH-ORIGINAL-SIZE8] original PS scale'),
+              ('      scale = 0.075f;',
+               '      scale = 0.11f; // [VS-TOUCH-ORIGINAL-SIZE8] original utility scale'),
+              ('    float scale = 0.366f; // [VS-TOUCH-REFERENCE7] D-pad footprint ~280/766',
+               '    float scale = 0.35f; // [VS-TOUCH-ORIGINAL-SIZE8] original D-pad scale'),
+              ('    float scale = 0.308f; // [VS-TOUCH-REFERENCE7] analog max edge ~236/766',
+               '    float scale = 0.275f; // [VS-TOUCH-ORIGINAL-SIZE8] original analog scale'),
+          ):
+              text = replace_once(text, old, new, f'touch scale {old.strip()}')
+          write(path, text)
+          
+          # [VS-TOUCH-FREE-SCALE8] Original geometry is 100%; user range is intentionally broad.
+          path = 'android/app/src/main/java/org/vita3k/emulator/overlay/OverlayConfig.kt'
+          text = read(path)
+          text = replace_once(
+              text,
+              '            overlayScale = overlayScale.coerceIn(50, 150),',
+              '            overlayScale = overlayScale.coerceIn(25, 250), // [VS-TOUCH-FREE-SCALE8]',
+              'touch free scale normalization',
+          )
+          write(path, text)
+          
+          path = 'android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/OverlaySettings.kt'
+          text = read(path)
+          text = replace_once(
+              text,
+              '            valueRange = 50f..150f,\n'
+              '            steps = 99,',
+              '            valueRange = 25f..250f, // [VS-TOUCH-FREE-SCALE8]\n'
+              '            steps = 224,',
+              'touch free scale slider',
+          )
+          write(path, text)
+          
+          path = 'android/app/src/main/java/org/vita3k/emulator/overlay/OverlayStore.kt'
+          text = read(path)
+          text = replace_once(
+              text,
+              '    private const val CURRENT_LAYOUT_SCHEMA_VERSION = 7 // [VS-TOUCH-LAYOUT-MIGRATION7]',
+              '    private const val CURRENT_LAYOUT_SCHEMA_VERSION = 8 // [VS-TOUCH-LAYOUT-MIGRATION8]',
+              'touch schema 8',
+          )
+          text = text.replace('[VS-TOUCH-LAYOUT-MIGRATION7]', '[VS-TOUCH-LAYOUT-MIGRATION8]')
+          write(path, text)
+          
+          # ---------------------------------------------------------------
+          # Skip Cutscene FIX8
+          # Generic opt-in movie skip for titles routed through SceAvPlayer.
+          # Disabled by default. No renderer/kernel/FrameGen timing changes.
+          # ---------------------------------------------------------------
+          path = 'vita3k/config/include/config/state.h'
+          text = read(path)
+          text = replace_once(
+              text,
+              '        bool fps_hack = false;\n        bool shader_cache = true;',
+              '        bool fps_hack = false;\n'
+              '        bool skip_cutscene = false; // [VS-SKIP-CUTSCENE8] opt-in SceAvPlayer movie skip\n'
+              '        bool shader_cache = true;',
+              'skip-cutscene current config',
+          )
+          write(path, text)
+          
+          path = 'vita3k/config/include/config/config.h'
+          text = read(path)
+          text = replace_once(
+              text,
+              '    code(bool, "fps-hack", false, fps_hack)                                                             \\\n',
+              '    code(bool, "fps-hack", false, fps_hack)                                                             \\\n'
+              '    code(bool, "skip-cutscene", false, skip_cutscene)                                                   \\\n',
+              'skip-cutscene global config key',
+          )
+          write(path, text)
+          
+          path = 'vita3k/config/src/settings.cpp'
+          text = read(path)
+          text = replace_once(
+              text,
+              '    current.fps_hack = cfg.fps_hack;\n    current.shader_cache = cfg.shader_cache;',
+              '    current.fps_hack = cfg.fps_hack;\n'
+              '    current.skip_cutscene = cfg.skip_cutscene; // [VS-SKIP-CUTSCENE8]\n'
+              '    current.shader_cache = cfg.shader_cache;',
+              'skip copy global to current',
+          )
+          text = replace_once(
+              text,
+              '    cfg.fps_hack = current.fps_hack;\n    cfg.shader_cache = current.shader_cache;',
+              '    cfg.fps_hack = current.fps_hack;\n'
+              '    cfg.skip_cutscene = current.skip_cutscene; // [VS-SKIP-CUTSCENE8]\n'
+              '    cfg.shader_cache = current.shader_cache;',
+              'skip copy current to global',
+          )
+          text = replace_once(
+              text,
+              '        out.fps_hack = gpu.attribute("fps-hack").as_bool();\n'
+              '        out.shader_cache = gpu.attribute("shader-cache").as_bool(true);',
+              '        out.fps_hack = gpu.attribute("fps-hack").as_bool();\n'
+              '        out.skip_cutscene = gpu.attribute("skip-cutscene").as_bool(false); // [VS-SKIP-CUTSCENE8]\n'
+              '        out.shader_cache = gpu.attribute("shader-cache").as_bool(true);',
+              'skip custom config load',
+          )
+          text = replace_once(
+              text,
+              '    gpu_child.append_attribute("fps-hack") = cc.fps_hack;\n'
+              '    gpu_child.append_attribute("shader-cache") = cc.shader_cache;',
+              '    gpu_child.append_attribute("fps-hack") = cc.fps_hack;\n'
+              '    gpu_child.append_attribute("skip-cutscene") = cc.skip_cutscene; // [VS-SKIP-CUTSCENE8]\n'
+              '    gpu_child.append_attribute("shader-cache") = cc.shader_cache;',
+              'skip custom config save',
+          )
+          write(path, text)
+          
+          path = 'android/app/src/main/java/org/vita3k/emulator/data/EmulatorConfig.kt'
+          text = read(path)
+          text = replace_once(
+              text,
+              '    @JvmField var fpsHack: Boolean = false\n    @JvmField var turboMode: Boolean = false',
+              '    @JvmField var fpsHack: Boolean = false\n'
+              '    @JvmField var skipCutscene: Boolean = false // [VS-SKIP-CUTSCENE8]\n'
+              '    @JvmField var turboMode: Boolean = false',
+              'skip Android field',
+          )
+          text = replace_once(
+              text,
+              '        config.fpsHack = fpsHack\n        config.turboMode = turboMode',
+              '        config.fpsHack = fpsHack\n'
+              '        config.skipCutscene = skipCutscene\n'
+              '        config.turboMode = turboMode',
+              'skip Android copy',
+          )
+          text = replace_once(
+              text,
+              '            fpsHack == other.fpsHack &&\n            turboMode == other.turboMode &&',
+              '            fpsHack == other.fpsHack &&\n'
+              '            skipCutscene == other.skipCutscene &&\n'
+              '            turboMode == other.turboMode &&',
+              'skip Android equals',
+          )
+          text = replace_once(
+              text,
+              '        result = 31 * result + fpsHack.hashCode()\n        result = 31 * result + turboMode.hashCode()',
+              '        result = 31 * result + fpsHack.hashCode()\n'
+              '        result = 31 * result + skipCutscene.hashCode()\n'
+              '        result = 31 * result + turboMode.hashCode()',
+              'skip Android hash',
+          )
+          write(path, text)
+          
+          path = 'vita3k/android/jni/native_config.cpp'
+          text = read(path)
+          text = replace_once(
+              text,
+              '    jfieldID fpsHack = nullptr;\n    jfieldID turboMode = nullptr;',
+              '    jfieldID fpsHack = nullptr;\n'
+              '    jfieldID skipCutscene = nullptr; // [VS-SKIP-CUTSCENE8]\n'
+              '    jfieldID turboMode = nullptr;',
+              'skip JNI field id',
+          )
+          text = replace_once(
+              text,
+              '    fields.fpsHack = env->GetFieldID(fields.cls, "fpsHack", "Z");\n'
+              '    fields.turboMode = env->GetFieldID(fields.cls, "turboMode", "Z");',
+              '    fields.fpsHack = env->GetFieldID(fields.cls, "fpsHack", "Z");\n'
+              '    fields.skipCutscene = env->GetFieldID(fields.cls, "skipCutscene", "Z");\n'
+              '    fields.turboMode = env->GetFieldID(fields.cls, "turboMode", "Z");',
+              'skip JNI resolve',
+          )
+          text = replace_once(
+              text,
+              '    env->SetBooleanField(obj, fields.fpsHack, current_config.fps_hack);\n'
+              '    env->SetBooleanField(obj, fields.turboMode, config.turbo_mode);',
+              '    env->SetBooleanField(obj, fields.fpsHack, current_config.fps_hack);\n'
+              '    env->SetBooleanField(obj, fields.skipCutscene, current_config.skip_cutscene);\n'
+              '    env->SetBooleanField(obj, fields.turboMode, config.turbo_mode);',
+              'skip JNI fill',
+          )
+          text = replace_once(
+              text,
+              '    current_config.fps_hack = env->GetBooleanField(obj, fields.fpsHack) != JNI_FALSE;\n'
+              '    config.turbo_mode = env->GetBooleanField(obj, fields.turboMode) != JNI_FALSE;',
+              '    current_config.fps_hack = env->GetBooleanField(obj, fields.fpsHack) != JNI_FALSE;\n'
+              '    current_config.skip_cutscene = env->GetBooleanField(obj, fields.skipCutscene) != JNI_FALSE;\n'
+              '    config.turbo_mode = env->GetBooleanField(obj, fields.turboMode) != JNI_FALSE;',
+              'skip JNI read',
+          )
+          write(path, text)
+          
+          path = 'vita3k/modules/SceAvPlayer/SceAvPlayer.cpp'
+          text = read(path)
+          text = replace_once(
+              text,
+              '#include <codec/state.h>\n#include <io/functions.h>',
+              '#include <codec/state.h>\n#include <config/state.h> // [VS-SKIP-CUTSCENE8]\n#include <io/functions.h>',
+              'skip backend config include',
+          )
+          helper_anchor = '''static void run_event_callback(EmuEnvState &emuenv, const ThreadStatePtr &thread, const PlayerPtr &player_info, uint32_t event_id, uint32_t source_id, Ptr<void> event_data) {
+              if (player_info->event_manager.event_callback) {
+                  thread->run_callback(player_info->event_manager.event_callback.address(), { player_info->event_manager.user_data, event_id, source_id, event_data.address() });
+              }
+          }'''
+          helper_new = helper_anchor + r'''
+          
+          // [VS-SKIP-CUTSCENE8] Generic movie skip for titles using SceAvPlayer.
+          // Do not alter guest timing, renderer pacing or FrameGen.
+          static bool skip_cutscene_if_requested(EmuEnvState &emuenv, const SceUID thread_id,
+              const PlayerPtr &player_info, const char *origin) {
+              if (!emuenv.cfg.current_config.skip_cutscene || !player_info
+                  || player_info->player.video_playing.empty())
+                  return false;
+          
+              const std::string skipped = player_info->player.video_playing;
+              player_info->player.free_video();
+              player_info->player.videos_queue = {};
+              player_info->paused = false;
+              player_info->last_frame_time = current_time();
+          
+              const auto thread = emuenv.kernel.get_thread(thread_id);
+              if (thread)
+                  run_event_callback(emuenv, thread, player_info, SCE_AVPLAYER_STATE_STOP, 0, Ptr<void>(0));
+          
+              LOG_INFO("[VS-SKIP-CUTSCENE8] skipped SceAvPlayer movie origin={} path={}", origin, skipped);
+              return true;
+          }'''
+          text = replace_once(text, helper_anchor, helper_new, 'skip backend helper')
+          text = replace_once(
+              text,
+              '    run_event_callback(emuenv, thread, player_info, SCE_AVPLAYER_STATE_READY, 0, Ptr<void>(0));\n'
+              '    return 0;\n}\n\nEXPORT(int, sceAvPlayerClose',
+              '    run_event_callback(emuenv, thread, player_info, SCE_AVPLAYER_STATE_READY, 0, Ptr<void>(0));\n'
+              '    skip_cutscene_if_requested(emuenv, thread_id, player_info, "add-source");\n'
+              '    return 0;\n}\n\nEXPORT(int, sceAvPlayerClose',
+              'skip on add source',
+          )
+          text = replace_once(
+              text,
+              '    if (!player_info) {\n        return false;\n    }\n    Ptr<uint8_t> buffer;\n\n    if (player_info->paused) {',
+              '    if (!player_info) {\n        return false;\n    }\n'
+              '    if (skip_cutscene_if_requested(emuenv, thread_id, player_info, "audio"))\n'
+              '        return false;\n'
+              '    Ptr<uint8_t> buffer;\n\n    if (player_info->paused) {',
+              'skip audio path',
+          )
+          text = replace_once(
+              text,
+              '    if (!player_info) {\n        return false;\n    }\n\n    Ptr<uint8_t> buffer;\n\n    DecoderSize size = player_info->player.get_size();',
+              '    if (!player_info) {\n        return false;\n    }\n'
+              '    if (skip_cutscene_if_requested(emuenv, thread_id, player_info, "video"))\n'
+              '        return false;\n\n'
+              '    Ptr<uint8_t> buffer;\n\n    DecoderSize size = player_info->player.get_size();',
+              'skip video path',
+          )
+          text = replace_once(
+              text,
+              '    const PlayerPtr &player_info = lock_and_find(player_handle, state->players, state->mutex);\n\n'
+              '    return !player_info->player.video_playing.empty();\n}\n\nEXPORT(int, sceAvPlayerJumpToTime)',
+              '    const PlayerPtr &player_info = lock_and_find(player_handle, state->players, state->mutex);\n'
+              '    if (!player_info)\n'
+              '        return false;\n'
+              '    if (emuenv.cfg.current_config.skip_cutscene) {\n'
+              '        skip_cutscene_if_requested(emuenv, thread_id, player_info, "is-active");\n'
+              '        return false;\n'
+              '    }\n\n'
+              '    return !player_info->player.video_playing.empty();\n}\n\nEXPORT(int, sceAvPlayerJumpToTime)',
+              'skip active query',
+          )
+          text = replace_once(
+              text,
+              'EXPORT(int, sceAvPlayerStart, SceUID player_handle) {\n'
+              '    const auto state = emuenv.kernel.obj_store.get<AvPlayerState>();\n'
+              '    const PlayerPtr &player_info = lock_and_find(player_handle, state->players, state->mutex);\n'
+              '    if (!player_info->player.videos_queue.empty()) {',
+              'EXPORT(int, sceAvPlayerStart, SceUID player_handle) {\n'
+              '    const auto state = emuenv.kernel.obj_store.get<AvPlayerState>();\n'
+              '    const PlayerPtr &player_info = lock_and_find(player_handle, state->players, state->mutex);\n'
+              '    if (!player_info)\n'
+              '        return SCE_AVPLAYER_ERROR_INVALID_ARGUMENT;\n'
+              '    if (emuenv.cfg.current_config.skip_cutscene) {\n'
+              '        skip_cutscene_if_requested(emuenv, thread_id, player_info, "start");\n'
+              '        return 0;\n'
+              '    }\n'
+              '    if (!player_info->player.videos_queue.empty()) {',
+              'skip start path',
+          )
+          write(path, text)
+          
+          # ---------------------------------------------------------------
+          # UI/HACKs: remove duplicate card headings, expose real existing FPS
+          # Hack + Turbo toggles, and remove the separate disabled fake pause tab.
+          # ---------------------------------------------------------------
+          path = 'android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsComponents.kt'
+          text = read(path)
+          text = replace_once(
+              text,
+              '                    Text(\n'
+              '                        text = title,\n'
+              '                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)\n'
+              '                    )\n'
+              '                    if (!summary.isNullOrBlank()) {',
+              '                    if (title.isNotBlank()) { // [VS-SETTINGS-CLEAN8]\n'
+              '                        Text(\n'
+              '                            text = title,\n'
+              '                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)\n'
+              '                        )\n'
+              '                    }\n'
+              '                    if (!summary.isNullOrBlank()) {',
+              'optional card title',
+          )
+          write(path, text)
+          
+          path = 'android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsSections.kt'
+          text = read(path)
+          text = replace_once(
+              text,
+              '        SettingsCategory.Hacks -> HacksSettingsSection(onShowHelp = onShowHelp)',
+              '        SettingsCategory.Hacks -> HacksSettingsSection(\n'
+              '            cfg = cfg,\n'
+              '            isPerApp = isPerApp,\n'
+              '            onUpdate = onUpdate,\n'
+              '            onShowHelp = onShowHelp\n'
+              '        )',
+              'functional HACKs branch',
+          )
+          new_licenses = r'''private fun LicensesSettingsSection(onShowHelp: (SettingsHelpEntry) -> Unit) {
+              SettingsSectionCard(
+                  title = "", // [VS-SETTINGS-CLEAN8] app bar already says Licenses
+                  summary = stringResource(R.string.settings_licenses_summary),
+                  help = null,
+                  onShowHelp = onShowHelp
+              ) {
+                  SettingsNote(text = stringResource(R.string.settings_license_vitastation))
+                  SettingsNote(text = stringResource(R.string.settings_license_eden))
+                  SettingsNote(text = stringResource(R.string.settings_license_sgsr))
+                  SettingsNote(text = stringResource(R.string.settings_license_lsfg))
+              }
+          }'''
+          text = replace_function(text, 'private fun LicensesSettingsSection(', new_licenses)
+          new_hacks = r'''private fun HacksSettingsSection(
+              cfg: EmulatorConfig,
+              isPerApp: Boolean,
+              onUpdate: (EmulatorConfig.() -> Unit) -> Unit,
+              onShowHelp: (SettingsHelpEntry) -> Unit
+          ) {
+              SettingsSectionCard(
+                  title = "", // [VS-SETTINGS-CLEAN8] app bar already says HACKs
+                  summary = stringResource(R.string.settings_hacks_summary),
+                  help = null,
+                  onShowHelp = onShowHelp
+              ) {
+                  SettingsToggleRow(
+            title = stringResource(R.string.settings_gpu_fps_hack),
+            checked = cfg.fpsHack,
+            onCheckedChange = { checked -> onUpdate { fpsHack = checked } },
+            help = SettingsHelpEntry(
+                title = stringResource(R.string.settings_gpu_fps_hack),
+                body = stringResource(R.string.settings_gpu_fps_hack_desc)
+            ),
+            onShowHelp = onShowHelp
+                  )
+                  SettingsToggleRow(
+            title = stringResource(R.string.settings_hacks_skip_movie),
+            checked = cfg.skipCutscene, // [VS-SKIP-CUTSCENE8]
+            onCheckedChange = { checked -> onUpdate { skipCutscene = checked } },
+            help = SettingsHelpEntry(
+                title = stringResource(R.string.settings_hacks_skip_movie),
+                body = stringResource(R.string.settings_hacks_skip_movie_desc)
+            ),
+            onShowHelp = onShowHelp
+                  )
+                  if (!isPerApp && isVulkanBackend(cfg.backendRenderer)) {
+            SettingsToggleRow(
+                title = stringResource(R.string.settings_gpu_turbo_mode),
+                checked = cfg.turboMode,
+                onCheckedChange = { checked -> onUpdate { turboMode = checked } },
+                help = SettingsHelpEntry(
+                    title = stringResource(R.string.settings_gpu_turbo_mode),
+                    body = stringResource(R.string.settings_gpu_turbo_mode_desc),
+                    scope = SettingsScope.Global
+                ),
+                onShowHelp = onShowHelp
+            )
+                  }
+                  SettingsNote(text = stringResource(R.string.settings_hacks_save_state))
+                  SettingsNote(text = stringResource(R.string.settings_hacks_backend_pending))
+              }
+          }'''
+          text = replace_function(text, 'private fun HacksSettingsSection(', new_hacks)
+          write(path, text)
+          
+          path = 'android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/EmulationPauseMenu.kt'
+          text = read(path)
+          text = replace_once(text, 'import androidx.compose.material.icons.filled.Extension\n', '', 'fake HACKs icon')
+          text = replace_once(
+              text,
+              '    Hacks(R.string.emulation_tab_hacks, Icons.Default.Extension), // [VS-RUNTIME-HACKS7]\n',
+              '',
+              'fake HACKs tab',
+          )
+          text = replace_once(text, '                PauseMenuTab.Hacks -> RuntimeHacksTab()\n', '', 'fake HACKs branch')
+          start, end = function_span(text, 'private fun RuntimeHacksTab()')
+          text = text[:start] + text[end:]
+          write(path, text)
+          
+          for strings_path, old_summary, new_summary, old_pending, new_pending in (
+              (
+                  'android/app/src/main/res/values/strings.xml',
+                  'Runtime tools and game-specific compatibility hacks',
+                  'Working performance and compatibility controls',
+                  'FIX7 exposes the UI contract but does not fake unsafe backend actions.',
+                  'Skip Cutscene uses the SceAvPlayer movie backend. Save State stays disabled until a complete serializer is ready.'
+              ),
+              (
+                  'android/app/src/main/res/values-pt-rBR/strings.xml',
+                  'Ferramentas em tempo real e hacks específicos de compatibilidade',
+                  'Controles funcionais de desempenho e compatibilidade',
+                  'A FIX7 cria a interface, mas não finge ações de backend que ainda seriam inseguras.',
+                  'Skip Cutscene usa o backend de vídeo SceAvPlayer. Save State continua desativado até o serializador completo ficar pronto.'
+              ),
+          ):
+              s = read(strings_path)
+              s = replace_once(s, old_summary, new_summary, f'HACKs summary {strings_path}')
+              s = replace_once(s, old_pending, new_pending, f'HACKs pending {strings_path}')
+              write(strings_path, s)
+          
+          # [VS-SKIP-CUTSCENE8] Reuse the existing toggle component with a real backend.
+          for strings_path, old_skip, new_skip, desc in (
+              (
+                  'android/app/src/main/res/values/strings.xml',
+                  '<string name="settings_hacks_skip_movie">Skip Movie — requires a title-specific cutscene hook</string>',
+                  '<string name="settings_hacks_skip_movie">Skip Cutscene</string>',
+                  '<string name="settings_hacks_skip_movie_desc">Automatically skips movies played through the Vita SceAvPlayer path. In-engine cutscenes may not use this path.</string>'
+              ),
+              (
+                  'android/app/src/main/res/values-pt-rBR/strings.xml',
+                  '<string name="settings_hacks_skip_movie">Skip Movie — exige um hook específico para a cutscene de cada jogo</string>',
+                  '<string name="settings_hacks_skip_movie">Pular cutscene</string>',
+                  '<string name="settings_hacks_skip_movie_desc">Pula automaticamente vídeos reproduzidos pelo caminho SceAvPlayer do Vita. Cutscenes renderizadas pelo próprio jogo podem não usar esse caminho.</string>'
+              ),
+          ):
+              st = read(strings_path)
+              st = replace_once(st, old_skip, new_skip + '\n              ' + desc, f'Skip Cutscene strings {strings_path}')
+              write(strings_path, st)
+          
+          # HUD: retain FIX7 KGSL delta reader; sample GPU once per second and show
+          # real vs presented FPS explicitly while FG is active.
+          path = 'android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/PerformanceHudView.java'
+          text = read(path)
+          text = replace_once(
+              text,
+              '    private static final long SLOW_UPDATE_MS = 2000L;',
+              '    private static final long SLOW_UPDATE_MS = 1000L; // [VS-HUD-PRECISION8]',
+              'HUD sampling',
+          )
+          text = replace_once(
+              text,
+              '            statusPills.add("FR: " + fps + "  |  FG: " + frameGenerationMultiplier + "x");',
+              '            int presented = fps * frameGenerationMultiplier;\n'
+              '            statusPills.add("FR: " + fps + "  |  P: " + presented + "  |  FG: " + frameGenerationMultiplier + "x");',
+              'HUD FR/P/FG',
+          )
+          write(path, text)
+          
+          print('[VS-FIX8] Mega Update applied')
+          print('[VS-FIX8] Gintama sync + Fractional-HD equal-BPP + FrameGen preserved')
+          PY
+
+      - name: FIX8 Mega regression gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          
+          def data(path):
+              return Path(path).read_text(encoding='utf-8')
+          
+          def require(path, *markers):
+              content = data(path)
+              for marker in markers:
+                  if marker not in content:
+                      raise SystemExit(f'::error::FIX8 gate missing in {path}: {marker}')
+          
+          def forbid(path, *markers):
+              content = data(path)
+              for marker in markers:
+                  if marker in content:
+                      raise SystemExit(f'::error::FIX8 forbidden regression in {path}: {marker}')
+          
+          require('android/app/build.gradle', 'versionCode = 49', 'versionName = "0.3.0-alpha4-fix8"')
+          
+          # Gintama baseline stays intact.
+          require(
+              'vita3k/kernel/src/sync_primitives.cpp',
+              '[VS-KERNEL-WAIT-DOMAIN7]',
+              'thread->status_cond.wait_for(',
+              'primitive_lock.unlock();',
+              'primitive_lock.lock();',
+              'queue->find(thread)',
+              '[VS-KERNEL-OWNERSHIP-WAIT]',
+              '[VS-LWMUTEX-WORKAREA]',
+          )
+          
+          require(
+              'vita3k/mem/src/mem.cpp',
+              '[VS-MEMMAP-PROTECT8]',
+              'vs_apply_guest_protection',
+              '[VS-MEMMAP-HOSTPAGE8]',
+              '[VS-MEMMAP-UNMAP8]',
+              'mem.page_table[first_page + block] = mem.memory.get();',
+          )
+          require(
+              'vita3k/renderer/include/renderer/vulkan/types.h',
+              '[VS-MEMMAP-BUFFER-OFFSET8]',
+              'uint32_t buffer_offset;',
+          )
+          require(
+              'vita3k/renderer/src/vulkan/renderer.cpp',
+              '[VS-MEMMAP-HOSTPAGE8]',
+              '[VS-MEMMAP-AHB-SIZE8]',
+              'hardware_props.allocationSize',
+              'mapping_alignment',
+              'mapping_allocation_size',
+              '[VS-MEMMAP-END-BOUND8]',
+              '[VS-MEMMAP-BUFFER-OFFSET8]',
+              '[VS-MEMMAP-FD-OWNERSHIP8]',
+              'dup(handle->data[0])',
+              'mapped_memory->second.buffer_offset + address.address()',
+          )
+          
+          surface = 'vita3k/renderer/src/vulkan/surface_cache.cpp'
+          require(
+              surface,
+              '[VS-FRACTIONAL-HD-SURFACE7R3]',
+              'vs_scale_surface_interval_extent',
+              '[VS-UNCHARTED-TYPELESS-RESTORE8]',
+              'static_cast<vk::DeviceSize>(stride_bytes)',
+              '(info.stride_bytes / bytes_per_pixel_in_store)',
+              '(stride_bytes / bytes_per_pixel_requested)',
+              '[VS-TYPELESS-HD-STAGING]',
+              '[VS-FEEDBACK-SNAPSHOT-SAMPLED7]',
+          )
+          forbid(surface, '[VS-FRACTIONAL-HD-ROW-PITCH7R3]', 'scaled_row_bytes', 'dst_available_width')
+          
+          require(
+              'vita3k/modules/SceKernelThreadMgr/SceThreadmgr.cpp',
+              '[VS-THREADINFO-LEGACY8]',
+              '[VS-LORD-EVENT8]',
+              '[VS-EVENT-CB-WAIT7]',
+          )
+          require(
+              'vita3k/modules/SceGxm/SceGxm.cpp',
+              '[VS-GXM-CONTEXT-REUSE7]',
+              '[VS-GXM-FINISH-RECOVER7]',
+          )
+          
+          overlay = 'android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java'
+          require(
+              overlay,
+              '[VS-TOUCH-PNG5]',
+              '[VS-TOUCH-PNG-AUTHORITY7]',
+              '[VS-TOUCH-ORIGINAL-SIZE8]',
+              'float scale = 0.15f;',
+              'scale = 0.25f;',
+              'scale = 0.11f;',
+              'float scale = 0.35f;',
+              'float scale = 0.275f;',
+              'button.draw(canvas);',
+              'dpad.draw(canvas);',
+              'joystick.draw(canvas);',
+          )
+          require(
+              'android/app/src/main/java/org/vita3k/emulator/overlay/OverlayStore.kt',
+              'CURRENT_LAYOUT_SCHEMA_VERSION = 8',
+              '[VS-TOUCH-LAYOUT-MIGRATION8]',
+          )
+          require(
+              'android/app/src/main/java/org/vita3k/emulator/overlay/OverlayConfig.kt',
+              '[VS-TOUCH-FREE-SCALE8]',
+              'coerceIn(25, 250)',
+          )
+          require(
+              'android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/OverlaySettings.kt',
+              '[VS-TOUCH-FREE-SCALE8]',
+              'valueRange = 25f..250f',
+              'steps = 224',
+          )
+          
+          # Generic Skip Cutscene must be a real opt-in backend, not UI-only scaffolding.
+          require(
+              'vita3k/config/include/config/state.h',
+              '[VS-SKIP-CUTSCENE8]',
+              'bool skip_cutscene = false;',
+          )
+          require(
+              'vita3k/config/include/config/config.h',
+              '"skip-cutscene", false, skip_cutscene',
+          )
+          require(
+              'vita3k/config/src/settings.cpp',
+              '[VS-SKIP-CUTSCENE8]',
+              'out.skip_cutscene = gpu.attribute("skip-cutscene").as_bool(false)',
+              'gpu_child.append_attribute("skip-cutscene") = cc.skip_cutscene',
+          )
+          require(
+              'android/app/src/main/java/org/vita3k/emulator/data/EmulatorConfig.kt',
+              '[VS-SKIP-CUTSCENE8]',
+              'var skipCutscene: Boolean = false',
+          )
+          require(
+              'vita3k/android/jni/native_config.cpp',
+              '[VS-SKIP-CUTSCENE8]',
+              'fields.skipCutscene',
+              'current_config.skip_cutscene',
+          )
+          require(
+              'vita3k/modules/SceAvPlayer/SceAvPlayer.cpp',
+              '[VS-SKIP-CUTSCENE8]',
+              'skip_cutscene_if_requested',
+              'emuenv.cfg.current_config.skip_cutscene',
+              'SCE_AVPLAYER_STATE_STOP',
+          )
+          
+          require(
+              'android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsComponents.kt',
+              '[VS-SETTINGS-CLEAN8]',
+              'if (title.isNotBlank())',
+          )
+          require(
+              'android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsSections.kt',
+              'title = "", // [VS-SETTINGS-CLEAN8] app bar already says Licenses',
+              'title = "", // [VS-SETTINGS-CLEAN8] app bar already says HACKs',
+              'checked = cfg.fpsHack',
+              'checked = cfg.skipCutscene',
+              'skipCutscene = checked',
+              'checked = cfg.turboMode',
+              'settings_hacks_skip_movie_desc',
+              'settings_license_eden',
+          )
+          forbid(
+              'android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/EmulationPauseMenu.kt',
+              'PauseMenuTab.Hacks',
+              'RuntimeHacksTab()',
+              'Icons.Default.Extension',
+          )
+          
+          require(
+              'android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/PerformanceHudView.java',
+              '[VS-GPU-DELTA7]',
+              '[VS-HUD-PRECISION8]',
+              'P: " + presented',
+          )
+          require(
+              'android/app/src/main/res/values/strings.xml',
+              'Eden emulator contributors — GNU GPL v3-or-later',
+              'Working performance and compatibility controls',
+              '<string name="settings_hacks_skip_movie">Skip Cutscene</string>',
+              'SceAvPlayer movie backend',
+          )
+          require(
+              'android/app/src/main/res/values-pt-rBR/strings.xml',
+              'Colaboradores do emulador Eden — GNU GPL v3 ou posterior',
+              'Controles funcionais de desempenho e compatibilidade',
+              '<string name="settings_hacks_skip_movie">Pular cutscene</string>',
+              'backend de vídeo SceAvPlayer',
+          )
+          
+          frozen = {
+              'vita3k/renderer/src/vulkan/frame_generation.cpp': '1e7cc634f3308566b6ea3d972b73c55086f8f781',
+              'vita3k/renderer/include/renderer/vulkan/surface_cache.h': 'c30ac772a497c59f93a9b5d27c3de1edeb20f451',
+          }
+          for file_path, wanted in frozen.items():
+              got = subprocess.check_output(['git', 'hash-object', file_path], text=True).strip()
+              if got != wanted:
+                  raise SystemExit(f'::error::FIX8 frozen component changed: {file_path} expected={wanted} actual={got}')
+          
+          print('[VS-FIX8] Mega regression gates passed')
+          print('[VS-FIX8] Gintama/FrameGen protected; Uncharted typeless R3 regression isolated')
+          PY
+
       - name: Set up Java 17
         uses: actions/setup-java@v5
         with:
@@ -431,7 +1698,7 @@ jobs:
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build signed VitaStation FIX7-R3 APK
+      - name: Build signed VitaStation FIX8 MEGA APK
         shell: bash
         run: |
           set -euo pipefail
@@ -462,27 +1729,27 @@ jobs:
           wanted = '1e7cc634f3308566b6ea3d972b73c55086f8f781'
           if got != wanted:
               raise SystemExit(f'::error::FrameGen drift expected={wanted} actual={got}')
-          print(f'[VS-FIX7-R3] permanent signing certificate verified: {actual}')
-          print('[VS-FIX7-R3] FrameGen remained byte-identical')
+          print(f'[VS-FIX8] permanent signing certificate verified: {actual}')
+          print('[VS-FIX8] FrameGen remained byte-identical')
           PY
 
-      - name: Rename and hash FIX7-R3 APK
+      - name: Rename and hash FIX8 APK
         shell: bash
         run: |
           set -euo pipefail
           SRC='artifacts/vitastation-android/app.apk'
-          DST="artifacts/vitastation-android/$FIX7_R3_APK_NAME"
+          DST="artifacts/vitastation-android/$FIX8_APK_NAME"
           test -s "$SRC"
           mv "$SRC" "$DST"
-          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX7_R3_APK_NAME.sha256"
+          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX8_APK_NAME.sha256"
           ls -lh "$DST"
 
-      - name: Upload VitaStation FIX7-R3 APK
+      - name: Upload VitaStation FIX8 APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.3.0-Alpha4-FIX7-R3-Android-Signed
+          name: VitaStation-v0.3.0-Alpha4-FIX8-Mega-Android-Signed
           path: |
-            artifacts/vitastation-android/${{ env.FIX7_R3_APK_NAME }}
-            artifacts/vitastation-android/${{ env.FIX7_R3_APK_NAME }}.sha256
+            artifacts/vitastation-android/${{ env.FIX8_APK_NAME }}
+            artifacts/vitastation-android/${{ env.FIX8_APK_NAME }}.sha256
           if-no-files-found: error
           retention-days: 30

@@ -1,9 +1,9 @@
-# VitaStation Alpha 4 FIX10-R2 UNCHARTED PHASE VIEW
+# VitaStation Alpha 4 FIX11 MEGA UPDATE
 # Replays the verified FIX9 stack, then applies one title-scoped Uncharted Typeless phase-view delta.
 # FIX10-R2 recompiles and verifies the SPIR-V actually packaged in the APK.
 # No Bootstrap. Gintama sync and frozen FrameGen remain protected.
 
-name: VitaStation Android APK - Alpha 4 FIX10-R2 UNCHARTED PHASE VIEW
+name: VitaStation Android APK - Alpha 4 FIX11 MEGA UPDATE
 
 "on":
   workflow_dispatch:
@@ -17,17 +17,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: vitastation-android-fix10-r2-${{ github.ref }}
+  group: vitastation-android-fix11-mega-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   VCPKG_ROOT: /usr/local/share/vcpkg
   VITASTATION_SIGNING_CERT_SHA256: fc57542b62221ad0c0550d12b2791e4e40794e980c9f26a86d83250d67ed5d30
-  FIX10R2_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX10-R2-Uncharted-PhaseView-ProtectedGintama-StableFG-Signed.apk
+  FIX11_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX11-Mega-Uncharted-Gintama-Lord-UX-Signed.apk
 
 jobs:
   android-build:
-    name: Build VitaStation v0.3.0 Alpha 4 FIX10-R2 UNCHARTED PHASE VIEW
+    name: Build VitaStation v0.3.0 Alpha 4 FIX11 MEGA UPDATE
     runs-on: ubuntu-latest
 
     steps:
@@ -2770,6 +2770,975 @@ jobs:
           print('[VS-FIX10-R2] source/SPIR-V/protection gates passed')
           PY
 
+
+      - name: Apply FIX11 MEGA consolidated delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import re
+          
+          
+          def read(path):
+              return Path(path).read_text(encoding='utf-8')
+          
+          
+          def write(path, content):
+              Path(path).write_text(content, encoding='utf-8')
+          
+          
+          def replace_once(content, old, new, label):
+              count = content.count(old)
+              if count != 1:
+                  raise SystemExit(f'::error::FIX11 {label}: expected one anchor, found {count}')
+              return content.replace(old, new, 1)
+          
+          
+          def sha(path):
+              return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+          
+          
+          def set_string(path, name, value):
+              content = read(path)
+              escaped = (value.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;'))
+              pattern = re.compile(r'(?m)^\s*<string name="' + re.escape(name) + r'">.*?</string>\s*$')
+              replacement = f'    <string name="{name}">{escaped}</string>'
+              if pattern.search(content):
+                  content = pattern.sub(replacement, content, count=1)
+              else:
+                  content = content.replace('</resources>', replacement + '\n</resources>', 1)
+              write(path, content)
+          
+          
+          protected_before = {
+              'gintama_sync': sha('vita3k/kernel/src/sync_primitives.cpp'),
+              'framegen': sha('vita3k/renderer/src/vulkan/frame_generation.cpp'),
+              'typeless_shader': sha('vita3k/shaders-builtin/vulkan/surface_cast_reinterpret.comp'),
+              'typeless_spv': sha('vita3k/shaders-builtin/vulkan/surface_cast_reinterpret.comp.spv'),
+          }
+          
+          # -----------------------------------------------------------------------------
+          # Version / identity.
+          # -----------------------------------------------------------------------------
+          path = 'android/app/build.gradle'
+          content = read(path)
+          content = replace_once(content, 'versionCode = 53', 'versionCode = 54', 'versionCode')
+          content = replace_once(
+              content,
+              'versionName = "0.3.0-alpha4-fix10-r2"',
+              'versionName = "0.3.0-alpha4-fix11-mega"',
+              'versionName',
+          )
+          write(path, content)
+          
+          # -----------------------------------------------------------------------------
+          # Uncharted PCSA00029: preserve the R2 shader exactly, but remember that a guest
+          # surface base has exposed its +4 phase view for the rest of the session.
+          # This prevents temporary fallbacks to packed-interleave semantics when the
+          # cached ColorSurfaceCacheInfo object is recreated.
+          # -----------------------------------------------------------------------------
+          path = 'vita3k/renderer/include/renderer/vulkan/surface_cache.h'
+          content = read(path)
+          content = replace_once(
+              content,
+              '    ColorSurfaceCacheInfo *last_written_surface = nullptr;\n',
+              '    ColorSurfaceCacheInfo *last_written_surface = nullptr;\n'
+              '    // [VS-UNCHARTED-PHASE11-PERSIST] Guest surface bases that exposed a +4 phase alias.\n'
+              '    std::map<Address, bool> uncharted_phase_memory;\n',
+              'Uncharted persistent phase map',
+          )
+          write(path, content)
+          
+          path = 'vita3k/renderer/src/vulkan/surface_cache.cpp'
+          content = read(path)
+          content = replace_once(
+              content,
+              '    info_added.data = color->data;\n'
+              '    info_added.typeless_phase_view = false; // [VS-UNCHARTED-PHASE10R2]\n'
+              '    info_added.total_bytes = total_surface_size;',
+              '    info_added.data = color->data;\n'
+              '    // [VS-UNCHARTED-PHASE11-PERSIST] A cache-object recreation must not forget\n'
+              '    // that PCSA00029 already exposed the second 32-bit word view at base+4.\n'
+              '    if (state.app_title_id == "PCSA00029") {\n'
+              '        const auto phase_it = uncharted_phase_memory.find(address);\n'
+              '        info_added.typeless_phase_view = phase_it != uncharted_phase_memory.end() && phase_it->second;\n'
+              '    } else {\n'
+              '        info_added.typeless_phase_view = false;\n'
+              '    }\n'
+              '    info_added.total_bytes = total_surface_size;',
+              'Uncharted restore phase state',
+          )
+          content = replace_once(
+              content,
+              '                info.typeless_phase_view = true; // [VS-UNCHARTED-PHASE10R2]\n'
+              '                for (CastedTexture &old_cast : info.casted_textures)',
+              '                info.typeless_phase_view = true; // [VS-UNCHARTED-PHASE10R2]\n'
+              '                uncharted_phase_memory[ite->first] = true; // [VS-UNCHARTED-PHASE11-PERSIST]\n'
+              '                for (CastedTexture &old_cast : info.casted_textures)',
+              'Uncharted remember phase state',
+          )
+          write(path, content)
+          
+          # -----------------------------------------------------------------------------
+          # Gintama PCSG01073 High Accuracy A/B: keep High semantics, but disable only
+          # shader interlock for this title. Standard remains untouched; kernel sync and
+          # FrameGen remain byte-identical. If High still hangs, the next isolated branch
+          # is the no-texture-viewport path.
+          # -----------------------------------------------------------------------------
+          path = 'vita3k/renderer/src/vulkan/renderer.cpp'
+          content = read(path)
+          content = replace_once(
+              content,
+              '    bool use_high_accuracy = cfg.current_config.high_accuracy;\n',
+              '    bool use_high_accuracy = cfg.current_config.high_accuracy;\n'
+              '    const bool gintama_high_safe = use_high_accuracy && game_id == "PCSG01073"; // [VS-GINTAMA-HIGH-SAFE11]\n'
+              '    if (gintama_high_safe)\n'
+              '        LOG_WARN_ONCE("[VS-GINTAMA-HIGH-SAFE11] High Accuracy active; shader interlock isolated for PCSG01073");\n',
+              'Gintama high-safe state',
+          )
+          content = replace_once(
+              content,
+              '    if (features.support_shader_interlock && use_high_accuracy) {\n',
+              '    if (features.support_shader_interlock && use_high_accuracy && !gintama_high_safe) {\n',
+              'Gintama interlock isolation',
+          )
+          write(path, content)
+          
+          # -----------------------------------------------------------------------------
+          # LORD diagnostics: remove the flood from safe address-mode setters and expose
+          # external-mapping teardown at low volume. No compatibility behaviour changes.
+          # -----------------------------------------------------------------------------
+          path = 'vita3k/modules/SceGxm/SceGxm.cpp'
+          content = read(path)
+          content = replace_once(
+              content,
+              '    LOG_INFO("[VS-TEXADDR] axis=U safe=1 type={} mode={} supported={} old_u={} old_v={}",\n'
+              '        log_hex(texture_type), static_cast<uint32_t>(mode), supported,\n'
+              '        static_cast<uint32_t>(texture->uaddr_mode), static_cast<uint32_t>(texture->vaddr_mode));',
+              '    static thread_local uint64_t vs_texaddr_u11 = 0;\n'
+              '    if (((++vs_texaddr_u11 & 0x3FFu) == 1u))\n'
+              '        LOG_DEBUG("[VS-TEXADDR11] axis=U safe=1 type={} mode={} supported={} old_u={} old_v={}",\n'
+              '            log_hex(texture_type), static_cast<uint32_t>(mode), supported,\n'
+              '            static_cast<uint32_t>(texture->uaddr_mode), static_cast<uint32_t>(texture->vaddr_mode));',
+              'LORD U texaddr rate limit',
+          )
+          content = replace_once(
+              content,
+              '    LOG_INFO("[VS-TEXADDR] axis=V safe=1 type={} mode={} supported={} old_u={} old_v={}",\n'
+              '        log_hex(texture_type), static_cast<uint32_t>(mode), supported,\n'
+              '        static_cast<uint32_t>(texture->uaddr_mode), static_cast<uint32_t>(texture->vaddr_mode));',
+              '    static thread_local uint64_t vs_texaddr_v11 = 0;\n'
+              '    if (((++vs_texaddr_v11 & 0x3FFu) == 1u))\n'
+              '        LOG_DEBUG("[VS-TEXADDR11] axis=V safe=1 type={} mode={} supported={} old_u={} old_v={}",\n'
+              '            log_hex(texture_type), static_cast<uint32_t>(mode), supported,\n'
+              '            static_cast<uint32_t>(texture->uaddr_mode), static_cast<uint32_t>(texture->vaddr_mode));',
+              'LORD V texaddr rate limit',
+          )
+          write(path, content)
+          
+          path = 'vita3k/mem/src/mem.cpp'
+          content = read(path)
+          content = replace_once(
+              content,
+              '    // remove all protections on this range\n'
+              '    unprotect_inner(mem, mapping.address, mapping.size);',
+              '    // [VS-LORD-MEMMAP11] Compact lifetime diagnostic for the crash that occurs\n'
+              '    // while LORD rebuilds character resources near gameplay entry.\n'
+              '    static thread_local uint64_t vs_unmap_diag11 = 0;\n'
+              '    if (((++vs_unmap_diag11 & 0x3Fu) == 1u))\n'
+              '        LOG_DEBUG("[VS-LORD-MEMMAP11] host={} guest={} size={}",\n'
+              '            log_hex(addr_value), log_hex(mapping.address), mapping.size);\n\n'
+              '    // remove all protections on this range\n'
+              '    unprotect_inner(mem, mapping.address, mapping.size);',
+              'LORD mapping diagnostic',
+          )
+          content = replace_once(
+              content,
+              '        auto it = mem.external_mapping.find(addr_value);\n'
+              '        assert(it != mem.external_mapping.end());\n\n'
+              '        mapping = it->second;\n'
+              '        mem.external_mapping.erase(it);',
+              '        auto it = mem.external_mapping.find(addr_value);\n'
+              '        if (it == mem.external_mapping.end()) {\n'
+              '            LOG_WARN("[VS-MEMMAP-HARDEN11] ignoring removal of unknown external mapping host={}", log_hex(addr_value));\n'
+              '            return;\n'
+              '        }\n\n'
+              '        mapping = it->second;\n'
+              '        mem.external_mapping.erase(it);',
+              'external mapping missing-entry hardening',
+          )
+          content = replace_once(
+              content,
+              '        auto prot_it = mem.protect_tree.lower_bound(mapping.address);\n'
+              '        if (prot_it->first + prot_it->second.size <= mapping.address) {',
+              '        auto prot_it = mem.protect_tree.lower_bound(mapping.address);\n'
+              '        // [VS-MEMMAP-HARDEN11] lower_bound may legitimately return end().\n'
+              '        if (prot_it != mem.protect_tree.end() && prot_it->first + prot_it->second.size <= mapping.address) {',
+              'protect-tree end hardening',
+          )
+          write(path, content)
+          
+          # -----------------------------------------------------------------------------
+          # Uniform game cards: title area always reserves two lines and the whole card has
+          # a stable height. Long names ellipsize instead of stretching neighbouring cards.
+          # -----------------------------------------------------------------------------
+          path = 'android/app/src/main/java/org/vita3k/emulator/ui/screens/AppsListScreen.kt'
+          content = read(path)
+          content = replace_once(
+              content,
+              '        modifier = Modifier\n'
+              '            .fillMaxWidth()\n'
+              '            .combinedClickable(',
+              '        modifier = Modifier\n'
+              '            .fillMaxWidth()\n'
+              '            .height(286.dp) // [VS-UNIFORM-CARDS11]\n'
+              '            .combinedClickable(',
+              'uniform game card height',
+          )
+          content = replace_once(
+              content,
+              '            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {\n'
+              '                Text(\n'
+              '                    app.title,\n'
+              '                    style = MaterialTheme.typography.titleSmall,\n'
+              '                    fontWeight = FontWeight.SemiBold,\n'
+              '                    maxLines = 2,\n'
+              '                    overflow = TextOverflow.Ellipsis\n'
+              '                )',
+              '            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {\n'
+              '                Box(modifier = Modifier.height(40.dp), contentAlignment = Alignment.TopStart) {\n'
+              '                    Text(\n'
+              '                        app.title,\n'
+              '                        style = MaterialTheme.typography.titleSmall,\n'
+              '                        fontWeight = FontWeight.SemiBold,\n'
+              '                        maxLines = 2,\n'
+              '                        overflow = TextOverflow.Ellipsis\n'
+              '                    )\n'
+              '                }',
+              'uniform two-line title area',
+          )
+          write(path, content)
+          
+          # -----------------------------------------------------------------------------
+          # GPU custom-driver actions: three compact, stable columns on one row.
+          # -----------------------------------------------------------------------------
+          path = 'android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsSections.kt'
+          content = read(path)
+          old_driver = '''                if (showCustomDriverManagement) {
+                              FlowRow(
+                                  modifier = Modifier.fillMaxWidth(),
+                                  horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                  verticalArrangement = Arrangement.spacedBy(12.dp)
+                              ) {
+                                  OutlinedButton(onClick = onDownloadCustomDriver, enabled = !customDriverBusy) {
+                                      Text(stringResource(R.string.settings_gpu_download_custom_driver))
+                                  }
+                                  FilledTonalButton(onClick = onInstallCustomDriver, enabled = !customDriverBusy) {
+                                      Text(stringResource(R.string.settings_gpu_install_custom_driver))
+                                  }
+                                  if (cfg.customDriverName.isNotEmpty() && cfg.customDriverName in installedCustomDrivers) {
+                                      OutlinedButton(
+                                          onClick = { onRequestRemoveCustomDriver(cfg.customDriverName) },
+                                          enabled = !customDriverBusy
+                                      ) {
+                                          Text(stringResource(R.string.settings_gpu_remove_custom_driver))
+                                      }
+                                  }
+                                  if (customDriverBusy) {
+                                      CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                                  }
+                              }
+                          }
+          '''
+          new_driver = '''                if (showCustomDriverManagement) {
+                              Row(
+                                  modifier = Modifier.fillMaxWidth(),
+                                  horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                  verticalAlignment = Alignment.CenterVertically
+                              ) {
+                                  OutlinedButton(
+                                      onClick = onDownloadCustomDriver,
+                                      enabled = !customDriverBusy,
+                                      modifier = Modifier.weight(1f)
+                                  ) { Text(stringResource(R.string.settings_gpu_download_custom_driver), maxLines = 1) }
+                                  FilledTonalButton(
+                                      onClick = onInstallCustomDriver,
+                                      enabled = !customDriverBusy,
+                                      modifier = Modifier.weight(1f)
+                                  ) { Text(stringResource(R.string.settings_gpu_install_custom_driver), maxLines = 1) }
+                                  OutlinedButton(
+                                      onClick = { onRequestRemoveCustomDriver(cfg.customDriverName) },
+                                      enabled = !customDriverBusy && cfg.customDriverName.isNotEmpty() && cfg.customDriverName in installedCustomDrivers,
+                                      modifier = Modifier.weight(1f)
+                                  ) { Text(stringResource(R.string.settings_gpu_remove_custom_driver), maxLines = 1) }
+                                  if (customDriverBusy)
+                                      CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                              }
+                          }
+          '''
+          content = replace_once(content, old_driver, new_driver, 'three-column driver actions')
+          
+          # Thread an immediate restart notification from High Accuracy to SettingsRoute.
+          if 'import org.vita3k.emulator.data.RestartRequiredSetting\n' not in content:
+              content = content.replace(
+                  'import org.vita3k.emulator.data.PerformanceHudPrefs\n',
+                  'import org.vita3k.emulator.data.PerformanceHudPrefs\nimport org.vita3k.emulator.data.RestartRequiredSetting\n',
+                  1,
+              )
+          content = replace_once(
+              content,
+              '    sessionSafe: Boolean = false,\n    onShowHelp: (SettingsHelpEntry) -> Unit\n) {',
+              '    sessionSafe: Boolean = false,\n'
+              '    onRestartRequiredChange: (RestartRequiredSetting) -> Unit = {}, // [VS-RESTART-NOW11]\n'
+              '    onShowHelp: (SettingsHelpEntry) -> Unit\n) {',
+              'category restart callback signature',
+          )
+          content = replace_once(
+              content,
+              '            sessionSafe = sessionSafe,\n            onInstallCustomDriver = onInstallCustomDriver,',
+              '            sessionSafe = sessionSafe,\n'
+              '            onRestartRequiredChange = onRestartRequiredChange,\n'
+              '            onInstallCustomDriver = onInstallCustomDriver,',
+              'pass restart callback to GPU section',
+          )
+          content = replace_once(
+              content,
+              '    sessionSafe: Boolean,\n    onInstallCustomDriver: () -> Unit,',
+              '    sessionSafe: Boolean,\n'
+              '    onRestartRequiredChange: (RestartRequiredSetting) -> Unit,\n'
+              '    onInstallCustomDriver: () -> Unit,',
+              'GPU restart callback signature',
+          )
+          content = replace_once(
+              content,
+              '                    onSelect = { index -> onUpdate { highAccuracy = index == 1 } },',
+              '                    onSelect = { index ->\n'
+              '                        val enabled = index == 1\n'
+              '                        if (enabled != cfg.highAccuracy) {\n'
+              '                            onUpdate { highAccuracy = enabled }\n'
+              '                            onRestartRequiredChange(RestartRequiredSetting.HighAccuracy)\n'
+              '                        }\n'
+              '                    },',
+              'High Accuracy immediate restart prompt',
+          )
+          write(path, content)
+          
+          # -----------------------------------------------------------------------------
+          # Real process restart. Settings are saved before relaunch, then MainActivity is
+          # recreated in a fresh process so Vulkan/memory-mapping/driver state is rebuilt.
+          # -----------------------------------------------------------------------------
+          path = 'android/app/src/main/java/org/vita3k/emulator/MainActivity.kt'
+          content = read(path)
+          for imp, anchor in (
+              ('import android.app.Activity\n', 'package org.vita3k.emulator\n\n'),
+              ('import android.app.AlarmManager\n', 'import android.app.Activity\n'),
+              ('import android.app.PendingIntent\n', 'import android.app.AlarmManager\n'),
+              ('import android.content.Context\n', 'import android.app.PendingIntent\n'),
+              ('import android.content.Intent\n', 'import android.content.Context\n'),
+              ('import android.os.Process\n', 'import android.os.Build\n'),
+          ):
+              if imp not in content:
+                  content = content.replace(anchor, anchor + imp, 1)
+          content = replace_once(
+              content,
+              '    private fun prepareFrontendRuntime() {\n        NativeLib.prepareFrontend()\n    }\n}',
+              '    private fun prepareFrontendRuntime() {\n'
+              '        NativeLib.prepareFrontend()\n'
+              '    }\n'
+              '}\n\n'
+              '// [VS-RESTART-NOW11] Full process restart available from global or per-game settings.\n'
+              'fun Context.restartVitaStationApplication() {\n'
+              '    val launchIntent = packageManager.getLaunchIntentForPackage(packageName)\n'
+              '        ?: Intent(this, MainActivity::class.java)\n'
+              '    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)\n'
+              '    val pendingIntent = PendingIntent.getActivity(\n'
+              '        this,\n'
+              '        0x5653,\n'
+              '        launchIntent,\n'
+              '        PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_IMMUTABLE\n'
+              '    )\n'
+              '    val alarm = getSystemService(Context.ALARM_SERVICE) as AlarmManager\n'
+              '    alarm.set(AlarmManager.ELAPSED_REALTIME, SystemClock.elapsedRealtime() + 350L, pendingIntent)\n'
+              '    (this as? Activity)?.finishAffinity()\n'
+              '    Process.killProcess(Process.myPid())\n'
+              '}',
+              'MainActivity process restart',
+          )
+          write(path, content)
+          
+          path = 'android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsRoute.kt'
+          content = read(path)
+          if 'import org.vita3k.emulator.restartVitaStationApplication\n' not in content:
+              content = content.replace('import org.vita3k.emulator.R\n', 'import org.vita3k.emulator.R\nimport org.vita3k.emulator.restartVitaStationApplication\n', 1)
+          content = replace_once(
+              content,
+              '                    onShowHelp = { activeHelp = it },\n',
+              '                    onRestartRequiredChange = { setting ->\n'
+              '                        pendingRestartSettings = listOf(setting)\n'
+              '                    },\n'
+              '                    onShowHelp = { activeHelp = it },\n',
+              'route restart callback',
+          )
+          content = replace_once(
+              content,
+              '    onResetControlsLayout: (() -> Unit)?,\n    onShowHelp: (SettingsHelpEntry) -> Unit,\n) {',
+              '    onResetControlsLayout: (() -> Unit)?,\n'
+              '    onRestartRequiredChange: (RestartRequiredSetting) -> Unit,\n'
+              '    onShowHelp: (SettingsHelpEntry) -> Unit,\n'
+              ') {',
+              'content pane restart callback signature',
+          )
+          content = replace_once(
+              content,
+              '                connectedGamepads = connectedGamepads,\n                onShowHelp = onShowHelp\n',
+              '                connectedGamepads = connectedGamepads,\n'
+              '                onRestartRequiredChange = onRestartRequiredChange,\n'
+              '                onShowHelp = onShowHelp\n',
+              'content pane passes restart callback',
+          )
+          old_dialog = '''    pendingRestartSettings?.let { settings ->
+                  AlertDialog(
+                      onDismissRequest = { },
+                      title = { Text(stringResource(R.string.settings_restart_required_title)) },
+                      text = {
+                          ApplyDialogDim()
+                          Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                              Text(stringResource(R.string.settings_restart_required_summary))
+                              Text(
+                                  stringResource(
+                                      R.string.settings_restart_required_message,
+                                      formatRestartRequiredSettings(context, settings)
+                                  )
+                              )
+                          }
+                      },
+                      confirmButton = {
+                          TextButton(onClick = {
+                              pendingRestartSettings = null
+                              val shouldClose = closeAfterRestartNotice
+                              closeAfterRestartNotice = false
+                              if (shouldClose) {
+                                  onBack()
+                              }
+                          }) {
+                              Text(stringResource(R.string.action_ok))
+                          }
+                      }
+                  )
+              }
+          '''
+          new_dialog = '''    pendingRestartSettings?.let { settings ->
+                  fun postponeRestart() {
+                      pendingRestartSettings = null
+                      val shouldClose = closeAfterRestartNotice
+                      closeAfterRestartNotice = false
+                      if (shouldClose) onBack()
+                  }
+                  AlertDialog(
+                      onDismissRequest = ::postponeRestart,
+                      title = { Text(stringResource(R.string.settings_restart_required_title)) },
+                      text = {
+                          ApplyDialogDim()
+                          Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                              Text(stringResource(R.string.settings_restart_required_summary))
+                              Text(
+                                  stringResource(
+                                      R.string.settings_restart_required_message,
+                                      formatRestartRequiredSettings(context, settings)
+                                  )
+                              )
+                          }
+                      },
+                      confirmButton = {
+                          TextButton(onClick = {
+                              // [VS-RESTART-NOW11] Persist pending config, then relaunch a fresh process.
+                              saveSettings {
+                                  pendingRestartSettings = null
+                                  closeAfterRestartNotice = false
+                                  context.restartVitaStationApplication()
+                              }
+                          }) {
+                              Text(stringResource(R.string.settings_restart_app))
+                          }
+                      },
+                      dismissButton = {
+                          TextButton(onClick = ::postponeRestart) {
+                              Text(stringResource(R.string.settings_restart_later))
+                          }
+                      }
+                  )
+              }
+          '''
+          content = replace_once(content, old_dialog, new_dialog, 'functional restart dialog')
+          write(path, content)
+          
+          # -----------------------------------------------------------------------------
+          # Overlay editor backend: individual scale persistence + one Grade control that
+          # combines grid and snapping. The palette controls the editor's own InputOverlay
+          # directly, not an Emulator Activity that does not exist on this settings screen.
+          # -----------------------------------------------------------------------------
+          path = 'android/app/src/main/java/org/vita3k/emulator/overlay/OverlayLayout.kt'
+          content = read(path)
+          old_layout = '''data class OverlayLayout(
+              val positions: Map<Int, OverlayPosition> = emptyMap()
+          ) {
+              fun positionFor(buttonType: Int): OverlayPosition? = positions[buttonType]
+          
+              fun withPosition(buttonType: Int, normalizedX: Float, normalizedY: Float): OverlayLayout =
+                  copy(
+                      positions = positions + (
+                          buttonType to OverlayPosition(
+                              normalizedX = normalizedX.coerceNormalizedCoordinate(),
+                              normalizedY = normalizedY.coerceNormalizedCoordinate()
+                          )
+                      )
+                  )
+          
+              fun normalized(): OverlayLayout =
+                  copy(
+                      positions = positions.mapValues { (_, position) ->
+                          OverlayPosition(
+                              normalizedX = position.normalizedX.coerceNormalizedCoordinate(),
+                              normalizedY = position.normalizedY.coerceNormalizedCoordinate()
+                          )
+                      }
+                  )
+          }
+          '''
+          new_layout = '''data class OverlayLayout(
+              val positions: Map<Int, OverlayPosition> = emptyMap(),
+              val scales: Map<Int, Float> = emptyMap() // [VS-TOUCH-RESIZE11]
+          ) {
+              fun positionFor(buttonType: Int): OverlayPosition? = positions[buttonType]
+              fun scaleFor(buttonType: Int): Float = (scales[buttonType] ?: 1f).coerceControlScale()
+          
+              fun withPosition(buttonType: Int, normalizedX: Float, normalizedY: Float): OverlayLayout =
+                  copy(
+                      positions = positions + (
+                          buttonType to OverlayPosition(
+                              normalizedX = normalizedX.coerceNormalizedCoordinate(),
+                              normalizedY = normalizedY.coerceNormalizedCoordinate()
+                          )
+                      )
+                  )
+          
+              fun withScale(buttonType: Int, scale: Float): OverlayLayout =
+                  copy(scales = scales + (buttonType to scale.coerceControlScale()))
+          
+              fun normalized(): OverlayLayout =
+                  copy(
+                      positions = positions.mapValues { (_, position) ->
+                          OverlayPosition(
+                              normalizedX = position.normalizedX.coerceNormalizedCoordinate(),
+                              normalizedY = position.normalizedY.coerceNormalizedCoordinate()
+                          )
+                      },
+                      scales = scales.mapValues { (_, scale) -> scale.coerceControlScale() }
+                  )
+          }
+          '''
+          content = replace_once(content, old_layout, new_layout, 'per-control scale model')
+          if 'internal fun Float.coerceControlScale()' not in content:
+              content += '\ninternal fun Float.coerceControlScale(): Float =\n    if (isFinite()) coerceIn(0.50f, 2.00f) else 1f\n'
+          write(path, content)
+          
+          path = 'android/app/src/main/java/org/vita3k/emulator/overlay/OverlayStore.kt'
+          content = read(path)
+          content = replace_once(
+              content,
+              '    private const val KEY_POSITION_Y_SUFFIX = ":y"\n',
+              '    private const val KEY_POSITION_Y_SUFFIX = ":y"\n'
+              '    private const val KEY_SCALE_SUFFIX = ":scale" // [VS-TOUCH-RESIZE11]\n',
+              'overlay scale key',
+          )
+          content = replace_once(
+              content,
+              '        val positions = defaultEntries.associate { entry ->\n'
+              '            val fallbackPosition = fallback.positionFor(entry.buttonType) ?: OverlayPosition(0f, 0f)\n'
+              '            entry.buttonType to OverlayPosition(\n'
+              '                normalizedX = prefs.getFloat(\n'
+              '                    positionKey(scopeId, entry.buttonType, KEY_POSITION_X_SUFFIX),\n'
+              '                    fallbackPosition.normalizedX\n'
+              '                ).coerceNormalizedCoordinate(),\n'
+              '                normalizedY = prefs.getFloat(\n'
+              '                    positionKey(scopeId, entry.buttonType, KEY_POSITION_Y_SUFFIX),\n'
+              '                    fallbackPosition.normalizedY\n'
+              '                ).coerceNormalizedCoordinate()\n'
+              '            )\n'
+              '        }\n'
+              '        return OverlayLayout(positions).normalized()',
+              '        val positions = defaultEntries.associate { entry ->\n'
+              '            val fallbackPosition = fallback.positionFor(entry.buttonType) ?: OverlayPosition(0f, 0f)\n'
+              '            entry.buttonType to OverlayPosition(\n'
+              '                normalizedX = prefs.getFloat(\n'
+              '                    positionKey(scopeId, entry.buttonType, KEY_POSITION_X_SUFFIX),\n'
+              '                    fallbackPosition.normalizedX\n'
+              '                ).coerceNormalizedCoordinate(),\n'
+              '                normalizedY = prefs.getFloat(\n'
+              '                    positionKey(scopeId, entry.buttonType, KEY_POSITION_Y_SUFFIX),\n'
+              '                    fallbackPosition.normalizedY\n'
+              '                ).coerceNormalizedCoordinate()\n'
+              '            )\n'
+              '        }\n'
+              '        val scales = defaultEntries.associate { entry ->\n'
+              '            entry.buttonType to prefs.getFloat(\n'
+              '                positionKey(scopeId, entry.buttonType, KEY_SCALE_SUFFIX),\n'
+              '                fallback.scaleFor(entry.buttonType)\n'
+              '            ).coerceControlScale()\n'
+              '        }\n'
+              '        return OverlayLayout(positions = positions, scales = scales).normalized()',
+              'load per-control scales',
+          )
+          content = replace_once(
+              content,
+              '            editor.putFloat(positionKey(scopeId, entry.buttonType, KEY_POSITION_Y_SUFFIX), position.normalizedY)\n',
+              '            editor.putFloat(positionKey(scopeId, entry.buttonType, KEY_POSITION_Y_SUFFIX), position.normalizedY)\n'
+              '            editor.putFloat(positionKey(scopeId, entry.buttonType, KEY_SCALE_SUFFIX), layout.scaleFor(entry.buttonType))\n',
+              'save per-control scales',
+          )
+          content = replace_once(
+              content,
+              '            editor.remove(positionKey(scopeId, entry.buttonType, KEY_POSITION_Y_SUFFIX))\n',
+              '            editor.remove(positionKey(scopeId, entry.buttonType, KEY_POSITION_Y_SUFFIX))\n'
+              '            editor.remove(positionKey(scopeId, entry.buttonType, KEY_SCALE_SUFFIX))\n',
+              'remove per-control scales',
+          )
+          write(path, content)
+          
+          path = 'android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java'
+          content = read(path)
+          content = replace_once(
+              content,
+              '  private boolean mEditSnapEnabled = false;\n',
+              '  private boolean mEditSnapEnabled = false;\n'
+              '  private int mSelectedControlId = -1; // [VS-TOUCH-RESIZE11]\n',
+              'selected control state',
+          )
+          content = replace_once(content, 'Math.round(32f * getResources().getDisplayMetrics().density)', 'Math.round(16f * getResources().getDisplayMetrics().density)', 'finer editor grid')
+          content = replace_once(
+              content,
+              '  public void setEditGridEnabled(boolean enabled) {\n'
+              '    mEditGridEnabled = enabled;\n'
+              '    invalidate();\n'
+              '  }',
+              '  public void setEditGridEnabled(boolean enabled) {\n'
+              '    mEditGridEnabled = enabled;\n'
+              '    mEditSnapEnabled = enabled; // [VS-TOUCH-GRADE11] Grade = grid + snap.\n'
+              '    invalidate();\n'
+              '  }',
+              'single Grade semantics',
+          )
+          content = replace_once(
+              content,
+              '            mButtonBeingConfigured = button;\n            mButtonBeingConfigured.onConfigureTouch(event);',
+              '            mButtonBeingConfigured = button;\n'
+              '            mSelectedControlId = button.getLegacyId();\n'
+              '            mButtonBeingConfigured.onConfigureTouch(event);',
+              'select button for resizing',
+          )
+          content = replace_once(
+              content,
+              '            mDpadBeingConfigured = dpad;\n            mDpadBeingConfigured.onConfigureTouch(event);',
+              '            mDpadBeingConfigured = dpad;\n'
+              '            mSelectedControlId = dpad.getLegacyId();\n'
+              '            mDpadBeingConfigured.onConfigureTouch(event);',
+              'select dpad for resizing',
+          )
+          content = replace_once(
+              content,
+              '            mJoystickBeingConfigured = joystick;\n            mJoystickBeingConfigured.onConfigureTouch(event);',
+              '            mJoystickBeingConfigured = joystick;\n'
+              '            mSelectedControlId = joystick.getLegacyId();\n'
+              '            mJoystickBeingConfigured.onConfigureTouch(event);',
+              'select joystick for resizing',
+          )
+          content = replace_once(
+              content,
+              '  public boolean isEditSnapEnabled() { return mEditSnapEnabled; }\n',
+              '  public boolean isEditSnapEnabled() { return mEditSnapEnabled; }\n\n'
+              '  public void resizeSelectedControl(float factor) { // [VS-TOUCH-RESIZE11]\n'
+              '    if (mSelectedControlId < 0 || mLayout == null || !Float.isFinite(factor) || factor <= 0f)\n'
+              '      return;\n'
+              '    final float next = Math.max(0.50f, Math.min(2.00f, mLayout.scaleFor(mSelectedControlId) * factor));\n'
+              '    mLayout = mLayout.withScale(mSelectedControlId, next);\n'
+              '    refreshControls();\n'
+              '    invalidate();\n'
+              '  }\n\n'
+              '  public void resetSelectedControlScale() {\n'
+              '    if (mSelectedControlId < 0 || mLayout == null) return;\n'
+              '    mLayout = mLayout.withScale(mSelectedControlId, 1.0f);\n'
+              '    refreshControls();\n'
+              '    invalidate();\n'
+              '  }\n',
+              'resize public API',
+          )
+          content = replace_once(
+              content,
+              '            vsButtonWidth(legacyId, layoutBounds, globalScale),\n'
+              '            vsButtonHeight(legacyId, layoutBounds, globalScale));',
+              '            vsButtonWidth(legacyId, layoutBounds, globalScale * layout.scaleFor(legacyId)),\n'
+              '            vsButtonHeight(legacyId, layoutBounds, globalScale * layout.scaleFor(legacyId)));',
+              'button individual geometry scale',
+          )
+          content = replace_once(
+              content,
+              '    final int dpadSize = vsDpadSize(layoutBounds, globalScale);',
+              '    final int dpadSize = vsDpadSize(layoutBounds, globalScale * layout.scaleFor(legacyId));',
+              'dpad individual geometry scale',
+          )
+          content = replace_once(
+              content,
+              '    int outerSize = vsJoystickSize(layoutBounds, globalScale);',
+              '    int outerSize = vsJoystickSize(layoutBounds, globalScale * layout.scaleFor(legacyId));',
+              'joystick individual geometry scale',
+          )
+          write(path, content)
+          
+          path = 'android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/OverlayLayoutEditorDialog.kt'
+          content = read(path)
+          content = replace_once(
+              content,
+              '                    setIsInEditMode(true)\n                    setScale(overlayConfig.overlayScale / 100f)',
+              '                    setIsInEditMode(true)\n'
+              '                    setEditGridEnabled(true) // [VS-TOUCH-GRADE11]\n'
+              '                    setScale(overlayConfig.overlayScale / 100f)',
+              'editor initial Grade',
+          )
+          content = replace_once(
+              content,
+              '        OverlayEditorPalette(\n'
+              '            onDone = ::finishEditor,\n'
+              '            onReset = {\n'
+              '                overlayView?.setLayout(OverlayStore.defaultLayout(context))\n'
+              '            }\n'
+              '        )',
+              '        OverlayEditorPalette(\n'
+              '            onDone = ::finishEditor,\n'
+              '            onReset = { overlayView?.setLayout(OverlayStore.defaultLayout(context)) },\n'
+              '            onGridChanged = { enabled -> overlayView?.setEditGridEnabled(enabled) },\n'
+              '            onScaleSelected = { factor -> overlayView?.resizeSelectedControl(factor) },\n'
+              '            onResetSelectedScale = { overlayView?.resetSelectedControlScale() }\n'
+              '        )',
+              'editor direct palette callbacks',
+          )
+          write(path, content)
+          
+          path = 'android/app/src/main/java/org/vita3k/emulator/ui/components/OverlayEditorPalette.kt'
+          content = read(path)
+          if 'import androidx.compose.foundation.layout.Column\n' not in content:
+              content = content.replace('import androidx.compose.foundation.layout.BoxWithConstraints\n', 'import androidx.compose.foundation.layout.BoxWithConstraints\nimport androidx.compose.foundation.layout.Column\n', 1)
+          start = content.index('@Composable\ninternal fun OverlayEditorPalette(')
+          brace = content.index('{', start)
+          depth = 0
+          end = None
+          for i in range(brace, len(content)):
+              if content[i] == '{':
+                  depth += 1
+              elif content[i] == '}':
+                  depth -= 1
+                  if depth == 0:
+                      end = i + 1
+                      break
+          if end is None:
+              raise SystemExit('::error::FIX11 unable to span OverlayEditorPalette')
+          new_palette = r'''@Composable
+          internal fun OverlayEditorPalette(
+              onDone: () -> Unit,
+              onReset: () -> Unit,
+              onGridChanged: (Boolean) -> Unit,
+              onScaleSelected: (Float) -> Unit,
+              onResetSelectedScale: () -> Unit,
+              modifier: Modifier = Modifier
+          ) {
+              var gridEnabled by rememberSaveable { mutableStateOf(true) }
+          
+              BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+                  var offsetX by rememberSaveable { mutableIntStateOf(0) }
+                  var offsetY by rememberSaveable { mutableIntStateOf(0) }
+                  var panelSize by remember { mutableStateOf(IntSize.Zero) }
+                  val maxOffsetX = ((constraints.maxWidth - panelSize.width) / 2).coerceAtLeast(0)
+                  val maxOffsetY = ((constraints.maxHeight - panelSize.height) / 2).coerceAtLeast(0)
+          
+                  Surface(
+                      modifier = Modifier
+                          .align(Alignment.BottomCenter)
+                          .offset { IntOffset(offsetX, offsetY) }
+                          .padding(bottom = 18.dp)
+                          .widthIn(min = 320.dp, max = 520.dp)
+                          .onSizeChanged { panelSize = it }
+                          .pointerInput(maxOffsetX, maxOffsetY) {
+                              detectDragGestures { change, dragAmount ->
+                                  change.consume()
+                                  offsetX = (offsetX + dragAmount.x.roundToInt()).coerceIn(-maxOffsetX, maxOffsetX)
+                                  offsetY = (offsetY + dragAmount.y.roundToInt()).coerceIn(-maxOffsetY, maxOffsetY)
+                              }
+                          },
+                      shape = RoundedCornerShape(24.dp),
+                      color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                      border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                  ) {
+                      Column(
+                          modifier = Modifier.fillMaxWidth().padding(14.dp),
+                          verticalArrangement = Arrangement.spacedBy(10.dp)
+                      ) {
+                          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                              FilledTonalButton(
+                                  onClick = {
+                                      gridEnabled = !gridEnabled
+                                      onGridChanged(gridEnabled)
+                                  },
+                                  modifier = Modifier.weight(1.2f)
+                              ) {
+                                  val gridState = if (gridEnabled) {
+                                      stringResource(R.string.settings_value_enabled)
+                                  } else {
+                                      stringResource(R.string.settings_value_disabled)
+                                  }
+                                  Text("${stringResource(R.string.emulation_controls_grid)}: $gridState")
+                              }
+                              OutlinedButton(onClick = { onScaleSelected(0.90f) }, modifier = Modifier.weight(1f)) {
+                                  Text(stringResource(R.string.emulation_controls_smaller))
+                              }
+                              OutlinedButton(onClick = { onScaleSelected(1.10f) }, modifier = Modifier.weight(1f)) {
+                                  Text(stringResource(R.string.emulation_controls_larger))
+                              }
+                              OutlinedButton(onClick = onResetSelectedScale, modifier = Modifier.weight(1f)) {
+                                  Text(stringResource(R.string.emulation_controls_reset_size))
+                              }
+                          }
+                          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                              OutlinedButton(onClick = onReset, modifier = Modifier.weight(1f)) {
+                                  Icon(Icons.Default.Restore, contentDescription = null)
+                                  Text(stringResource(R.string.action_reset), modifier = Modifier.padding(start = 6.dp))
+                              }
+                              FilledTonalButton(onClick = onDone, modifier = Modifier.weight(1f)) {
+                                  Icon(Icons.Default.Done, contentDescription = null)
+                                  Text(stringResource(R.string.action_done), modifier = Modifier.padding(start = 6.dp))
+                              }
+                          }
+                      }
+                  }
+              }
+          }'''
+          content = content[:start] + new_palette + content[end:]
+          write(path, content)
+          
+          # -----------------------------------------------------------------------------
+          # Localization cleanup for the settings/help surfaces touched by this release.
+          # English stays fully English; pt-BR gets no English fallback for these dialogs.
+          # -----------------------------------------------------------------------------
+          en = 'android/app/src/main/res/values/strings.xml'
+          pt = 'android/app/src/main/res/values-pt-rBR/strings.xml'
+          for name, value in {
+              'settings_gpu_download_custom_driver': 'Download',
+              'settings_gpu_install_custom_driver': 'Install',
+              'settings_gpu_remove_custom_driver': 'Remove',
+              'settings_restart_required_title': 'Restart Required',
+              'settings_restart_required_summary': 'This change only takes effect after restarting VitaStation.',
+              'settings_restart_app': 'Restart now',
+              'settings_restart_later': 'Later',
+              'emulation_controls_grid': 'Grid',
+              'emulation_controls_smaller': 'Smaller',
+              'emulation_controls_larger': 'Larger',
+              'emulation_controls_reset_size': 'Reset size',
+          }.items():
+              set_string(en, name, value)
+          
+          for name, value in {
+              'settings_gpu_download_custom_driver': 'Baixar',
+              'settings_gpu_install_custom_driver': 'Instalar',
+              'settings_gpu_remove_custom_driver': 'Remover',
+              'settings_gpu_custom_driver_desc': 'Selecione o driver Vulkan usado pelo VitaStation. Drivers personalizados podem melhorar compatibilidade e desempenho em GPUs compatíveis.',
+              'settings_gpu_custom_driver_active_desc': 'O driver personalizado selecionado está carregado e ativo.',
+              'settings_gpu_custom_driver_fallback_desc': 'O driver personalizado não pôde ser carregado. O VitaStation está usando o driver padrão do sistema.',
+              'settings_gpu_screen_filter_desc': 'Selecione o filtro final aplicado à imagem exibida.',
+              'settings_gpu_accuracy_desc': 'Define o nível de precisão do renderizador Vulkan. Alta pode melhorar a imagem, mas reduzir o desempenho.',
+              'settings_gpu_async_pipeline_desc': 'Permite compilar pipelines em paralelo usando várias threads. Reduz travamentos durante a compilação, mas pode causar falhas gráficas temporárias.',
+              'settings_gpu_memory_mapping_desc': 'Escolha como a memória do PS Vita é mapeada para o renderizador. Alterar esta opção exige reiniciar o VitaStation.',
+              'settings_gpu_resolution_desc': 'Define a resolução interna de renderização. Valores maiores melhoram a nitidez e aumentam o uso da GPU.',
+              'settings_restart_required_title': 'Reinício necessário',
+              'settings_restart_required_summary': 'Esta alteração só entra em vigor após reiniciar o VitaStation.',
+              'settings_restart_required_message': 'Configurações alteradas que serão aplicadas após o reinício:\\n- %1$s',
+              'settings_restart_app': 'Reiniciar agora',
+              'settings_restart_later': 'Depois',
+              'emulation_controls_grid': 'Grade',
+              'emulation_controls_smaller': 'Diminuir',
+              'emulation_controls_larger': 'Aumentar',
+              'emulation_controls_reset_size': 'Tamanho padrão',
+          }.items():
+              set_string(pt, name, value)
+          
+          # Make sure user-facing L2/R2/L3/R3/touch utilities stay localized in pt-BR.
+          for name, value in {
+              'settings_controls_l2r2': 'Mostrar botões L2 / R2',
+              'settings_controls_l3r3': 'Mostrar botões L3 / R3',
+              'settings_controls_touch_switch': 'Mostrar alternador de touchscreen',
+              'settings_controls_hide_toggle': 'Mostrar botão de ocultar',
+          }.items():
+              set_string(pt, name, value)
+          
+          # -----------------------------------------------------------------------------
+          # Protection: the R2 mosaic fix, Gintama kernel sync and FrameGen are immutable.
+          # -----------------------------------------------------------------------------
+          if sha('vita3k/kernel/src/sync_primitives.cpp') != protected_before['gintama_sync']:
+              raise SystemExit('::error::FIX11 touched Gintama kernel sync')
+          if sha('vita3k/renderer/src/vulkan/frame_generation.cpp') != protected_before['framegen']:
+              raise SystemExit('::error::FIX11 touched frozen FrameGen')
+          if sha('vita3k/shaders-builtin/vulkan/surface_cast_reinterpret.comp') != protected_before['typeless_shader']:
+              raise SystemExit('::error::FIX11 changed the R2 Typeless shader that fixed Uncharted mosaic')
+          if sha('vita3k/shaders-builtin/vulkan/surface_cast_reinterpret.comp.spv') != protected_before['typeless_spv']:
+              raise SystemExit('::error::FIX11 changed the verified R2 Typeless SPIR-V')
+          
+          print('[VS-FIX11-MEGA] delta applied')
+          print('[VS-FIX11-MEGA] R2 mosaic shader frozen; phase persistence + Gintama High A/B + LORD diagnostics + UX/editor landed')
+          PY
+
+      - name: FIX11 MEGA regression gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import subprocess
+
+          def text(path):
+              return Path(path).read_text(encoding='utf-8')
+
+          def require(path, *markers):
+              data = text(path)
+              for marker in markers:
+                  if marker not in data:
+                      raise SystemExit(f'::error::FIX11 missing marker in {path}: {marker}')
+
+          require('android/app/build.gradle', 'versionCode = 54', 'versionName = "0.3.0-alpha4-fix11-mega"')
+          require('vita3k/renderer/src/vulkan/surface_cache.cpp', '[VS-UNCHARTED-PHASE11-PERSIST]', 'uncharted_phase_memory[ite->first] = true')
+          require('vita3k/renderer/include/renderer/vulkan/surface_cache.h', '[VS-UNCHARTED-PHASE11-PERSIST]', 'uncharted_phase_memory')
+          require('vita3k/renderer/src/vulkan/renderer.cpp', '[VS-GINTAMA-HIGH-SAFE11]', 'game_id == "PCSG01073"', '!gintama_high_safe')
+          require('vita3k/modules/SceGxm/SceGxm.cpp', '[VS-TEXADDR11]', 'vs_texaddr_u11', 'vs_texaddr_v11')
+          require('vita3k/mem/src/mem.cpp', '[VS-LORD-MEMMAP11]', '[VS-MEMMAP-HARDEN11]')
+          require('android/app/src/main/java/org/vita3k/emulator/MainActivity.kt', '[VS-RESTART-NOW11]', 'restartVitaStationApplication()', 'Process.killProcess')
+          require('android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsRoute.kt', '[VS-RESTART-NOW11]', 'settings_restart_app', 'settings_restart_later')
+          require('android/app/src/main/java/org/vita3k/emulator/ui/screens/AppsListScreen.kt', '[VS-UNIFORM-CARDS11]', '.height(286.dp)')
+          require('android/app/src/main/java/org/vita3k/emulator/overlay/OverlayLayout.kt', '[VS-TOUCH-RESIZE11]', 'withScale', 'scaleFor')
+          require('android/app/src/main/java/org/vita3k/emulator/overlay/OverlayStore.kt', '[VS-TOUCH-RESIZE11]', 'KEY_SCALE_SUFFIX')
+          require('android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java', '[VS-TOUCH-GRADE11]', '[VS-TOUCH-RESIZE11]', 'resizeSelectedControl')
+          require('android/app/src/main/java/org/vita3k/emulator/ui/components/OverlayEditorPalette.kt', 'onGridChanged', 'onScaleSelected', 'emulation_controls_smaller')
+          require('android/app/src/main/res/values-pt-rBR/strings.xml', 'Reiniciar agora', 'Compilação assíncrona', 'O driver personalizado selecionado está carregado e ativo.', 'Tamanho padrão')
+
+          framegen = subprocess.check_output(['git', 'hash-object', 'vita3k/renderer/src/vulkan/frame_generation.cpp'], text=True).strip()
+          if framegen != '1e7cc634f3308566b6ea3d972b73c55086f8f781':
+              raise SystemExit(f'::error::FIX11 FrameGen drift actual={framegen}')
+
+          active_workflow = Path('.github/workflows/android-build.yml').read_text(encoding='utf-8').lower()
+          if 'vitastation-' + 'bootstrap.yml' in active_workflow:
+              raise SystemExit('::error::FIX11 forbidden Bootstrap reference')
+
+          print('[VS-FIX11-MEGA] regression gates passed')
+          PY
+
       - name: Set up Java 17
         uses: actions/setup-java@v5
         with:
@@ -2826,13 +3795,13 @@ jobs:
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build signed VitaStation FIX10-R2 APK
+      - name: Build signed VitaStation FIX11 MEGA APK
         shell: bash
         run: |
           set -euo pipefail
           bash ./.ci/build-android.sh artifacts/vitastation-android
 
-      - name: Verify FIX10-R2 shader is actually packaged in APK
+      - name: Verify frozen R2 shader is packaged in FIX11 APK
         shell: bash
         run: |
           set -euo pipefail
@@ -2877,23 +3846,23 @@ jobs:
           print('[VS-FIX10-R2] FrameGen remained byte-identical')
           PY
 
-      - name: Rename and hash FIX10-R2 APK
+      - name: Rename and hash FIX11 MEGA APK
         shell: bash
         run: |
           set -euo pipefail
           SRC='artifacts/vitastation-android/app.apk'
-          DST="artifacts/vitastation-android/$FIX10R2_APK_NAME"
+          DST="artifacts/vitastation-android/$FIX11_APK_NAME"
           test -s "$SRC"
           mv "$SRC" "$DST"
-          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX10R2_APK_NAME.sha256"
+          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX11_APK_NAME.sha256"
           ls -lh "$DST"
 
-      - name: Upload VitaStation FIX10-R2 APK
+      - name: Upload VitaStation FIX11 MEGA APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.3.0-Alpha4-FIX10-R2-Uncharted-PhaseView-Android-Signed
+          name: VitaStation-v0.3.0-Alpha4-FIX11-Mega-Android-Signed
           path: |
-            artifacts/vitastation-android/${{ env.FIX10R2_APK_NAME }}
-            artifacts/vitastation-android/${{ env.FIX10R2_APK_NAME }}.sha256
+            artifacts/vitastation-android/${{ env.FIX11_APK_NAME }}
+            artifacts/vitastation-android/${{ env.FIX11_APK_NAME }}.sha256
           if-no-files-found: error
           retention-days: 30

@@ -5317,9 +5317,12 @@ jobs:
                   break
               pending_hits13.append(hit13)
               search_from13 = hit13 + 1
-          if len(pending_hits13) != 1:
+          if not pending_hits13:
               raise SystemExit(
-                  f'::error::FIX13 late-resolve insertion marker: expected one occurrence, found {len(pending_hits13)}')
+                  '::error::FIX13 late-resolve insertion marker: no occurrence found')
+          # FIX12 has two late_resolve_in_renderpass blocks. The first stops/prepares
+          # the render pass; the final one resumes it after the cast. Queue FIX13
+          # immediately before that final resume block.
 
           queue_block13 = r'''
                   if (state.app_title_id == "PCSA00029"
@@ -5417,7 +5420,8 @@ jobs:
                       }
                   }
           '''
-          insert_at13 = pending_hits13[0]
+          insert_at13 = pending_hits13[-1]
+          print(f'[VS-FIX13] late-resolve markers={len(pending_hits13)}; using final resume marker')
           content = content[:insert_at13] + queue_block13 + content[insert_at13:]
           write(path, content)
 

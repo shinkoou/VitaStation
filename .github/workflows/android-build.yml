@@ -1,9 +1,12 @@
-# VitaStation Alpha 4 FIX14 GINTAMA FEEDBACK BOUNDARY
-# FIX12 is the verified structural base. This delta only changes PCSG01073 same-image feedback pass placement.
+# VitaStation Alpha 4 FIX15 GINTAMA BARRIER + LORD COLD PIPELINE
+# FIX12 is the verified structural base. FIX14 boundary remains intact.
+# FIX15 adds exactly one isolated delta per title:
+# - PCSG01073: explicit producer->transfer barrier when same-image feedback resolves with no render pass open.
+# - PCSG00008: skip Vulkan pipeline-cache load only; shader cache stays enabled.
 # Keep FrameGen, kernel sync and Uncharted R2/Visible12 frozen. No driver-name workaround.
-# Upload/replace as .github/workflows/android-build.yml for the controlled FIX14 build.
+# Upload/replace as .github/workflows/android-build.yml for the controlled FIX15 build.
 
-name: VitaStation Android APK - Alpha 4 FIX14-R2 GINTAMA FEEDBACK BOUNDARY
+name: VitaStation Android APK - Alpha 4 FIX15 GINTAMA BARRIER + LORD COLD PIPELINE
 
 "on":
   workflow_dispatch:
@@ -15,17 +18,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: vitastation-android-fix14-gintama-feedback-boundary-${{ github.ref }}
+  group: vitastation-android-fix15-gintama-barrier-lord-cold-pipeline-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   VCPKG_ROOT: /usr/local/share/vcpkg
   VITASTATION_SIGNING_CERT_SHA256: fc57542b62221ad0c0550d12b2791e4e40794e980c9f26a86d83250d67ed5d30
-  FIX14_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX14-Gintama-Feedback-Boundary-Signed.apk
+  FIX15_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX15-Gintama-Barrier-Lord-Cold-Pipeline-Signed.apk
 
 jobs:
   android-build:
-    name: Build VitaStation v0.3.0 Alpha 4 FIX14-R2 GINTAMA FEEDBACK BOUNDARY
+    name: Build VitaStation v0.3.0 Alpha 4 FIX15 GINTAMA BARRIER + LORD COLD PIPELINE
     runs-on: ubuntu-latest
 
     steps:
@@ -5279,6 +5282,167 @@ jobs:
           print('[VS-FIX14] title-scoped between-draw feedback boundary verified')
           PY
 
+      - name: Apply FIX15 Gintama out-of-pass barrier and LORD cold pipeline cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          def read(path):
+              return Path(path).read_text(encoding='utf-8')
+
+          def write(path, content):
+              Path(path).write_text(content, encoding='utf-8')
+
+          def replace_once(content, old, new, label):
+              count = content.count(old)
+              if count != 1:
+                  raise SystemExit(f'::error::FIX15 {label}: expected one anchor, found {count}')
+              return content.replace(old, new, 1)
+
+          path = 'android/app/build.gradle'
+          content = read(path)
+          content = replace_once(content, 'versionCode = 57', 'versionCode = 58', 'versionCode')
+          content = replace_once(
+              content,
+              'versionName = "0.3.0-alpha4-fix14-gintama-feedback-boundary"',
+              'versionName = "0.3.0-alpha4-fix15-gintama-barrier-lord-cold-pipeline"',
+              'versionName',
+          )
+          write(path, content)
+
+          path = 'vita3k/renderer/src/vulkan/surface_cache.cpp'
+          content = read(path)
+          state_anchor = '''        const bool gintama_feedback_boundary14 =
+                      state.app_title_id == "PCSG01073"
+                      && is_same_image
+                      && late_resolve_in_renderpass; // [VS-GINTAMA-FEEDBACK-BOUNDARY14]
+                  vk::CommandBuffer cmd_buffer = needs_late_resolve
+          '''
+          state_new = '''        const bool gintama_feedback_boundary14 =
+                      state.app_title_id == "PCSG01073"
+                      && is_same_image
+                      && late_resolve_in_renderpass; // [VS-GINTAMA-FEEDBACK-BOUNDARY14]
+                  const bool gintama_feedback_outside_pass15 =
+                      state.app_title_id == "PCSG01073"
+                      && is_same_image
+                      && needs_late_resolve
+                      && !late_resolve_in_renderpass; // [VS-GINTAMA-FEEDBACK-BARRIER15]
+                  vk::CommandBuffer cmd_buffer = needs_late_resolve
+          '''
+          content = replace_once(content, state_anchor, state_new, 'Gintama out-of-pass state')
+
+          barrier_anchor = '''            if (state.features.support_shader_interlock) {
+                          context->current_shader_interlock_pass = state.pipeline_cache.retrieve_render_pass(
+                              context->current_color_format, true, true, !context->record.color_surface.data, true);
+                      }
+                  }
+
+                  if (casted == nullptr) {
+          '''
+          barrier_new = '''            if (state.features.support_shader_interlock) {
+                          context->current_shader_interlock_pass = state.pipeline_cache.retrieve_render_pass(
+                              context->current_color_format, true, true, !context->record.color_surface.data, true);
+                      }
+                  }
+
+                  if (gintama_feedback_outside_pass15) {
+                      vk::ImageMemoryBarrier gintama_to_transfer15{
+                          .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eShaderWrite,
+                          .dstAccessMask = vk::AccessFlagBits::eTransferRead,
+                          .oldLayout = vk::ImageLayout::eGeneral,
+                          .newLayout = vk::ImageLayout::eGeneral,
+                          .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                          .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                          .image = info.texture.image,
+                          .subresourceRange = vkutil::color_subresource_range
+                      };
+                      cmd_buffer.pipelineBarrier(
+                          vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eFragmentShader,
+                          vk::PipelineStageFlagBits::eTransfer,
+                          vk::DependencyFlags{}, {}, {}, gintama_to_transfer15);
+
+                      static thread_local uint64_t gintama_feedback_barrier_log15 = 0;
+                      if (((++gintama_feedback_barrier_log15 & 0xFFu) == 1u)) {
+                          LOG_INFO(
+                              "[VS-GINTAMA-FEEDBACK-BARRIER15] out-of-pass producer->transfer barrier surface={} scene={} draw={} generation={}",
+                              log_hex(ite->first), context->scene_timestamp, context->draw_timestamp, source_generation);
+                      }
+                  }
+
+                  if (casted == nullptr) {
+          '''
+          content = replace_once(content, barrier_anchor, barrier_new, 'Gintama out-of-pass barrier')
+          write(path, content)
+
+          path = 'vita3k/renderer/src/vulkan/pipeline_cache.cpp'
+          content = read(path)
+          cache_anchor = '''void PipelineCache::read_pipeline_cache() {
+              const std::string pipeline_cache_name = fmt::format("pipeline-cache-vk{}.dat", shader::CURRENT_VERSION);
+          '''
+          cache_new = '''void PipelineCache::read_pipeline_cache() {
+              if (state.app_title_id == "PCSG00008") {
+                  LOG_INFO_ONCE("[VS-LORD-PIPELINE-CACHE15] skipping Vulkan pipeline-cache load for PCSG00008; shader cache remains enabled");
+                  return;
+              }
+
+              const std::string pipeline_cache_name = fmt::format("pipeline-cache-vk{}.dat", shader::CURRENT_VERSION);
+          '''
+          content = replace_once(content, cache_anchor, cache_new, 'LORD pipeline cache bypass')
+          write(path, content)
+
+          print('[VS-FIX15] PCSG01073 out-of-pass same-image resolve now gets an explicit producer->transfer barrier')
+          print('[VS-FIX15] PCSG00008 skips Vulkan pipeline-cache loading only; shader cache/precompile remain enabled')
+          print('[VS-FIX15] FIX14 boundary retained; FrameGen, kernel sync and Uncharted untouched')
+          PY
+
+      - name: FIX15 Gintama and LORD regression gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          def require(path, *tokens):
+              text = Path(path).read_text(encoding='utf-8')
+              for token in tokens:
+                  if token not in text:
+                      raise SystemExit(f'::error::FIX15 gate missing {token!r} in {path}')
+              return text
+
+          require(
+              'android/app/build.gradle',
+              'versionCode = 58',
+              'versionName = "0.3.0-alpha4-fix15-gintama-barrier-lord-cold-pipeline"',
+          )
+          surface = require(
+              'vita3k/renderer/src/vulkan/surface_cache.cpp',
+              '[VS-GINTAMA-FEEDBACK-BOUNDARY14]',
+              '[VS-GINTAMA-FEEDBACK-BARRIER15]',
+              'gintama_feedback_outside_pass15',
+              'gintama_to_transfer15',
+              'vk::AccessFlagBits::eTransferRead',
+          )
+          if surface.count('[VS-GINTAMA-FEEDBACK-BARRIER15]') != 2:
+              raise SystemExit('::error::FIX15 expected declaration marker + runtime log marker for Gintama barrier')
+
+          pipeline = require(
+              'vita3k/renderer/src/vulkan/pipeline_cache.cpp',
+              '[VS-LORD-PIPELINE-CACHE15]',
+              'state.app_title_id == "PCSG00008"',
+              'shader cache remains enabled',
+          )
+          func = pipeline[pipeline.index('void PipelineCache::read_pipeline_cache() {'):]
+          func = func[:func.index('void PipelineCache::save_pipeline_cache()')]
+          if func.index('[VS-LORD-PIPELINE-CACHE15]') > func.index('Found pipeline cache, reading...'):
+              raise SystemExit('::error::FIX15 LORD bypass must execute before cache file load')
+
+          print('[VS-FIX15] regression gates passed')
+          print('[VS-FIX15] Gintama barrier is PCSG01073-scoped and out-of-pass only')
+          print('[VS-FIX15] LORD bypass is PCSG00008-scoped; shader cache remains enabled')
+          PY
+
       - name: Set up Java 17
         uses: actions/setup-java@v5
         with:
@@ -5335,13 +5499,13 @@ jobs:
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build signed VitaStation FIX14 GINTAMA FEEDBACK BOUNDARY APK
+      - name: Build signed VitaStation FIX15 GINTAMA BARRIER + LORD COLD PIPELINE APK
         shell: bash
         run: |
           set -euo pipefail
           bash ./.ci/build-android.sh artifacts/vitastation-android
 
-      - name: Verify frozen R2 shader is packaged in FIX14 APK
+      - name: Verify frozen R2 shader is packaged in FIX15 APK
         shell: bash
         run: |
           set -euo pipefail
@@ -5386,23 +5550,23 @@ jobs:
           print('[VS-FIX10-R2] FrameGen remained byte-identical')
           PY
 
-      - name: Rename and hash FIX14 GINTAMA FEEDBACK BOUNDARY APK
+      - name: Rename and hash FIX15 GINTAMA BARRIER + LORD COLD PIPELINE APK
         shell: bash
         run: |
           set -euo pipefail
           SRC='artifacts/vitastation-android/app.apk'
-          DST="artifacts/vitastation-android/$FIX14_APK_NAME"
+          DST="artifacts/vitastation-android/$FIX15_APK_NAME"
           test -s "$SRC"
           mv "$SRC" "$DST"
-          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX14_APK_NAME.sha256"
+          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX15_APK_NAME.sha256"
           ls -lh "$DST"
 
-      - name: Upload VitaStation FIX14 GINTAMA FEEDBACK BOUNDARY APK
+      - name: Upload VitaStation FIX15 GINTAMA BARRIER + LORD COLD PIPELINE APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.3.0-Alpha4-FIX14-Gintama-Feedback-Boundary-Android-Signed
+          name: VitaStation-v0.3.0-Alpha4-FIX15-Gintama-Barrier-Lord-Cold-Pipeline-Android-Signed
           path: |
-            artifacts/vitastation-android/${{ env.FIX14_APK_NAME }}
-            artifacts/vitastation-android/${{ env.FIX14_APK_NAME }}.sha256
+            artifacts/vitastation-android/${{ env.FIX15_APK_NAME }}
+            artifacts/vitastation-android/${{ env.FIX15_APK_NAME }}.sha256
           if-no-files-found: error
           retention-days: 30

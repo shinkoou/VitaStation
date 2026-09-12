@@ -3,7 +3,7 @@
 # Keep FrameGen, kernel sync and Uncharted R2/Visible12 frozen. No driver-name workaround.
 # Upload/replace as .github/workflows/android-build.yml for the controlled FIX14 build.
 
-name: VitaStation Android APK - Alpha 4 FIX14 GINTAMA FEEDBACK BOUNDARY
+name: VitaStation Android APK - Alpha 4 FIX14-R2 GINTAMA FEEDBACK BOUNDARY
 
 "on":
   workflow_dispatch:
@@ -25,7 +25,7 @@ env:
 
 jobs:
   android-build:
-    name: Build VitaStation v0.3.0 Alpha 4 FIX14 GINTAMA FEEDBACK BOUNDARY
+    name: Build VitaStation v0.3.0 Alpha 4 FIX14-R2 GINTAMA FEEDBACK BOUNDARY
     runs-on: ubuntu-latest
 
     steps:
@@ -5247,8 +5247,33 @@ jobs:
               if forbidden in local:
                   raise SystemExit(f'::error::FIX14 forbidden token near Gintama boundary: {forbidden}')
           
-          if local.count('context->start_render_pass(false);') != 1:
-              raise SystemExit('::error::FIX14 expected exactly one guarded immediate restart near boundary')
+          # Verify the guarded resume structurally instead of counting every
+          # start_render_pass(false) in a broad text window. FIX12 legitimately
+          # contains other render-pass restart sites near this function, so the
+          # previous count-based gate produced a false positive in Run 94030434977.
+          back_to_render = 'vk::DependencyFlags{}, {}, {}, back_to_render);'
+          resume_pos = surface.find(back_to_render, marker)
+          if resume_pos < 0:
+              raise SystemExit('::error::FIX14 back_to_render barrier missing after Gintama boundary')
+
+          guard_token = 'if (!gintama_feedback_boundary14) {'
+          guard_pos = surface.find(guard_token, resume_pos)
+          if guard_pos < 0 or guard_pos - resume_pos > 1500:
+              raise SystemExit('::error::FIX14 guarded Gintama resume is not attached to back_to_render')
+
+          between_barrier_and_guard = surface[resume_pos + len(back_to_render):guard_pos]
+          if 'context->start_render_pass(false);' in between_barrier_and_guard:
+              raise SystemExit('::error::FIX14 unconditional immediate render-pass restart still present')
+
+          guard_local = surface[guard_pos:guard_pos + 1200]
+          for token in (
+              'context->start_render_pass(false);',
+              '} else {',
+              '// [VS-GINTAMA-FEEDBACK-BOUNDARY14]',
+              'deferred render-pass restart',
+          ):
+              if token not in guard_local:
+                  raise SystemExit(f'::error::FIX14 guarded resume missing token: {token}')
           
           print('[VS-FIX14] regression gates passed')
           print('[VS-FIX14] title-scoped between-draw feedback boundary verified')

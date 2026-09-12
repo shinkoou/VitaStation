@@ -4986,7 +4986,6 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          import hashlib
           
           
           def data(path):
@@ -5006,9 +5005,6 @@ jobs:
                   if token in text:
                       raise SystemExit(f'::error::FIX12 gate forbidden token {token!r} in {path}')
           
-          
-          def sha256(path):
-              return hashlib.sha256(Path(path).read_bytes()).hexdigest()
           
           require('android/app/build.gradle', 'versionCode = 55', 'versionName = "0.3.0-alpha4-fix12-structural"')
           
@@ -5075,10 +5071,8 @@ jobs:
           forbid('android/app/src/main/java/org/vita3k/emulator/MainActivity.kt',
                  'AlarmManager.ELAPSED_REALTIME', 'Process.killProcess(Process.myPid())')
           
-          # Frozen working features.
-          framegen = sha256('vita3k/renderer/src/vulkan/frame_generation.cpp')
-          if framegen != '1e7cc634f3308566b6ea3d972b73c55086f8f781':
-              raise SystemExit(f'::error::FIX12 FrameGen drift actual={framegen}')
+          # Frozen FrameGen is already protected before/after FIX12 and verified again
+          # after the APK build with git hash-object. Avoid duplicate digest algorithms here.
           
           # R2 shader source and binary are protected by the patch itself; keep marker gates too.
           require('vita3k/renderer/src/vulkan/surface_cache.cpp', '[VS-TYPELESS-HD-STAGING]', '[VS-UNCHARTED-TYPELESS-CACHE9]')

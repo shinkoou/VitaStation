@@ -3905,9 +3905,9 @@ jobs:
               start = content.find(marker)
               if start < 0:
                   raise SystemExit(f'::error::FIX12 {label}: function marker missing: {marker}')
-              annotation = content.rfind('@Composable', 0, start)
-              if annotation >= 0 and content[annotation:start].strip() == '@Composable':
-                  start = annotation
+              # [VS-FIX12-COMPOSABLE-SAFE] Preserve annotations immediately before a
+              # function when the marker starts at `private fun`. The previous helper
+              # stripped @Composable from HacksSettingsSection and caused Kotlin compile failure.
               brace = content.find('{', start)
               if brace < 0:
                   raise SystemExit(f'::error::FIX12 {label}: opening brace missing')
@@ -5013,6 +5013,9 @@ jobs:
           start = hacks.find('private fun HacksSettingsSection(')
           if start < 0:
               raise SystemExit('::error::FIX12 HacksSettingsSection missing')
+          prefix = hacks[max(0, start - 96):start]
+          if '@Composable' not in prefix:
+              raise SystemExit('::error::FIX12 HacksSettingsSection lost @Composable annotation')
           end = hacks.find('\n@Composable', start + 1)
           if end < 0:
               end = len(hacks)

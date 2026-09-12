@@ -1,9 +1,9 @@
-# VitaStation Alpha 4 FIX13 UNCHARTED PENDINGCAST
-# Replays the verified FIX9 stack, then applies one title-scoped Uncharted Typeless phase-view delta.
-# FIX10-R2 recompiles and verifies the SPIR-V actually packaged in the APK.
-# No Bootstrap. Gintama sync and frozen FrameGen remain protected.
+# VitaStation Alpha 4 FIX14 GINTAMA FEEDBACK BOUNDARY
+# FIX12 is the verified structural base. This delta only changes PCSG01073 same-image feedback pass placement.
+# Keep FrameGen, kernel sync and Uncharted R2/Visible12 frozen. No driver-name workaround.
+# Upload/replace as .github/workflows/android-build.yml for the controlled FIX14 build.
 
-name: VitaStation Android APK - Alpha 4 FIX13 UNCHARTED PENDINGCAST
+name: VitaStation Android APK - Alpha 4 FIX14 GINTAMA FEEDBACK BOUNDARY
 
 "on":
   workflow_dispatch:
@@ -15,17 +15,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: vitastation-android-fix13-uncharted-pendingcast-${{ github.ref }}
+  group: vitastation-android-fix14-gintama-feedback-boundary-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   VCPKG_ROOT: /usr/local/share/vcpkg
   VITASTATION_SIGNING_CERT_SHA256: fc57542b62221ad0c0550d12b2791e4e40794e980c9f26a86d83250d67ed5d30
-  FIX13_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX13-Uncharted-PendingCast-Signed.apk
+  FIX14_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX14-Gintama-Feedback-Boundary-Signed.apk
 
 jobs:
   android-build:
-    name: Build VitaStation v0.3.0 Alpha 4 FIX13 UNCHARTED PENDINGCAST
+    name: Build VitaStation v0.3.0 Alpha 4 FIX14 GINTAMA FEEDBACK BOUNDARY
     runs-on: ubuntu-latest
 
     steps:
@@ -5085,440 +5085,173 @@ jobs:
           PY
 
 
-      - name: Apply FIX13 Uncharted draw-time PendingCast delta
+      - name: Apply FIX14 Gintama safe feedback render-pass boundary
         shell: bash
         run: |
           set -euo pipefail
           python3 <<'PY'
           from pathlib import Path
-
+          
           def read(path):
               return Path(path).read_text(encoding='utf-8')
-
+          
           def write(path, content):
               Path(path).write_text(content, encoding='utf-8')
-
+          
           def replace_once(content, old, new, label):
               count = content.count(old)
               if count != 1:
-                  raise SystemExit(f'::error::FIX13 {label}: expected one anchor, found {count}')
+                  raise SystemExit(f'::error::FIX14 {label}: expected one anchor, found {count}')
               return content.replace(old, new, 1)
-
+          
+          # Version only. Keep the verified FIX12 stack underneath this A/B.
           path = 'android/app/build.gradle'
           content = read(path)
-          content = replace_once(content, 'versionCode = 55', 'versionCode = 56', 'versionCode')
+          content = replace_once(content, 'versionCode = 55', 'versionCode = 57', 'versionCode')
           content = replace_once(
               content,
               'versionName = "0.3.0-alpha4-fix12-structural"',
-              'versionName = "0.3.0-alpha4-fix13-uncharted-pendingcast"',
+              'versionName = "0.3.0-alpha4-fix14-gintama-feedback-boundary"',
               'versionName',
           )
           write(path, content)
-
-          path = 'vita3k/renderer/include/renderer/vulkan/surface_cache.h'
-          content = read(path)
-
-          if '#include <functional>' not in content:
-              content = replace_once(
-                  content,
-                  '#include <optional>\n',
-                  '#include <functional>\n#include <optional>\n',
-                  'surface_cache functional include',
-              )
-
-          if 'struct VKContext;' not in content:
-              content = replace_once(
-                  content,
-                  'struct VKRenderTarget;\nstruct VKState;\n',
-                  'struct VKContext;\nstruct VKRenderTarget;\nstruct VKState;\n',
-                  'VKContext forward declaration',
-              )
-
-          pending_anchor = '''    ColorSurfaceCacheInfo *last_written_surface = nullptr;
-          '''
-          pending_block = '''    ColorSurfaceCacheInfo *last_written_surface = nullptr;
-
-              // [VS-UNCHARTED-PENDING13] Vita3K-Plus style draw-time refresh queue.
-              // Title-scoped at enqueue/call sites so every non-PCSA00029 game keeps
-              // the verified VitaStation FIX12 path byte-for-byte.
-              struct PendingCast13 {
-                  vk::ImageView view = nullptr;
-                  ColorSurfaceCacheInfo *info = nullptr;
-                  vk::Rect2D read_region{};
-                  std::function<void(vk::CommandBuffer)> record;
-              };
-              std::vector<PendingCast13> pending_casts13;
-
-              void record_pending_cast13(PendingCast13 &cast, VKContext &context);
-          '''
-          content = replace_once(content, pending_anchor, pending_block, 'PendingCast13 storage')
-
-          public_anchor = '''    std::optional<TextureLookupResult> retrieve_color_surface_as_texture(const SceGxmTexture &texture, const SceGxmColorBaseFormat base_format, TextureViewport *texture_viewport);
-
-              SurfaceRetrieveResult retrieve_depth_stencil_for_framebuffer'''
-          public_block = '''    std::optional<TextureLookupResult> retrieve_color_surface_as_texture(const SceGxmTexture &texture, const SceGxmColorBaseFormat base_format, TextureViewport *texture_viewport);
-
-              // [VS-UNCHARTED-PENDING13] Execute only casts referenced by the draw's
-              // currently bound texture views.
-              void perform_pending_casts13(
-                  VKContext &context,
-                  uint16_t vert_texture_count,
-                  uint16_t frag_texture_count);
-
-              SurfaceRetrieveResult retrieve_depth_stencil_for_framebuffer'''
-          content = replace_once(content, public_anchor, public_block, 'PendingCast13 public API')
-          write(path, content)
-
+          
           path = 'vita3k/renderer/src/vulkan/surface_cache.cpp'
           content = read(path)
-
-          if '#include <algorithm>' not in content:
-              content = replace_once(
-                  content,
-                  '#include <array>\n',
-                  '#include <algorithm>\n#include <array>\n',
-                  'surface_cache algorithm include',
-              )
-
-          methods_anchor = '''void VKSurfaceCache::destroy_surface(ColorSurfaceCacheInfo &info) {
-              vkutil::DestroyQueue &destroy_queue = state.frame().destroy_queue;
+          
+          # Gintama PCSG01073 only: same-image framebuffer feedback is resolved
+          # between draws. If sync_texture() is called while the previous draw's
+          # render pass is still open, stop it and perform the already-existing
+          # resolve/barriers, but DO NOT immediately begin a new pass inside the
+          # texture lookup. draw() is the natural owner of the next beginRenderPass.
+          # This matches Vita3K-Plus' pending-cast placement without importing the
+          # discarded PCSA00029 Pending13 experiment or changing the copy algorithm.
+          boundary_anchor = '''        const bool late_resolve_in_renderpass = needs_late_resolve && context->in_renderpass;
+                  vk::CommandBuffer cmd_buffer = needs_late_resolve
+                      ? context->render_cmd
+                      : context->prerender_cmd;
           '''
-          methods_block = r'''void VKSurfaceCache::record_pending_cast13(PendingCast13 &cast, VKContext &context) {
-              if (!cast.info || !cast.info->texture.image || !cast.record)
-                  return;
-
-              ColorSurfaceCacheInfo &info = *cast.info;
-              const bool was_in_renderpass = context.in_renderpass;
-
-              if (was_in_renderpass) {
-                  context.stop_render_pass();
-
-                  context.current_render_pass = state.pipeline_cache.retrieve_render_pass(
-                      context.current_color_format, true, true, !context.record.color_surface.data);
-                  if (state.features.support_shader_interlock) {
-                      context.current_shader_interlock_pass = state.pipeline_cache.retrieve_render_pass(
-                          context.current_color_format, true, true, !context.record.color_surface.data, true);
-                  }
-              }
-
-              vk::ImageMemoryBarrier store_visible{
-                  .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eShaderWrite,
-                  .dstAccessMask = vk::AccessFlagBits::eTransferRead | vk::AccessFlagBits::eShaderRead,
-                  .oldLayout = vk::ImageLayout::eGeneral,
-                  .newLayout = vk::ImageLayout::eGeneral,
-                  .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                  .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                  .image = info.texture.image,
-                  .subresourceRange = vkutil::color_subresource_range
-              };
-              context.render_cmd.pipelineBarrier(
-                  vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eFragmentShader,
-                  vk::PipelineStageFlagBits::eTransfer | vk::PipelineStageFlagBits::eComputeShader,
-                  vk::DependencyFlags{}, {}, {}, store_visible);
-
-              cast.record(context.render_cmd);
-
-              info.last_resolve_scene = context.scene_timestamp;
-              info.last_resolve_generation = info.write_generation;
-              subtract_resolved_region(info.pending_write_regions, cast.read_region);
-
-              static thread_local uint64_t pending_exec_log13 = 0;
-              if (((++pending_exec_log13 & 0x1FFu) == 1u)) {
-                  LOG_INFO(
-                      "[VS-UNCHARTED-PENDING13] execute scene={} draw={} generation={} pending_regions={}",
-                      context.scene_timestamp,
-                      context.draw_timestamp,
-                      info.write_generation,
-                      info.pending_write_regions.size());
-              }
-
-              if (was_in_renderpass) {
-                  vk::ImageMemoryBarrier back_to_render{
-                      .srcAccessMask = vk::AccessFlagBits::eTransferRead,
-                      .dstAccessMask = vk::AccessFlagBits::eColorAttachmentRead
-                          | vk::AccessFlagBits::eColorAttachmentWrite
-                          | vk::AccessFlagBits::eShaderRead
-                          | vk::AccessFlagBits::eShaderWrite,
-                      .oldLayout = vk::ImageLayout::eGeneral,
-                      .newLayout = vk::ImageLayout::eGeneral,
-                      .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                      .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                      .image = info.texture.image,
-                      .subresourceRange = vkutil::color_subresource_range
-                  };
-                  context.render_cmd.pipelineBarrier(
-                      vk::PipelineStageFlagBits::eTransfer,
-                      vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eFragmentShader,
-                      vk::DependencyFlags{}, {}, {}, back_to_render);
-                  context.start_render_pass(false);
-              }
-          }
-
-          void VKSurfaceCache::perform_pending_casts13(
-              VKContext &context,
-              const uint16_t vert_texture_count,
-              const uint16_t frag_texture_count) {
-              if (pending_casts13.empty())
-                  return;
-
-              for (size_t i = 0; i < pending_casts13.size();) {
-                  bool used = false;
-
-                  for (uint16_t unit = 0; unit < frag_texture_count && !used; ++unit)
-                      used = pending_casts13[i].view == context.fragment_textures[unit].imageView;
-
-                  for (uint16_t unit = 0; unit < vert_texture_count && !used; ++unit)
-                      used = pending_casts13[i].view == context.vertex_textures[unit].imageView;
-
-                  if (!used) {
-                      ++i;
-                      continue;
-                  }
-
-                  PendingCast13 cast = std::move(pending_casts13[i]);
-                  pending_casts13.erase(pending_casts13.begin() + i);
-                  record_pending_cast13(cast, context);
-                  i = 0;
-              }
-          }
-
-          void VKSurfaceCache::destroy_surface(ColorSurfaceCacheInfo &info) {
-              pending_casts13.erase(
-                  std::remove_if(
-                      pending_casts13.begin(),
-                      pending_casts13.end(),
-                      [&info](const PendingCast13 &cast) { return cast.info == &info; }),
-                  pending_casts13.end());
-
-              vkutil::DestroyQueue &destroy_queue = state.frame().destroy_queue;
+          boundary_new = '''        const bool late_resolve_in_renderpass = needs_late_resolve && context->in_renderpass;
+                  const bool gintama_feedback_boundary14 =
+                      state.app_title_id == "PCSG01073"
+                      && is_same_image
+                      && late_resolve_in_renderpass; // [VS-GINTAMA-FEEDBACK-BOUNDARY14]
+                  vk::CommandBuffer cmd_buffer = needs_late_resolve
+                      ? context->render_cmd
+                      : context->prerender_cmd;
           '''
-          content = replace_once(content, methods_anchor, methods_block, 'PendingCast13 implementation')
-
-          cleanup_anchor = '''    cpu_surfaces_changed.clear();
-              target = nullptr;
-              last_written_surface = nullptr;
+          content = replace_once(content, boundary_anchor, boundary_new, 'feedback boundary state')
+          
+          resume_anchor = '''            cmd_buffer.pipelineBarrier(
+                          vk::PipelineStageFlagBits::eTransfer,
+                          vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eFragmentShader,
+                          vk::DependencyFlags{}, {}, {}, back_to_render);
+                      context->start_render_pass(false);
           '''
-          cleanup_block = '''    cpu_surfaces_changed.clear();
-              pending_casts13.clear(); // [VS-UNCHARTED-PENDING13]
-              target = nullptr;
-              last_written_surface = nullptr;
-          '''
-          content = replace_once(content, cleanup_anchor, cleanup_block, 'PendingCast13 cleanup')
-
-          # Insert immediately before the existing late-resolve resume block.
-          # FIX12 changed the exact transition formatting, so do not depend on a
-          # whitespace-fragile multi-line anchor here.
-          pending_marker13 = '\n        if (late_resolve_in_renderpass) {'
-          pending_hits13 = []
-          search_from13 = 0
-          while True:
-              hit13 = content.find(pending_marker13, search_from13)
-              if hit13 < 0:
-                  break
-              pending_hits13.append(hit13)
-              search_from13 = hit13 + 1
-          if not pending_hits13:
-              raise SystemExit(
-                  '::error::FIX13 late-resolve insertion marker: no occurrence found')
-          # FIX12 has two late_resolve_in_renderpass blocks. The first stops/prepares
-          # the render pass; the final one resumes it after the cast. Queue FIX13
-          # immediately before that final resume block.
-
-          queue_block13 = r'''
-                  if (state.app_title_id == "PCSA00029"
-                      && needs_late_resolve
-                      && bytes_per_pixel_requested == bytes_per_pixel_in_store) {
-                      const size_t casted_index13 =
-                          static_cast<size_t>(casted - casted_vec.data());
-                      ColorSurfaceCacheInfo *info_ptr13 = &info;
-                      const vk::ImageView pending_view13 = casted->texture.view;
-
-                      pending_casts13.erase(
-                          std::remove_if(
-                              pending_casts13.begin(),
-                              pending_casts13.end(),
-                              [pending_view13](const PendingCast13 &pending) {
-                                  return pending.view == pending_view13;
-                              }),
-                          pending_casts13.end());
-
-                      auto record_cast13 = [
-                          info_ptr13,
-                          casted_index13,
-                          start_x,
-                          start_sourced_line,
-                          width,
-                          height](vk::CommandBuffer pending_cmd) {
-                          if (!info_ptr13
-                              || casted_index13 >= info_ptr13->casted_textures.size())
-                              return;
-
-                          CastedTexture &pending_casted =
-                              info_ptr13->casted_textures[casted_index13];
-
-                          pending_casted.texture.transition_to(
-                              pending_cmd, vkutil::ImageLayout::TransferDst);
-
-                          const uint32_t available_w =
-                              info_ptr13->width > start_x
-                              ? info_ptr13->width - start_x
-                              : 0u;
-                          const uint32_t available_h =
-                              info_ptr13->height > start_sourced_line
-                              ? info_ptr13->height - start_sourced_line
-                              : 0u;
-                          const uint32_t copy_w = std::min<uint32_t>(width, available_w);
-                          const uint32_t copy_h = std::min<uint32_t>(height, available_h);
-                          if (copy_w == 0 || copy_h == 0) {
-                              pending_casted.texture.transition_to(
-                                  pending_cmd, vkutil::ImageLayout::ColorAttachmentReadWrite);
-                              return;
+          resume_new = '''            cmd_buffer.pipelineBarrier(
+                          vk::PipelineStageFlagBits::eTransfer,
+                          vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eFragmentShader,
+                          vk::DependencyFlags{}, {}, {}, back_to_render);
+          
+                      if (!gintama_feedback_boundary14) {
+                          context->start_render_pass(false);
+                      } else {
+                          // [VS-GINTAMA-FEEDBACK-BOUNDARY14]
+                          // Leave the pass closed. sync_texture() runs immediately before the
+                          // upcoming draw; draw() will call start_render_pass() once all texture
+                          // and dynamic state synchronization is complete.
+                          static thread_local uint64_t gintama_feedback_boundary_log14 = 0;
+                          if (((++gintama_feedback_boundary_log14 & 0xFFu) == 1u)) {
+                              LOG_INFO(
+                                  "[VS-GINTAMA-FEEDBACK-BOUNDARY14] deferred render-pass restart surface={} scene={} draw={} generation={}",
+                                  log_hex(ite->first), scene_timestamp, context->draw_timestamp, source_generation);
                           }
-
-                          vk::ImageCopy pending_copy{
-                              .srcSubresource = vkutil::color_subresource_layer,
-                              .srcOffset = {
-                                  static_cast<int32_t>(start_x),
-                                  static_cast<int32_t>(start_sourced_line),
-                                  0 },
-                              .dstSubresource = vkutil::color_subresource_layer,
-                              .dstOffset = { 0, 0, 0 },
-                              .extent = { copy_w, copy_h, 1 }
-                          };
-                          pending_cmd.copyImage(
-                              info_ptr13->texture.image,
-                              vk::ImageLayout::eGeneral,
-                              pending_casted.texture.image,
-                              vk::ImageLayout::eTransferDstOptimal,
-                              pending_copy);
-
-                          pending_casted.texture.transition_to(
-                              pending_cmd, vkutil::ImageLayout::ColorAttachmentReadWrite);
-                          pending_casted.source_generation =
-                              info_ptr13->write_generation;
-                      };
-
-                      pending_casts13.push_back(PendingCast13{
-                          .view = pending_view13,
-                          .info = info_ptr13,
-                          .read_region = read_region,
-                          .record = std::move(record_cast13)
-                      });
-
-                      static thread_local uint64_t pending_queue_log13 = 0;
-                      if (((++pending_queue_log13 & 0x1FFu) == 1u)) {
-                          LOG_INFO(
-                              "[VS-UNCHARTED-PENDING13] queue surface={} scene={} draw={} generation={} region=({},{} {}x{})",
-                              log_hex(ite->first),
-                              scene_timestamp,
-                              context->draw_timestamp,
-                              info.write_generation,
-                              read_region.offset.x,
-                              read_region.offset.y,
-                              read_region.extent.width,
-                              read_region.extent.height);
                       }
-                  }
           '''
-          insert_at13 = pending_hits13[-1]
-          print(f'[VS-FIX13] late-resolve markers={len(pending_hits13)}; using final resume marker')
-          content = content[:insert_at13] + queue_block13 + content[insert_at13:]
+          content = replace_once(content, resume_anchor, resume_new, 'deferred render-pass resume')
           write(path, content)
-
-          path = 'vita3k/renderer/src/vulkan/scene.cpp'
-          content = read(path)
-          scene_anchor = '''    void *indices_ptr = indices.get(mem);
-
-              context.check_for_macroblock_change(true);
-          '''
-          scene_block = '''    void *indices_ptr = indices.get(mem);
-
-              if (context.state.app_title_id == "PCSA00029") { // [VS-UNCHARTED-PENDING13]
-                  const auto &vert_data13 =
-                      context.record.vertex_program.get(mem)->renderer_data;
-                  const auto &frag_data13 =
-                      context.record.fragment_program.get(mem)->renderer_data;
-                  context.state.surface_cache.perform_pending_casts13(
-                      context,
-                      vert_data13->texture_count,
-                      frag_data13->texture_count);
-              }
-
-              context.check_for_macroblock_change(true);
-          '''
-          content = replace_once(content, scene_anchor, scene_block, 'Uncharted draw hook')
-          write(path, content)
-
-          print('[VS-FIX13] PCSA00029 draw-time PendingCast refresh applied')
-          print('[VS-FIX13] R2 Typeless remains untouched; Gintama path untouched')
+          
+          print('[VS-FIX14] PCSG01073 same-image feedback now resolves at the between-draw boundary')
+          print('[VS-FIX14] Existing image copy + visibility barriers retained; only immediate pass restart is deferred')
+          print('[VS-FIX14] No driver-name condition; Standard and High share the same title-scoped path')
+          print('[VS-FIX14] FrameGen, kernel sync, Uncharted R2/Visible12 and all other titles untouched')
           PY
 
-      - name: FIX13 Uncharted PendingCast regression gates
+      - name: FIX14 Gintama feedback-boundary regression gates
         shell: bash
         run: |
           set -euo pipefail
           python3 <<'PY'
           from pathlib import Path
-
+          
           def require(path, *tokens):
               text = Path(path).read_text(encoding='utf-8')
               for token in tokens:
                   if token not in text:
-                      raise SystemExit(f'::error::FIX13 gate missing {token!r} in {path}')
-
-          def forbid(path, *tokens):
-              text = Path(path).read_text(encoding='utf-8')
-              for token in tokens:
-                  if token in text:
-                      raise SystemExit(f'::error::FIX13 gate forbidden {token!r} in {path}')
-
+                      raise SystemExit(f'::error::FIX14 gate missing {token!r} in {path}')
+          
           require(
               'android/app/build.gradle',
-              'versionCode = 56',
-              'versionName = "0.3.0-alpha4-fix13-uncharted-pendingcast"',
-          )
-          require(
-              'vita3k/renderer/include/renderer/vulkan/surface_cache.h',
-              '[VS-UNCHARTED-PENDING13]',
-              'perform_pending_casts13',
-              'std::function<void(vk::CommandBuffer)> record',
+              'versionCode = 57',
+              'versionName = "0.3.0-alpha4-fix14-gintama-feedback-boundary"',
           )
           require(
               'vita3k/renderer/src/vulkan/surface_cache.cpp',
-              '[VS-UNCHARTED-PENDING13]',
-              'record_pending_cast13',
-              'perform_pending_casts13',
-              'state.app_title_id == "PCSA00029"',
-              'bytes_per_pixel_requested == bytes_per_pixel_in_store',
-              '[VS-UNCHARTED-VISIBLE12]',
+              '[VS-GINTAMA-FEEDBACK-BOUNDARY14]',
+              'state.app_title_id == "PCSG01073"',
+              'gintama_feedback_boundary14',
+              'if (!gintama_feedback_boundary14)',
+              'context->start_render_pass(false)',
+              'cmd_buffer.copyImage(info.texture.image',
+              '[VS-TYPELESS-HD-STAGING]',
               '[VS-UNCHARTED-PHASE10R2]',
               '[VS-UNCHARTED-PHASE11-PERSIST]',
-          )
-          require(
-              'vita3k/renderer/src/vulkan/scene.cpp',
-              '[VS-UNCHARTED-PENDING13]',
-              'context.state.app_title_id == "PCSA00029"',
-              'perform_pending_casts13',
+              '[VS-UNCHARTED-VISIBLE12]',
           )
           require(
               'vita3k/renderer/src/vulkan/renderer.cpp',
               '[VS-GINTAMA-HIGH-SAFE11]',
               '[VS-GINTAMA-HIGH-SAFE12]',
               'game_id == "PCSG01073"',
+              '(!use_high_accuracy || gintama_high_safe)',
           )
           require(
-              'vita3k/renderer/src/vulkan/surface_cache.cpp',
-              '[VS-TYPELESS-HD-STAGING]',
-              '[VS-UNCHARTED-TYPELESS-CACHE9]',
-          )
-          forbid(
               'vita3k/renderer/src/vulkan/scene.cpp',
-              'PCSG01073',
-              'PCSG00008',
+              'if (!context.in_renderpass)',
+              'context.start_render_pass();',
           )
-
-          print('[VS-FIX13] PendingCast regression gates passed')
-          print('[VS-FIX13] Gintama safe path and R2 Typeless markers preserved')
+          require(
+              'vita3k/renderer/src/vulkan/texture.cpp',
+              'textures are synced right before the draw',
+              'context.check_for_macroblock_change(false);',
+          )
+          require(
+              'vita3k/kernel/src/sync_primitives.cpp',
+              '[VS-KERNEL-WAIT-DOMAIN7]',
+              '[VS-KERNEL-OWNERSHIP-WAIT]',
+          )
+          
+          surface = Path('vita3k/renderer/src/vulkan/surface_cache.cpp').read_text(encoding='utf-8')
+          marker = surface.find('[VS-GINTAMA-FEEDBACK-BOUNDARY14]')
+          if marker < 0:
+              raise SystemExit('::error::FIX14 Gintama boundary marker missing')
+          local = surface[max(0, marker - 5000):marker + 10000]
+          
+          for forbidden in (
+              'Turnip_v26.3.0-R1',
+              '24.2.0',
+              'custom_driver_name',
+              'feedback_buffer_ready14',
+              '[VS-GINTAMA-FEEDBACK14]',
+          ):
+              if forbidden in local:
+                  raise SystemExit(f'::error::FIX14 forbidden token near Gintama boundary: {forbidden}')
+          
+          if local.count('context->start_render_pass(false);') != 1:
+              raise SystemExit('::error::FIX14 expected exactly one guarded immediate restart near boundary')
+          
+          print('[VS-FIX14] regression gates passed')
+          print('[VS-FIX14] title-scoped between-draw feedback boundary verified')
           PY
 
       - name: Set up Java 17
@@ -5577,13 +5310,13 @@ jobs:
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build signed VitaStation FIX13 UNCHARTED PENDINGCAST APK
+      - name: Build signed VitaStation FIX14 GINTAMA FEEDBACK BOUNDARY APK
         shell: bash
         run: |
           set -euo pipefail
           bash ./.ci/build-android.sh artifacts/vitastation-android
 
-      - name: Verify frozen R2 shader is packaged in FIX13 APK
+      - name: Verify frozen R2 shader is packaged in FIX14 APK
         shell: bash
         run: |
           set -euo pipefail
@@ -5628,23 +5361,23 @@ jobs:
           print('[VS-FIX10-R2] FrameGen remained byte-identical')
           PY
 
-      - name: Rename and hash FIX13 UNCHARTED PENDINGCAST APK
+      - name: Rename and hash FIX14 GINTAMA FEEDBACK BOUNDARY APK
         shell: bash
         run: |
           set -euo pipefail
           SRC='artifacts/vitastation-android/app.apk'
-          DST="artifacts/vitastation-android/$FIX13_APK_NAME"
+          DST="artifacts/vitastation-android/$FIX14_APK_NAME"
           test -s "$SRC"
           mv "$SRC" "$DST"
-          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX13_APK_NAME.sha256"
+          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX14_APK_NAME.sha256"
           ls -lh "$DST"
 
-      - name: Upload VitaStation FIX13 UNCHARTED PENDINGCAST APK
+      - name: Upload VitaStation FIX14 GINTAMA FEEDBACK BOUNDARY APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.3.0-Alpha4-FIX13-Uncharted-PendingCast-Android-Signed
+          name: VitaStation-v0.3.0-Alpha4-FIX14-Gintama-Feedback-Boundary-Android-Signed
           path: |
-            artifacts/vitastation-android/${{ env.FIX13_APK_NAME }}
-            artifacts/vitastation-android/${{ env.FIX13_APK_NAME }}.sha256
+            artifacts/vitastation-android/${{ env.FIX14_APK_NAME }}
+            artifacts/vitastation-android/${{ env.FIX14_APK_NAME }}.sha256
           if-no-files-found: error
           retention-days: 30

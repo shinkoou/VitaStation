@@ -3982,23 +3982,49 @@ jobs:
           # -----------------------------------------------------------------------------
           path = 'android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsSections.kt'
           content = read(path)
-          turbo_block = '''                  if (!isPerApp && isVulkanBackend(cfg.backendRenderer)) {
-                      SettingsToggleRow(
-                          title = stringResource(R.string.settings_gpu_turbo_mode),
-                          checked = cfg.turboMode,
-                          onCheckedChange = { checked -> onUpdate { turboMode = checked } },
-                          help = SettingsHelpEntry(
-                              title = stringResource(R.string.settings_gpu_turbo_mode),
-                              body = stringResource(R.string.settings_gpu_turbo_mode_desc),
-                              scope = SettingsScope.Global
-                          ),
-                          onShowHelp = onShowHelp
-                      )
-                            }
-          '''
-          content = replace_once(content, turbo_block, '', 'remove duplicate Turbo from HACKs')
-          content = content.replace('                  SettingsNote(text = stringResource(R.string.settings_hacks_save_state))\n', '', 1)
-          content = content.replace('                  SettingsNote(text = stringResource(R.string.settings_hacks_backend_pending))\n', '', 1)
+          # [VS-HACKS-CLEAN12] Replace the whole HACKs function instead of matching
+          # indentation-sensitive fragments. FIX8 owns this function, so this is a
+          # stable semantic boundary even after FIX11 formatting changes.
+          hacks12 = r'''private fun HacksSettingsSection(
+              cfg: EmulatorConfig,
+              isPerApp: Boolean,
+              onUpdate: (EmulatorConfig.() -> Unit) -> Unit,
+              onShowHelp: (SettingsHelpEntry) -> Unit
+          ) {
+              SettingsSectionCard(
+                  title = "",
+                  summary = stringResource(R.string.settings_hacks_summary),
+                  help = null,
+                  onShowHelp = onShowHelp
+              ) {
+                  SettingsToggleRow(
+                      title = stringResource(R.string.settings_gpu_fps_hack),
+                      checked = cfg.fpsHack,
+                      onCheckedChange = { checked -> onUpdate { fpsHack = checked } },
+                      help = SettingsHelpEntry(
+                          title = stringResource(R.string.settings_gpu_fps_hack),
+                          body = stringResource(R.string.settings_gpu_fps_hack_desc)
+                      ),
+                      onShowHelp = onShowHelp
+                  )
+                  SettingsToggleRow(
+                      title = stringResource(R.string.settings_hacks_skip_movie),
+                      checked = cfg.skipCutscene,
+                      onCheckedChange = { checked -> onUpdate { skipCutscene = checked } },
+                      help = SettingsHelpEntry(
+                          title = stringResource(R.string.settings_hacks_skip_movie),
+                          body = stringResource(R.string.settings_hacks_skip_movie_desc)
+                      ),
+                      onShowHelp = onShowHelp
+                  )
+              }
+          }'''
+          content = replace_function(
+              content,
+              'private fun HacksSettingsSection(',
+              hacks12,
+              'HACKs section without duplicate Turbo',
+          )
           write(path, content)
           
           # -----------------------------------------------------------------------------

@@ -10,8 +10,6 @@ name: VitaStation Android APK - Alpha 4 FIX12 STRUCTURAL UPDATE
   push:
     branches:
       - main
-    paths:
-      - '.github/workflows/android-build.yml'
 
 permissions:
   contents: read

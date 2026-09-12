@@ -1,9 +1,9 @@
-# VitaStation Alpha 4 FIX11 MEGA UPDATE
+# VitaStation Alpha 4 FIX12 STRUCTURAL UPDATE
 # Replays the verified FIX9 stack, then applies one title-scoped Uncharted Typeless phase-view delta.
 # FIX10-R2 recompiles and verifies the SPIR-V actually packaged in the APK.
 # No Bootstrap. Gintama sync and frozen FrameGen remain protected.
 
-name: VitaStation Android APK - Alpha 4 FIX11 MEGA UPDATE
+name: VitaStation Android APK - Alpha 4 FIX12 STRUCTURAL UPDATE
 
 "on":
   workflow_dispatch:
@@ -17,17 +17,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: vitastation-android-fix11-mega-${{ github.ref }}
+  group: vitastation-android-fix12-structural-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   VCPKG_ROOT: /usr/local/share/vcpkg
   VITASTATION_SIGNING_CERT_SHA256: fc57542b62221ad0c0550d12b2791e4e40794e980c9f26a86d83250d67ed5d30
-  FIX11_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX11-Mega-Uncharted-Gintama-Lord-UX-Signed.apk
+  FIX12_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX12-Structural-Uncharted-Lord-Gintama-Controls-Signed.apk
 
 jobs:
   android-build:
-    name: Build VitaStation v0.3.0 Alpha 4 FIX11 MEGA UPDATE
+    name: Build VitaStation v0.3.0 Alpha 4 FIX12 STRUCTURAL UPDATE
     runs-on: ubuntu-latest
 
     steps:
@@ -3867,6 +3867,1196 @@ jobs:
           print('[VS-FIX11-MEGA] regression gates passed')
           PY
 
+      - name: Apply FIX12 structural correction update
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import re
+          
+          
+          def read(path):
+              return Path(path).read_text(encoding='utf-8')
+          
+          
+          def write(path, content):
+              Path(path).parent.mkdir(parents=True, exist_ok=True)
+              Path(path).write_text(content, encoding='utf-8')
+          
+          
+          def replace_once(content, old, new, label):
+              count = content.count(old)
+              if count != 1:
+                  raise SystemExit(f'::error::FIX12 {label}: expected one anchor, found {count}')
+              return content.replace(old, new, 1)
+          
+          
+          def replace_optional_once(content, old, new, label):
+              count = content.count(old)
+              if count == 0:
+                  print(f'[VS-FIX12] optional anchor already absent: {label}')
+                  return content
+              if count != 1:
+                  raise SystemExit(f'::error::FIX12 {label}: expected at most one anchor, found {count}')
+              return content.replace(old, new, 1)
+          
+          
+          def replace_function(content, marker, replacement, label):
+              start = content.find(marker)
+              if start < 0:
+                  raise SystemExit(f'::error::FIX12 {label}: function marker missing: {marker}')
+              annotation = content.rfind('@Composable', 0, start)
+              if annotation >= 0 and content[annotation:start].strip() == '@Composable':
+                  start = annotation
+              brace = content.find('{', start)
+              if brace < 0:
+                  raise SystemExit(f'::error::FIX12 {label}: opening brace missing')
+              depth = 0
+              in_string = False
+              quote = ''
+              escape = False
+              i = brace
+              while i < len(content):
+                  ch = content[i]
+                  if in_string:
+                      if escape:
+                          escape = False
+                      elif ch == '\\':
+                          escape = True
+                      elif ch == quote:
+                          in_string = False
+                  else:
+                      if ch in ('"', "'"):
+                          in_string = True
+                          quote = ch
+                      elif ch == '{':
+                          depth += 1
+                      elif ch == '}':
+                          depth -= 1
+                          if depth == 0:
+                              return content[:start] + replacement + content[i + 1:]
+                  i += 1
+              raise SystemExit(f'::error::FIX12 {label}: function end missing')
+          
+          
+          def sha(path):
+              return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+          
+          
+          def set_string(path, name, value):
+              content = read(path)
+              escaped = value.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+              pattern = re.compile(r'(?m)^\s*<string name="' + re.escape(name) + r'">.*?</string>\s*$')
+              replacement = f'    <string name="{name}">{escaped}</string>'
+              if pattern.search(content):
+                  content = pattern.sub(replacement, content, count=1)
+              else:
+                  content = content.replace('</resources>', replacement + '\n</resources>', 1)
+              write(path, content)
+          
+          
+          protected_before = {
+              'framegen': sha('vita3k/renderer/src/vulkan/frame_generation.cpp'),
+              'typeless_shader': sha('vita3k/shaders-builtin/vulkan/surface_cast_reinterpret.comp'),
+              'typeless_spv': sha('vita3k/shaders-builtin/vulkan/surface_cast_reinterpret.comp.spv'),
+              'gintama_kernel': sha('vita3k/kernel/src/sync_primitives.cpp'),
+          }
+          
+          # -----------------------------------------------------------------------------
+          # Version / identity.
+          # -----------------------------------------------------------------------------
+          path = 'android/app/build.gradle'
+          content = read(path)
+          content = replace_once(content, 'versionCode = 54', 'versionCode = 55', 'versionCode')
+          content = replace_once(
+              content,
+              'versionName = "0.3.0-alpha4-fix11-mega"',
+              'versionName = "0.3.0-alpha4-fix12-structural"',
+              'versionName',
+          )
+          write(path, content)
+          
+          # -----------------------------------------------------------------------------
+          # HACKs cleanup: Turbo exists only in Experimental Settings. Remove stale notes
+          # that mixed old Save State / Skip Cutscene wording into the functional section.
+          # -----------------------------------------------------------------------------
+          path = 'android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsSections.kt'
+          content = read(path)
+          turbo_block = '''                  if (!isPerApp && isVulkanBackend(cfg.backendRenderer)) {
+                      SettingsToggleRow(
+                          title = stringResource(R.string.settings_gpu_turbo_mode),
+                          checked = cfg.turboMode,
+                          onCheckedChange = { checked -> onUpdate { turboMode = checked } },
+                          help = SettingsHelpEntry(
+                              title = stringResource(R.string.settings_gpu_turbo_mode),
+                              body = stringResource(R.string.settings_gpu_turbo_mode_desc),
+                              scope = SettingsScope.Global
+                          ),
+                          onShowHelp = onShowHelp
+                      )
+                            }
+          '''
+          content = replace_once(content, turbo_block, '', 'remove duplicate Turbo from HACKs')
+          content = content.replace('                  SettingsNote(text = stringResource(R.string.settings_hacks_save_state))\n', '', 1)
+          content = content.replace('                  SettingsNote(text = stringResource(R.string.settings_hacks_backend_pending))\n', '', 1)
+          write(path, content)
+          
+          # -----------------------------------------------------------------------------
+          # Uncharted PCSA00029: keep FIX10-R2 Typeless bytes frozen. Add the missing
+          # producer->consumer visibility barrier inspired by Vita3K-Plus. VitaStation
+          # already defers same-scene resolves into render_cmd; this barrier makes the
+          # color/shader writes visible before transfer/compute reinterpret reads.
+          # -----------------------------------------------------------------------------
+          path = 'vita3k/renderer/src/vulkan/surface_cache.cpp'
+          content = read(path)
+          anchor = '''        if (late_resolve_in_renderpass) {
+                      context->stop_render_pass();
+                  }
+          '''
+          barrier = anchor + '''
+                  // [VS-UNCHARTED-VISIBLE12] PCSA00029 combines the proven R2 Typeless
+                  // reinterpret with the producer/consumer visibility rule used by Vita3K-Plus.
+                  if (needs_late_resolve && state.app_title_id == "PCSA00029") {
+                      vk::ImageMemoryBarrier store_visible{
+                          .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eShaderWrite,
+                          .dstAccessMask = vk::AccessFlagBits::eTransferRead | vk::AccessFlagBits::eShaderRead,
+                          .oldLayout = vk::ImageLayout::eGeneral,
+                          .newLayout = vk::ImageLayout::eGeneral,
+                          .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                          .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                          .image = info.texture.image,
+                          .subresourceRange = vkutil::color_subresource_range
+                      };
+                      cmd_buffer.pipelineBarrier(
+                          vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eFragmentShader,
+                          vk::PipelineStageFlagBits::eTransfer | vk::PipelineStageFlagBits::eComputeShader,
+                          vk::DependencyFlags{}, {}, {}, store_visible);
+                      static thread_local uint64_t vs_uncharted_visible12 = 0;
+                      if (((++vs_uncharted_visible12 & 0x7FFu) == 1u))
+                          LOG_DEBUG("[VS-UNCHARTED-VISIBLE12] surface={} generation={} scene={} draw={}",
+                              log_hex(ite->first), source_generation, scene_timestamp, context->draw_timestamp);
+                  }
+          '''
+          content = replace_once(content, anchor, barrier, 'Uncharted late-resolve visibility barrier')
+          write(path, content)
+          
+          # -----------------------------------------------------------------------------
+          # Gintama PCSG01073 High Accuracy compatibility route. FIX11 removed shader
+          # interlock but still disabled the Standard texture-viewport path. High Safe now
+          # keeps the stable Standard synchronization path too, while remaining title-only.
+          # -----------------------------------------------------------------------------
+          path = 'vita3k/renderer/src/vulkan/renderer.cpp'
+          content = read(path)
+          content = replace_once(
+              content,
+              '    if (support_standard_layout && !use_high_accuracy) {\n',
+              '    if (support_standard_layout && (!use_high_accuracy || gintama_high_safe)) {\n'
+              '        if (gintama_high_safe)\n'
+              '            LOG_WARN_ONCE("[VS-GINTAMA-HIGH-SAFE12] PCSG01073 High Accuracy uses the stable Standard texture-viewport/sync path");\n',
+              'Gintama High Safe texture viewport',
+          )
+          write(path, content)
+          
+          # -----------------------------------------------------------------------------
+          # LORD shader compiler compatibility. Port the semantics-preserving SPIR-V
+          # constant-component helpers and OpSelect shape fix from Vita3K-Plus. This is
+          # aimed at the skinning vertex shader seen in the latest LORD log.
+          # -----------------------------------------------------------------------------
+          path = 'vita3k/shader/include/shader/usse_utilities.h'
+          content = read(path)
+          content = replace_once(
+              content,
+              'spv::Id make_vector_or_scalar_type(spv::Builder &b, spv::Id component, int size);\n\n',
+              'spv::Id make_vector_or_scalar_type(spv::Builder &b, spv::Id component, int size);\n\n'
+              '// [VS-LORD-SPIRV12] Prefer static composite ops when the component index is constant.\n'
+              'spv::Id extract_vector_component(spv::Builder &b, spv::Id type, spv::Id vector, spv::Id index);\n'
+              'spv::Id insert_vector_component(spv::Builder &b, spv::Id type, spv::Id vector, spv::Id component, spv::Id index);\n\n',
+              'SPIR-V helper declarations',
+          )
+          write(path, content)
+          
+          path = 'vita3k/shader/src/usse_utilities.cpp'
+          content = read(path)
+          content = replace_once(
+              content,
+              'spv::Id unwrap_type(spv::Builder &b, spv::Id type) {\n',
+              '''// [VS-LORD-SPIRV12] Adreno/Turnip-friendly constant component access.\nspv::Id extract_vector_component(spv::Builder &b, spv::Id type, spv::Id vector, spv::Id index) {\n    if (!b.isScalar(vector) && b.isConstantScalar(index)) {\n        const unsigned comp = b.getConstantScalar(index);\n        if (comp < static_cast<unsigned>(b.getNumComponents(vector)))\n            return b.createCompositeExtract(vector, type, comp);\n    }\n    return b.createBinOp(spv::OpVectorExtractDynamic, type, vector, index);\n}\n\nspv::Id insert_vector_component(spv::Builder &b, spv::Id type, spv::Id vector, spv::Id component, spv::Id index) {\n    if (!b.isScalar(vector) && b.isConstantScalar(index)) {\n        const unsigned comp = b.getConstantScalar(index);\n        if (comp < static_cast<unsigned>(b.getNumComponents(vector)))\n            return b.createCompositeInsert(component, vector, type, comp);\n    }\n    return b.createTriOp(spv::OpVectorInsertDynamic, type, vector, component, index);\n}\n\nspv::Id unwrap_type(spv::Builder &b, spv::Id type) {\n''',
+              'SPIR-V helper definitions',
+          )
+          # Exact utility replacements from Vita3K-Plus RC5 compatibility patch.
+          content = replace_once(
+              content,
+              'b.createOp(spv::OpVectorExtractDynamic, target_type, { access_base, b.makeIntConstant(access_offset) })',
+              'extract_vector_component(b, target_type, access_base, b.makeIntConstant(access_offset))',
+              'USSE finalize constant extract',
+          )
+          content = replace_once(
+              content,
+              'b.createBinOp(spv::OpVectorExtractDynamic, comp_type, extracted, b.makeIntConstant(i))',
+              'extract_vector_component(b, comp_type, extracted, b.makeIntConstant(i))',
+              'USSE pack constant extract',
+          )
+          old_unpack = '''        if (!b.isScalar(target) && !b.isConstant(target)) {
+                      std::vector<spv::Id> extract_ops;
+                      extract_ops.push_back(target);
+                      extract_ops.push_back(b.makeIntConstant(static_cast<int>(i)));
+          
+                      if (target_comp_count > 1) {
+                          extracted = b.createOp(spv::OpVectorExtractDynamic, type_f32, extract_ops);
+                      }
+                  }
+          '''
+          new_unpack = '''        if (!b.isScalar(target) && !b.isConstant(target)) {
+                      if (target_comp_count > 1) {
+                          extracted = extract_vector_component(b, type_f32, target, b.makeIntConstant(static_cast<int>(i)));
+                      }
+                  }
+          '''
+          content = replace_once(content, old_unpack, new_unpack, 'USSE unpack constant extract')
+          content = replace_once(
+              content,
+              'b.createOp(spv::OpVectorExtractDynamic, vec_comp_type, { source, b.makeIntConstant(std::min(source_value_taken_count++, (int)total_comp_source - 1)) })',
+              'extract_vector_component(b, vec_comp_type, source, b.makeIntConstant(std::min(source_value_taken_count++, (int)total_comp_source - 1)))',
+              'USSE store source extract',
+          )
+          content = replace_once(
+              content,
+              'b.createOp(spv::OpVectorExtractDynamic, b.makeFloatType(32), { b.createLoad(elem, spv::NoPrecision), b.makeIntConstant(actual_offset_start_to_store % 4) })',
+              'extract_vector_component(b, b.makeFloatType(32), b.createLoad(elem, spv::NoPrecision), b.makeIntConstant(actual_offset_start_to_store % 4))',
+              'USSE store destination extract',
+          )
+          content = replace_once(
+              content,
+              'b.createOp(spv::OpVectorExtractDynamic, vec_comp_type, { elem, b.makeIntConstant(j) })',
+              'extract_vector_component(b, vec_comp_type, elem, b.makeIntConstant(j))',
+              'USSE store element extract',
+          )
+          content = replace_once(
+              content,
+              'b.createOp(spv::OpVectorInsertDynamic, bank_base_elem_type, { b.createLoad(elem, spv::NoPrecision), source, b.makeIntConstant(insert_offset % 4) })',
+              'insert_vector_component(b, bank_base_elem_type, b.createLoad(elem, spv::NoPrecision), source, b.makeIntConstant(insert_offset % 4))',
+              'USSE store constant insert',
+          )
+          write(path, content)
+          
+          path = 'vita3k/shader/src/translator/alu.cpp'
+          content = read(path)
+          content = replace_optional_once(
+              content,
+              'spv::Id a1 = m_b.createBinOp(spv::OpVectorExtractDynamic, alpha_type, operation_1, alpha_index);',
+              'spv::Id a1 = utils::extract_vector_component(m_b, alpha_type, operation_1, alpha_index);',
+              'SOP2M alpha extract 1',
+          )
+          content = replace_optional_once(
+              content,
+              'spv::Id a2 = m_b.createBinOp(spv::OpVectorExtractDynamic, alpha_type, operation_2, alpha_index);',
+              'spv::Id a2 = utils::extract_vector_component(m_b, alpha_type, operation_2, alpha_index);',
+              'SOP2M alpha extract 2',
+          )
+          content = replace_optional_once(
+              content,
+              'result = m_b.createTriOp(spv::OpVectorInsertDynamic, src_type, result, apply_opcode(alpha_op, alpha_type, a1, a2), alpha_index);',
+              'result = utils::insert_vector_component(m_b, src_type, result, apply_opcode(alpha_op, alpha_type, a1, a2), alpha_index);',
+              'SOP2M alpha insert',
+          )
+          write(path, content)
+          
+          path = 'vita3k/shader/src/translator/data.cpp'
+          content = read(path)
+          vmov_anchor = '''            spv::Id cond_result = m_b.createOp(compare_op, utils::make_vector_or_scalar_type(m_b, m_b.makeBoolType(), m_b.getNumComponents(source_to_compare_with_0)),
+                          { source_to_compare_with_0, v0 });
+          '''
+          vmov_new = vmov_anchor + '''
+                      // [VS-LORD-SPIRV12] SPIR-V < 1.4 requires OpSelect condition shape to match the result.
+                      const int vs12_result_comps = m_b.getNumComponents(source_2);
+                      if (m_b.getNumComponents(cond_result) == 1 && vs12_result_comps > 1) {
+                          const spv::Id vs12_bvec_type = m_b.makeVectorType(m_b.makeBoolType(), vs12_result_comps);
+                          const std::vector<spv::Id> vs12_cond_comps(vs12_result_comps, cond_result);
+                          cond_result = m_b.createCompositeConstruct(vs12_bvec_type, vs12_cond_comps);
+                      }
+          '''
+          content = replace_once(content, vmov_anchor, vmov_new, 'VMOV OpSelect condition shape')
+          write(path, content)
+          
+          # Keep the rest of the same Vita3K-Plus SPIR-V compatibility patch coherent.
+          # These are semantics-preserving constant-component substitutions in texture translation.
+          path = 'vita3k/shader/src/translator/texture.cpp'
+          content = read(path)
+          texture_repls = [
+              ('b.createOp(spv::OpVectorExtractDynamic, f32, { query_lod, b.makeIntConstant(0) })',
+               'utils::extract_vector_component(b, f32, query_lod, b.makeIntConstant(0))',
+               'texture query LOD extract'),
+              ('m_b.createOp(spv::OpVectorExtractDynamic, type_f32, { m_b.createLoad(coord_id, spv::NoPrecision), m_b.makeIntConstant(0) })',
+               'utils::extract_vector_component(m_b, type_f32, m_b.createLoad(coord_id, spv::NoPrecision), m_b.makeIntConstant(0))',
+               'texture coord extract'),
+              ('m_b.createBinOp(spv::OpVectorExtractDynamic, type_f32, coord_id, m_b.makeIntConstant(2))',
+               'utils::extract_vector_component(m_b, type_f32, coord_id, m_b.makeIntConstant(2))',
+               'texture projection extract'),
+              ('m_b.createBinOp(spv::OpVectorExtractDynamic, type_f32, query_lod, m_b.makeIntConstant(0))',
+               'utils::extract_vector_component(m_b, type_f32, query_lod, m_b.makeIntConstant(0))',
+               'SMP LOD extract'),
+              ('m_b.createBinOp(spv::OpVectorExtractDynamic, type_ui32, uv, m_b.makeIntConstant(0))',
+               'utils::extract_vector_component(m_b, type_ui32, uv, m_b.makeIntConstant(0))',
+               'SMP U extract'),
+              ('m_b.createBinOp(spv::OpVectorExtractDynamic, type_ui32, uv, m_b.makeIntConstant(1))',
+               'utils::extract_vector_component(m_b, type_ui32, uv, m_b.makeIntConstant(1))',
+               'SMP V extract'),
+              ('m_b.createBinOp(spv::OpVectorExtractDynamic, comp_type, g4_comps[comp], m_b.makeIntConstant(pixel))',
+               'utils::extract_vector_component(m_b, comp_type, g4_comps[comp], m_b.makeIntConstant(pixel))',
+               'gather component extract'),
+          ]
+          for old, new, label in texture_repls:
+              content = replace_once(content, old, new, label)
+          # These float UV extracts appear multiple times. Match the exact local lines from the Plus patch.
+          for old, new, label in [
+              ('const spv::Id coord_x = m_b.createBinOp(spv::OpVectorExtractDynamic, type_f32, coord_xy, m_b.makeIntConstant(0));',
+               'const spv::Id coord_x = utils::extract_vector_component(m_b, type_f32, coord_xy, m_b.makeIntConstant(0));', 'coord_x'),
+              ('const spv::Id coord_y = m_b.createBinOp(spv::OpVectorExtractDynamic, type_f32, coord_xy, m_b.makeIntConstant(1));',
+               'const spv::Id coord_y = utils::extract_vector_component(m_b, type_f32, coord_xy, m_b.makeIntConstant(1));', 'coord_y'),
+              ('const spv::Id adj_x = m_b.createBinOp(spv::OpVectorExtractDynamic, type_f32, adjusted, m_b.makeIntConstant(0));',
+               'const spv::Id adj_x = utils::extract_vector_component(m_b, type_f32, adjusted, m_b.makeIntConstant(0));', 'adj_x'),
+              ('const spv::Id adj_y = m_b.createBinOp(spv::OpVectorExtractDynamic, type_f32, adjusted, m_b.makeIntConstant(1));',
+               'const spv::Id adj_y = utils::extract_vector_component(m_b, type_f32, adjusted, m_b.makeIntConstant(1));', 'adj_y'),
+              ('const spv::Id adx = m_b.createBinOp(spv::OpVectorExtractDynamic, type_f32, abs_delta, m_b.makeIntConstant(0));',
+               'const spv::Id adx = utils::extract_vector_component(m_b, type_f32, abs_delta, m_b.makeIntConstant(0));', 'adx'),
+              ('const spv::Id ady = m_b.createBinOp(spv::OpVectorExtractDynamic, type_f32, abs_delta, m_b.makeIntConstant(1));',
+               'const spv::Id ady = utils::extract_vector_component(m_b, type_f32, abs_delta, m_b.makeIntConstant(1));', 'ady'),
+              ('spv::Id cast_w = m_b.createBinOp(spv::OpVectorExtractDynamic, type_i32, cast_size, m_b.makeIntConstant(0));',
+               'spv::Id cast_w = utils::extract_vector_component(m_b, type_i32, cast_size, m_b.makeIntConstant(0));', 'cast_w'),
+          ]:
+              # Some of these blocks exist only after FIX10-R2 texture-translation additions. If present, require uniqueness.
+              if old in content:
+                  content = replace_once(content, old, new, label)
+          # Two final UV coefficient extracts in the stock SMP path.
+          content = content.replace(
+              'const spv::Id u = m_b.createBinOp(spv::OpVectorExtractDynamic, type_f32, uv, m_b.makeIntConstant(0));',
+              'const spv::Id u = utils::extract_vector_component(m_b, type_f32, uv, m_b.makeIntConstant(0));'
+          )
+          content = content.replace(
+              'const spv::Id v = m_b.createBinOp(spv::OpVectorExtractDynamic, type_f32, uv, m_b.makeIntConstant(1));',
+              'const spv::Id v = utils::extract_vector_component(m_b, type_f32, uv, m_b.makeIntConstant(1));'
+          )
+          write(path, content)
+          
+          # -----------------------------------------------------------------------------
+          # Touch editor crash + compact Emerald-style palette. FIX11 snapped by rebuilding
+          # HashSet-backed controls synchronously from inside the touch iteration, which can
+          # invalidate the active iterator. Persist immediately, rebuild only after dispatch.
+          # -----------------------------------------------------------------------------
+          path = 'android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java'
+          content = read(path)
+          content = replace_once(
+              content,
+              '    setLayout(updatedLayout, mEditSnapEnabled);\n',
+              '    setLayout(updatedLayout, false);\n'
+              '    if (mEditSnapEnabled)\n'
+              '      post(this::refreshControls); // [VS-TOUCH-SNAP-SAFE12] never rebuild HashSets during touch iteration.\n',
+              'deferred snap refresh',
+          )
+          # Physical gamepad bridge keeps the same canonical virtual controller alive even
+          # when the visual overlay is hidden by a connected controller.
+          content = replace_once(
+              content,
+              '  private boolean mControllerAttached = false;\n',
+              '  private boolean mControllerAttached = false;\n'
+              '  private boolean mPhysicalGamepadBridgeActive = false; // [VS-PAD-BRIDGE12]\n',
+              'physical gamepad bridge state',
+          )
+          content = replace_once(
+              content,
+              '    boolean shouldAttach = mAllowVirtualController && mOverlayMask != 0 && getWindowToken() != null;\n',
+              '    boolean shouldAttach = mAllowVirtualController\n'
+              '            && (mOverlayMask != 0 || mPhysicalGamepadBridgeActive)\n'
+              '            && getWindowToken() != null;\n',
+              'physical bridge virtual attach rule',
+          )
+          bridge_anchor = '  public void rebindController()\n  {\n'
+          bridge_methods = '''  public void setPhysicalGamepadBridgeActive(boolean active) { // [VS-PAD-BRIDGE12]\n    if (mPhysicalGamepadBridgeActive == active)\n      return;\n    if (!active)\n      releaseAllInputs();\n    mPhysicalGamepadBridgeActive = active;\n    updateVirtualControllerState();\n  }\n\n  public boolean isPhysicalGamepadBridgeActive() {\n    return mPhysicalGamepadBridgeActive;\n  }\n\n'''
+          content = replace_once(content, bridge_anchor, bridge_methods + bridge_anchor, 'physical bridge public API')
+          write(path, content)
+          
+          path = 'android/app/src/main/java/org/vita3k/emulator/ui/components/OverlayEditorPalette.kt'
+          content = read(path)
+          new_palette = r'''@Composable
+          internal fun OverlayEditorPalette(
+              onDone: () -> Unit,
+              onReset: () -> Unit,
+              onGridChanged: ((Boolean) -> Unit)? = null,
+              onScaleSelected: ((Float) -> Unit)? = null,
+              onResetSelectedScale: (() -> Unit)? = null,
+              modifier: Modifier = Modifier
+          ) {
+              val emulator = LocalContext.current as? Emulator
+              var gridEnabled by rememberSaveable { mutableStateOf(emulator?.isControllerEditGridEnabled() ?: false) }
+          
+              BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+                  var offsetX by rememberSaveable { mutableIntStateOf(0) }
+                  var offsetY by rememberSaveable { mutableIntStateOf(0) }
+                  var panelSize by remember { mutableStateOf(IntSize.Zero) }
+                  val maxOffsetX = ((constraints.maxWidth - panelSize.width) / 2).coerceAtLeast(0)
+                  val maxOffsetY = ((constraints.maxHeight - panelSize.height) / 2).coerceAtLeast(0)
+          
+                  Surface(
+                      modifier = Modifier
+                          .align(Alignment.BottomCenter)
+                          .offset { IntOffset(offsetX, offsetY) }
+                          .padding(bottom = 10.dp)
+                          .widthIn(min = 280.dp, max = 380.dp)
+                          .onSizeChanged { panelSize = it }
+                          .pointerInput(maxOffsetX, maxOffsetY) {
+                              detectDragGestures { change, dragAmount ->
+                                  change.consume()
+                                  offsetX = (offsetX + dragAmount.x.roundToInt()).coerceIn(-maxOffsetX, maxOffsetX)
+                                  offsetY = (offsetY + dragAmount.y.roundToInt()).coerceIn(-maxOffsetY, maxOffsetY)
+                              }
+                          },
+                      shape = RoundedCornerShape(18.dp),
+                      color = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f),
+                      border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                  ) {
+                      Column(
+                          modifier = Modifier.fillMaxWidth().padding(8.dp),
+                          verticalArrangement = Arrangement.spacedBy(6.dp)
+                      ) {
+                          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                              FilledTonalButton(
+                                  onClick = {
+                                      gridEnabled = !gridEnabled
+                                      onGridChanged?.invoke(gridEnabled) ?: emulator?.setControllerEditGridEnabled(gridEnabled)
+                                  },
+                                  modifier = Modifier.weight(1.35f)
+                              ) {
+                                  Text(if (gridEnabled) stringResource(R.string.emulation_controls_grid_on) else stringResource(R.string.emulation_controls_grid_off))
+                              }
+                              OutlinedButton(
+                                  onClick = { onScaleSelected?.invoke(0.90f) ?: emulator?.resizeSelectedControllerOverlayControl(0.90f) },
+                                  modifier = Modifier.weight(0.8f)
+                              ) { Text("−") }
+                              OutlinedButton(
+                                  onClick = { onScaleSelected?.invoke(1.10f) ?: emulator?.resizeSelectedControllerOverlayControl(1.10f) },
+                                  modifier = Modifier.weight(0.8f)
+                              ) { Text("+") }
+                              OutlinedButton(
+                                  onClick = { onResetSelectedScale?.invoke() ?: emulator?.resetSelectedControllerOverlayScale() },
+                                  modifier = Modifier.weight(1f)
+                              ) { Text("1:1") }
+                          }
+                          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                              OutlinedButton(onClick = onReset, modifier = Modifier.weight(1f)) {
+                                  Icon(Icons.Default.Restore, contentDescription = null)
+                                  Text(stringResource(R.string.action_reset), modifier = Modifier.padding(start = 4.dp))
+                              }
+                              FilledTonalButton(onClick = onDone, modifier = Modifier.weight(1f)) {
+                                  Icon(Icons.Default.Done, contentDescription = null)
+                                  Text(stringResource(R.string.action_done), modifier = Modifier.padding(start = 4.dp))
+                              }
+                          }
+                      }
+                  }
+              }
+          }'''
+          content = replace_function(content, '@Composable\ninternal fun OverlayEditorPalette(', new_palette, 'compact overlay palette')
+          write(path, content)
+          
+          path = 'android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/OverlayLayoutEditorDialog.kt'
+          content = read(path)
+          content = content.replace('                    setEditGridEnabled(true) // [VS-TOUCH-GRADE11]\n', '                    setEditGridEnabled(false) // [VS-TOUCH-GRADE12] start uncluttered; user enables snap explicitly.\n', 1)
+          write(path, content)
+          
+          # -----------------------------------------------------------------------------
+          # Physical Android gamepad -> canonical Vita virtual-controller bridge. This
+          # bypasses device-specific SDL mapping for gameplay while still using Vita3K's
+          # proven virtual controller backend. It is especially aimed at iPega-class pads.
+          # -----------------------------------------------------------------------------
+          path = 'android/app/src/main/java/org/vita3k/emulator/Emulator.java'
+          content = read(path)
+          if 'import org.vita3k.emulator.data.EmulatorConfig;\n' not in content:
+              content = content.replace('import org.vita3k.emulator.data.AppStorage;\n', 'import org.vita3k.emulator.data.AppStorage;\nimport org.vita3k.emulator.data.EmulatorConfig;\n', 1)
+          content = replace_once(
+              content,
+              '    private int lastPadDeviceId = -1;\n',
+              '    private int lastPadDeviceId = -1;\n'
+              '    private long lastPadMappingRefreshUptimeMs = 0L; // [VS-PAD-BRIDGE12]\n'
+              '    private int[] physicalButtonBinds = new int[]{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14};\n'
+              '    private int[] physicalAxisBinds = new int[]{0,1,2,3,4,5};\n'
+              '    private float physicalAnalogMultiplier = 1.0f;\n',
+              'physical mapping cache fields',
+          )
+          old_update = '''    private void updateControllerConnectionState() {
+                  if (sessionViewModel != null) {
+                      sessionViewModel.setControllerConnected(this, InputDeviceUtils.hasPhysicalGamepadConnected());
+                  }
+              }
+          '''
+          new_update = '''    private void updateControllerConnectionState() {
+                  final boolean connected = InputDeviceUtils.hasPhysicalGamepadConnected();
+                  if (connected)
+                      refreshPhysicalGamepadMapping(true);
+                  InputOverlay overlay = getmOverlay();
+                  if (overlay != null)
+                      overlay.setPhysicalGamepadBridgeActive(connected); // [VS-PAD-BRIDGE12]
+                  if (sessionViewModel != null)
+                      sessionViewModel.setControllerConnected(this, connected);
+              }
+          '''
+          content = replace_once(content, old_update, new_update, 'controller connection bridge')
+          
+          # Replace dispatchGenericMotionEvent as one function so SDL cannot also consume the
+          # same physical event after it has been normalized into the virtual Vita controller.
+          new_motion = r'''    @Override
+              public boolean dispatchGenericMotionEvent(MotionEvent event) {
+                  final InputDevice device = event != null ? event.getDevice() : null;
+                  if (InputDeviceUtils.isPhysicalGamepad(device)) {
+                      logPhysicalGamepadDevice(device);
+                      final long now = SystemClock.uptimeMillis();
+                      if (now - lastPadMotionLogUptimeMs >= 500L) {
+                          lastPadMotionLogUptimeMs = now;
+                          Log.d(TAG, String.format(java.util.Locale.US,
+                                  "[VS-PAD-AXIS12] id=%d lx=%.3f ly=%.3f rx=%.3f ry=%.3f hatx=%.2f haty=%.2f l2=%.3f r2=%.3f",
+                                  device.getId(),
+                                  event.getAxisValue(MotionEvent.AXIS_X),
+                                  event.getAxisValue(MotionEvent.AXIS_Y),
+                                  event.getAxisValue(MotionEvent.AXIS_Z),
+                                  event.getAxisValue(MotionEvent.AXIS_RZ),
+                                  event.getAxisValue(MotionEvent.AXIS_HAT_X),
+                                  event.getAxisValue(MotionEvent.AXIS_HAT_Y),
+                                  Math.max(event.getAxisValue(MotionEvent.AXIS_LTRIGGER), event.getAxisValue(MotionEvent.AXIS_BRAKE)),
+                                  Math.max(event.getAxisValue(MotionEvent.AXIS_RTRIGGER), event.getAxisValue(MotionEvent.AXIS_GAS))));
+                      }
+                      if (routePhysicalGamepadMotion(event))
+                          return true;
+                  }
+                  return super.dispatchGenericMotionEvent(event);
+              }'''
+          content = replace_function(content, '    @Override\n    public boolean dispatchGenericMotionEvent(', new_motion, 'gamepad motion dispatch')
+          
+          new_key = r'''    @Override
+              public boolean dispatchKeyEvent(KeyEvent event) {
+                  final InputDevice device = event != null ? event.getDevice() : null;
+                  final boolean physicalGamepad = InputDeviceUtils.isPhysicalGamepad(device);
+                  if (physicalGamepad) {
+                      logPhysicalGamepadDevice(device);
+                      if (event.getAction() == KeyEvent.ACTION_DOWN || event.getAction() == KeyEvent.ACTION_UP) {
+                          Log.d(TAG,
+                                  "[VS-PAD-KEY12] id=" + device.getId()
+                                          + " key=" + KeyEvent.keyCodeToString(event.getKeyCode())
+                                          + " action=" + event.getAction()
+                                          + " repeat=" + event.getRepeatCount());
+                      }
+                  }
+          
+                  if (event.getKeyCode() == KeyEvent.KEYCODE_BACK && nativeKeyboardRequested) {
+                      if (event.getAction() == KeyEvent.ACTION_UP && event.getRepeatCount() == 0)
+                          dismissImeFromKeyboard(mTextEdit);
+                      return true;
+                  }
+          
+                  if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+                      if (event.getAction() == KeyEvent.ACTION_UP
+                              && event.getRepeatCount() == 0
+                              && sessionViewModel != null
+                              && sessionViewModel.handleBackPressed(this))
+                          return true;
+                      return true;
+                  }
+          
+                  if (physicalGamepad && event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_MODE
+                          && event.getAction() == KeyEvent.ACTION_DOWN
+                          && event.getRepeatCount() == 0) {
+                      openPauseMenuFromController();
+                      return true;
+                  }
+          
+                  if (physicalGamepad && routePhysicalGamepadKey(event))
+                      return true;
+          
+                  return super.dispatchKeyEvent(event);
+              }'''
+          content = replace_function(content, '    @Override\n    public boolean dispatchKeyEvent(', new_key, 'gamepad key dispatch')
+          
+          helper_anchor = '    @Override\n    public boolean dispatchGenericMotionEvent('
+          helpers = r'''    // [VS-PAD-BRIDGE12] Normalize Android gamepads into the same SDL virtual pad used by touch controls.
+              // The existing Controller Mapping screen remains authoritative: controllerBinds maps canonical
+              // Vita/SDL buttons -> physical SDL button ids and controllerAxisBinds does the same for axes.
+              private void refreshPhysicalGamepadMapping(boolean force) {
+                  final long now = SystemClock.uptimeMillis();
+                  if (!force && now - lastPadMappingRefreshUptimeMs < 1000L)
+                      return;
+                  lastPadMappingRefreshUptimeMs = now;
+                  try {
+                      EmulatorConfig cfg = NativeLib.INSTANCE.getGlobalConfig();
+                      if (cfg != null) {
+                          if (cfg.controllerBinds != null && cfg.controllerBinds.length >= 15)
+                              physicalButtonBinds = Arrays.copyOf(cfg.controllerBinds, cfg.controllerBinds.length);
+                          if (cfg.controllerAxisBinds != null && cfg.controllerAxisBinds.length >= 6)
+                              physicalAxisBinds = Arrays.copyOf(cfg.controllerAxisBinds, cfg.controllerAxisBinds.length);
+                          physicalAnalogMultiplier = Math.max(0.1f, Math.min(2.0f, cfg.controllerAnalogMultiplier));
+                      }
+                  } catch (Throwable t) {
+                      Log.w(TAG, "[VS-PAD-BRIDGE12] unable to refresh controller mapping", t);
+                  }
+              }
+          
+              private static float padAxis(MotionEvent event, int axis) {
+                  InputDevice device = event.getDevice();
+                  if (device == null)
+                      return 0.0f;
+                  InputDevice.MotionRange range = device.getMotionRange(axis, event.getSource());
+                  if (range == null)
+                      return 0.0f;
+                  float value = event.getAxisValue(axis);
+                  if (Math.abs(value) <= range.getFlat())
+                      return 0.0f;
+                  return Math.max(-1.0f, Math.min(1.0f, value));
+              }
+          
+              private static float padTriggerAxis(MotionEvent event, int axis) {
+                  InputDevice device = event.getDevice();
+                  if (device == null)
+                      return 0.0f;
+                  InputDevice.MotionRange range = device.getMotionRange(axis, event.getSource());
+                  if (range == null)
+                      return 0.0f;
+                  final float raw = event.getAxisValue(axis);
+                  final float span = range.getMax() - range.getMin();
+                  if (span > 0.0001f)
+                      return Math.max(0.0f, Math.min(1.0f, (raw - range.getMin()) / span));
+                  return Math.max(0.0f, Math.min(1.0f, raw));
+              }
+          
+              private static float padTrigger(MotionEvent event, int primary, int fallback) {
+                  return Math.max(padTriggerAxis(event, primary), padTriggerAxis(event, fallback));
+              }
+          
+              private static short padStickShort(float value) {
+                  return (short)Math.round(Math.max(-1.0f, Math.min(1.0f, value)) * 32767.0f);
+              }
+          
+              private static short padTriggerShort(float value) {
+                  return (short)Math.round(Math.max(0.0f, Math.min(1.0f, value)) * 32767.0f);
+              }
+          
+              private int canonicalButtonForPhysical(int physicalButton) {
+                  final int limit = Math.min(15, physicalButtonBinds != null ? physicalButtonBinds.length : 0);
+                  for (int canonical = 0; canonical < limit; canonical++) {
+                      if (physicalButtonBinds[canonical] == physicalButton)
+                          return canonical;
+                  }
+                  return physicalButton >= 0 && physicalButton < 15 ? physicalButton : -1;
+              }
+          
+              private boolean routePhysicalButtonId(InputOverlay overlay, int physicalButton, boolean pressed) {
+                  final int canonical = canonicalButtonForPhysical(physicalButton);
+                  if (canonical < 0)
+                      return false;
+                  overlay.setButton(canonical, pressed);
+                  return true;
+              }
+          
+              private static int androidKeyToPhysicalSdlButton(int keyCode) {
+                  switch (keyCode) {
+                      case KeyEvent.KEYCODE_BUTTON_A: return 0;
+                      case KeyEvent.KEYCODE_BUTTON_B: return 1;
+                      case KeyEvent.KEYCODE_BUTTON_X: return 2;
+                      case KeyEvent.KEYCODE_BUTTON_Y: return 3;
+                      case KeyEvent.KEYCODE_BUTTON_SELECT: return 4;
+                      case KeyEvent.KEYCODE_BUTTON_MODE: return 5;
+                      case KeyEvent.KEYCODE_BUTTON_START: return 6;
+                      case KeyEvent.KEYCODE_BUTTON_THUMBL: return 7;
+                      case KeyEvent.KEYCODE_BUTTON_THUMBR: return 8;
+                      case KeyEvent.KEYCODE_BUTTON_L1: return 9;
+                      case KeyEvent.KEYCODE_BUTTON_R1: return 10;
+                      case KeyEvent.KEYCODE_DPAD_UP: return 11;
+                      case KeyEvent.KEYCODE_DPAD_DOWN: return 12;
+                      case KeyEvent.KEYCODE_DPAD_LEFT: return 13;
+                      case KeyEvent.KEYCODE_DPAD_RIGHT: return 14;
+                      default: return -1;
+                  }
+              }
+          
+              private float physicalAxisValue(MotionEvent event, int physicalAxis) {
+                  final InputDevice device = event.getDevice();
+                  switch (physicalAxis) {
+                      case 0: return padAxis(event, MotionEvent.AXIS_X);
+                      case 1: return padAxis(event, MotionEvent.AXIS_Y);
+                      case 2:
+                          return device != null && device.getMotionRange(MotionEvent.AXIS_Z, event.getSource()) != null
+                                  ? padAxis(event, MotionEvent.AXIS_Z)
+                                  : padAxis(event, MotionEvent.AXIS_RX);
+                      case 3:
+                          return device != null && device.getMotionRange(MotionEvent.AXIS_RZ, event.getSource()) != null
+                                  ? padAxis(event, MotionEvent.AXIS_RZ)
+                                  : padAxis(event, MotionEvent.AXIS_RY);
+                      case 4: return padTrigger(event, MotionEvent.AXIS_LTRIGGER, MotionEvent.AXIS_BRAKE);
+                      case 5: return padTrigger(event, MotionEvent.AXIS_RTRIGGER, MotionEvent.AXIS_GAS);
+                      default: return 0.0f;
+                  }
+              }
+          
+              private void routeDigitalTrigger(InputOverlay overlay, int physicalAxis, boolean pressed) {
+                  final int limit = Math.min(6, physicalAxisBinds != null ? physicalAxisBinds.length : 0);
+                  for (int canonical = 0; canonical < limit; canonical++) {
+                      if (physicalAxisBinds[canonical] == physicalAxis) {
+                          if (canonical >= 4)
+                              overlay.setAxis(canonical, padTriggerShort(pressed ? 1.0f : 0.0f));
+                          else
+                              overlay.setAxis(canonical, padStickShort(pressed ? 1.0f : 0.0f));
+                      }
+                  }
+              }
+          
+              private boolean routePhysicalGamepadMotion(MotionEvent event) {
+                  InputOverlay overlay = getmOverlay();
+                  InputDevice device = event != null ? event.getDevice() : null;
+                  if (overlay == null || !InputDeviceUtils.isPhysicalGamepad(device))
+                      return false;
+          
+                  refreshPhysicalGamepadMapping(false);
+                  overlay.setPhysicalGamepadBridgeActive(true);
+                  final int axisCount = Math.min(6, physicalAxisBinds != null ? physicalAxisBinds.length : 0);
+                  for (int canonical = 0; canonical < axisCount; canonical++) {
+                      float value = physicalAxisValue(event, physicalAxisBinds[canonical]);
+                      if (canonical < 4)
+                          value = Math.max(-1.0f, Math.min(1.0f, value * physicalAnalogMultiplier));
+                      overlay.setAxis(canonical, canonical >= 4 ? padTriggerShort(value) : padStickShort(value));
+                  }
+          
+                  // HAT axes are reported instead of key events by many iPega/8BitDo-class pads.
+                  final float hatX = event.getAxisValue(MotionEvent.AXIS_HAT_X);
+                  final float hatY = event.getAxisValue(MotionEvent.AXIS_HAT_Y);
+                  routePhysicalButtonId(overlay, 13, hatX < -0.5f);
+                  routePhysicalButtonId(overlay, 14, hatX > 0.5f);
+                  routePhysicalButtonId(overlay, 11, hatY < -0.5f);
+                  routePhysicalButtonId(overlay, 12, hatY > 0.5f);
+                  return true;
+              }
+          
+              private boolean routePhysicalGamepadKey(KeyEvent event) {
+                  InputOverlay overlay = getmOverlay();
+                  if (overlay == null || event == null)
+                      return false;
+                  refreshPhysicalGamepadMapping(false);
+                  final boolean pressed = event.getAction() != KeyEvent.ACTION_UP;
+                  overlay.setPhysicalGamepadBridgeActive(true);
+          
+                  // Some controllers expose triggers as digital keys, others as analog axes. Support both.
+                  if (event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_L2) {
+                      routeDigitalTrigger(overlay, 4, pressed);
+                      return true;
+                  }
+                  if (event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_R2) {
+                      routeDigitalTrigger(overlay, 5, pressed);
+                      return true;
+                  }
+          
+                  final int physicalButton = androidKeyToPhysicalSdlButton(event.getKeyCode());
+                  return physicalButton >= 0 && routePhysicalButtonId(overlay, physicalButton, pressed);
+              }
+          
+          '''
+          content = replace_once(content, helper_anchor, helpers + helper_anchor, 'gamepad bridge helpers')
+          
+          # In-game restart: save settings first, request a graceful guest shutdown, then hand off
+          # to the separate restart process. A bounded fallback prevents a stuck guest from blocking restart forever.
+          content = replace_once(
+              content,
+              '    private long nativeQuitStartedAtMs;\n',
+              '    private long nativeQuitStartedAtMs;\n'
+              '    private boolean restartAfterNativeQuit = false; // [VS-RESTART-GRACEFUL12]\n'
+              '    private long restartRequestedAtMs = 0L;\n',
+              'in-game restart state',
+          )
+          old_idle = '''            if (!stillRunning) {
+                          Log.i(TAG,
+                                  "[VS-EXIT-ANDROID] native session is Idle; finishing Emulator Activity");
+                          returnToLibrary();
+                          return;
+                      }
+          '''
+          new_idle = '''            if (!stillRunning) {
+                          if (restartAfterNativeQuit) {
+                              Log.i(TAG, "[VS-RESTART-GRACEFUL12] native session is Idle; restarting VitaStation");
+                              restartAfterNativeQuit = false;
+                              restartRequestedAtMs = 0L;
+                              MainActivityKt.restartVitaStationApplication(Emulator.this);
+                              return;
+                          }
+                          Log.i(TAG,
+                                  "[VS-EXIT-ANDROID] native session is Idle; finishing Emulator Activity");
+                          returnToLibrary();
+                          return;
+                      }
+          
+                      if (restartAfterNativeQuit && restartRequestedAtMs > 0L
+                              && SystemClock.elapsedRealtime() - restartRequestedAtMs >= 3500L) {
+                          Log.w(TAG, "[VS-RESTART-GRACEFUL12] native quit timeout; forcing full process restart");
+                          restartAfterNativeQuit = false;
+                          restartRequestedAtMs = 0L;
+                          MainActivityKt.restartVitaStationApplication(Emulator.this);
+                          return;
+                      }
+          '''
+          content = replace_once(content, old_idle, new_idle, 'native quit restart handoff')
+          request_anchor = '    public void requestNativeQuit() {\n'
+          request_method = '''    public void requestFullAppRestart() { // [VS-RESTART-GRACEFUL12]
+                  runOnUiThread(() -> {
+                      if (isFinishing() || isDestroyed())
+                          return;
+                      restartAfterNativeQuit = true;
+                      restartRequestedAtMs = SystemClock.elapsedRealtime();
+                      requestNativeQuit();
+                      getWindow().getDecorView().postDelayed(() -> {
+                          if (restartAfterNativeQuit && !nativeQuitRequested) {
+                              Log.w(TAG, "[VS-RESTART-GRACEFUL12] native quit could not be queued; forcing restart");
+                              restartAfterNativeQuit = false;
+                              restartRequestedAtMs = 0L;
+                              MainActivityKt.restartVitaStationApplication(Emulator.this);
+                          }
+                      }, 250L);
+                  });
+              }
+          
+          '''
+          content = replace_once(content, request_anchor, request_method + request_anchor, 'public graceful restart method')
+          write(path, content)
+          
+          # The pause-menu restart must use the graceful native shutdown path rather than SDLActivity.restartApp().
+          path = 'android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/EmulationPauseMenu.kt'
+          content = read(path)
+          content = replace_once(
+              content,
+              '                    Text(stringResource(R.string.settings_restart_required_summary))\n',
+              '                    Text(stringResource(R.string.settings_restart_required_summary))\n'
+              '                    Text(stringResource(R.string.settings_restart_game_warning))\n',
+              'in-game restart warning',
+          )
+          content = replace_once(
+              content,
+              '                    pendingRestartSettings = null\n                    activity.restartApp(uiState.titleId, "", "")\n',
+              '                    pendingRestartSettings = null\n'
+              '                    activity.requestFullAppRestart() // [VS-RESTART-GRACEFUL12]\n',
+              'pause menu restart action',
+          )
+          write(path, content)
+          
+          # -----------------------------------------------------------------------------
+          # Reliable restart architecture: replace AlarmManager race with a tiny helper
+          # Activity in a separate :restart process. The helper waits for the old PID to
+          # disappear, launches a clean MainActivity, then exits itself.
+          # -----------------------------------------------------------------------------
+          path = 'android/app/src/main/java/org/vita3k/emulator/MainActivity.kt'
+          content = read(path)
+          for imp in [
+              'import android.app.AlarmManager\n',
+              'import android.app.PendingIntent\n',
+          ]:
+              content = content.replace(imp, '')
+          for imp, anchor_imp in [
+              ('import android.os.Handler\n', 'import android.os.Build\n'),
+              ('import android.os.Looper\n', 'import android.os.Handler\n'),
+          ]:
+              if imp not in content:
+                  content = content.replace(anchor_imp, anchor_imp + imp, 1)
+          # Replace only the FIX11 extension function, not MainActivity itself.
+          restart_marker = '// [VS-RESTART-NOW11] Full process restart available from global or per-game settings.\nfun Context.restartVitaStationApplication() {'
+          start = content.find(restart_marker)
+          if start < 0:
+              raise SystemExit('::error::FIX12 restart function marker missing')
+          brace = content.find('{', start)
+          depth = 0
+          end = None
+          for i in range(brace, len(content)):
+              if content[i] == '{': depth += 1
+              elif content[i] == '}':
+                  depth -= 1
+                  if depth == 0:
+                      end = i + 1
+                      break
+          if end is None:
+              raise SystemExit('::error::FIX12 restart function end missing')
+          new_restart = '''// [VS-RESTART-HELPER12] Full process restart without AlarmManager timing races.\nfun Context.restartVitaStationApplication() {\n    val oldPid = Process.myPid()\n    val helperIntent = Intent(this, RestartActivity::class.java)\n        .putExtra(RestartActivity.EXTRA_OLD_PID, oldPid)\n        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)\n    startActivity(helperIntent)\n    (this as? Activity)?.finishAffinity()\n    Handler(Looper.getMainLooper()).postDelayed({\n        Process.killProcess(oldPid)\n    }, 140L)\n}\n'''
+          content = content[:start] + new_restart + content[end:]
+          write(path, content)
+          
+          restart_activity = r'''package org.vita3k.emulator
+          
+          import android.app.Activity
+          import android.content.Intent
+          import android.os.Bundle
+          import android.os.Handler
+          import android.os.Looper
+          import java.io.File
+          
+          // [VS-RESTART-HELPER12] Runs in :restart so it survives termination of the emulator process.
+          class RestartActivity : Activity() {
+              companion object {
+                  const val EXTRA_OLD_PID = "vitastation_old_pid"
+                  private const val MAX_WAIT_MS = 2500L
+                  private const val POLL_MS = 50L
+              }
+          
+              private val handler = Handler(Looper.getMainLooper())
+              private var startedAt = 0L
+              private var oldPid = -1
+          
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  oldPid = intent.getIntExtra(EXTRA_OLD_PID, -1)
+                  startedAt = android.os.SystemClock.elapsedRealtime()
+                  pollAndRelaunch()
+              }
+          
+              private fun pollAndRelaunch() {
+                  val elapsed = android.os.SystemClock.elapsedRealtime() - startedAt
+                  val oldAlive = oldPid > 0 && File("/proc/$oldPid").exists()
+                  if (oldAlive && elapsed < MAX_WAIT_MS) {
+                      handler.postDelayed(::pollAndRelaunch, POLL_MS)
+                      return
+                  }
+          
+                  val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+                      ?: Intent(this, MainActivity::class.java)
+                  launchIntent.addFlags(
+                      Intent.FLAG_ACTIVITY_NEW_TASK or
+                          Intent.FLAG_ACTIVITY_CLEAR_TASK or
+                          Intent.FLAG_ACTIVITY_CLEAR_TOP
+                  )
+                  startActivity(launchIntent)
+                  finishAndRemoveTask()
+              }
+          
+              override fun onDestroy() {
+                  handler.removeCallbacksAndMessages(null)
+                  super.onDestroy()
+              }
+          }
+          '''
+          write('android/app/src/main/java/org/vita3k/emulator/RestartActivity.kt', restart_activity)
+          
+          path = 'android/app/src/main/AndroidManifest.xml'
+          content = read(path)
+          manifest_anchor = '''        <!-- SDL game rendering activity -->
+                  <activity android:name=".Emulator"
+          '''
+          manifest_add = '''        <!-- [VS-RESTART-HELPER12] Separate process survives a full VitaStation process kill. -->
+                  <activity
+                      android:name=".RestartActivity"
+                      android:process=":restart"
+                      android:exported="false"
+                      android:noHistory="true"
+                      android:excludeFromRecents="true"
+                      android:finishOnTaskLaunch="true"
+                      android:taskAffinity="org.vitastation.emulator.restart"
+                      android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+          
+          ''' + manifest_anchor
+          content = replace_once(content, manifest_anchor, manifest_add, 'RestartActivity manifest registration')
+          write(path, content)
+          
+          # -----------------------------------------------------------------------------
+          # Persist Android uncaught crash details so editor/backend failures do not vanish
+          # to the launcher without a useful stack trace. The :restart helper process must
+          # not load the heavy Vita3K native runtime, otherwise it is not an independent helper.
+          # -----------------------------------------------------------------------------
+          path = 'android/app/src/main/java/org/vita3k/emulator/Vita3KApplication.kt'
+          content = read(path)
+          if 'import android.os.Build\n' not in content:
+              content = content.replace('import android.app.Application\n', 'import android.app.Application\nimport android.os.Build\n', 1)
+          if 'import java.io.File\n' not in content:
+              content = content.replace('import android.os.Build\n', 'import android.os.Build\nimport java.io.File\n', 1)
+          old_oncreate = '''    override fun onCreate() {
+                  super.onCreate()
+                  System.loadLibrary("Vita3K")
+                  SDLActivity.nativeSetenv("SDL_ANDROID_ALLOW_RECREATE_ACTIVITY", "1")
+                  UiLanguages.applyStored(this)
+              }
+          '''
+          new_oncreate = '''    override fun onCreate() {
+                  super.onCreate()
+          
+                  val processName = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                      Application.getProcessName()
+                  } else {
+                      runCatching {
+                          File("/proc/self/cmdline").readText().trim('\\u0000', ' ', '\\n', '\\r', '\\t')
+                      }.getOrDefault("")
+                  }
+                  // [VS-RESTART-HELPER12] Keep the helper process tiny and independent from SDL/native state.
+                  if (processName.endsWith(":restart"))
+                      return
+          
+                  // [VS-ANDROID-CRASH12] Keep a shareable last Java/Kotlin crash trace.
+                  val previousCrashHandler = Thread.getDefaultUncaughtExceptionHandler()
+                  Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+                      runCatching {
+                          val dir = getExternalFilesDir(null) ?: filesDir
+                          File(dir, "vitastation-android-crash.log").appendText(
+                              "\\n[${System.currentTimeMillis()}] thread=${thread.name}\\n${throwable.stackTraceToString()}\\n"
+                          )
+                      }
+                      previousCrashHandler?.uncaughtException(thread, throwable)
+                  }
+          
+                  System.loadLibrary("Vita3K")
+                  SDLActivity.nativeSetenv("SDL_ANDROID_ALLOW_RECREATE_ACTIVITY", "1")
+                  UiLanguages.applyStored(this)
+              }
+          '''
+          content = replace_once(content, old_oncreate, new_oncreate, 'Application restart-process/crash handler')
+          write(path, content)
+          
+          # -----------------------------------------------------------------------------
+          # Localization polish for the surfaces observed in FIX11 testing.
+          # -----------------------------------------------------------------------------
+          en = 'android/app/src/main/res/values/strings.xml'
+          pt = 'android/app/src/main/res/values-pt-rBR/strings.xml'
+          for name, value in {
+              'emulation_controls_grid_on': 'Grid: On',
+              'emulation_controls_grid_off': 'Grid: Off',
+              'settings_restart_game_warning': 'The running game will be closed before VitaStation restarts.',
+          }.items():
+              set_string(en, name, value)
+          for name, value in {
+              'emulation_controls_grid_on': 'Grade: Ativada',
+              'emulation_controls_grid_off': 'Grade: Desativada',
+              'settings_restart_game_warning': 'O jogo em execução será encerrado antes de reiniciar o VitaStation.',
+              'settings_hacks_save_state': 'Salvar estado — serializador ainda em desenvolvimento',
+              'settings_hacks_backend_pending': 'Pular cutscene usa o backend de vídeo SceAvPlayer.',
+              'settings_gpu_async_pipeline_desc': 'Permite compilar pipelines em paralelo usando várias threads. Reduz travamentos durante a compilação, mas pode causar falhas gráficas temporárias.',
+              'settings_gpu_accuracy_desc': 'Define o nível de precisão do renderizador Vulkan. Alta pode melhorar a imagem, mas reduzir o desempenho.',
+              'settings_gpu_screen_filter_desc': 'Selecione o filtro final aplicado à imagem exibida.',
+              'settings_restart_required_title': 'Reinício necessário',
+              'settings_restart_required_summary': 'Esta alteração só entra em vigor após reiniciar o VitaStation.',
+              'settings_restart_app': 'Reiniciar agora',
+              'settings_restart_later': 'Depois',
+          }.items():
+              set_string(pt, name, value)
+          
+          # -----------------------------------------------------------------------------
+          # Protection gates inside the patch itself.
+          # -----------------------------------------------------------------------------
+          if sha('vita3k/renderer/src/vulkan/frame_generation.cpp') != protected_before['framegen']:
+              raise SystemExit('::error::FIX12 touched frozen FrameGen')
+          if sha('vita3k/shaders-builtin/vulkan/surface_cast_reinterpret.comp') != protected_before['typeless_shader']:
+              raise SystemExit('::error::FIX12 changed the R2 Typeless shader')
+          if sha('vita3k/shaders-builtin/vulkan/surface_cast_reinterpret.comp.spv') != protected_before['typeless_spv']:
+              raise SystemExit('::error::FIX12 changed the verified R2 Typeless SPIR-V')
+          if sha('vita3k/kernel/src/sync_primitives.cpp') != protected_before['gintama_kernel']:
+              raise SystemExit('::error::FIX12 touched protected Gintama kernel sync')
+          
+          print('[VS-FIX12] structural patch applied')
+          print('[VS-FIX12] Uncharted visibility + LORD SPIR-V + Gintama High Safe + touch/gamepad/restart/UI landed')
+          PY
+
+      - name: FIX12 structural regression gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          
+          
+          def data(path):
+              return Path(path).read_text(encoding='utf-8')
+          
+          
+          def require(path, *tokens):
+              text = data(path)
+              for token in tokens:
+                  if token not in text:
+                      raise SystemExit(f'::error::FIX12 gate missing {token!r} in {path}')
+          
+          
+          def forbid(path, *tokens):
+              text = data(path)
+              for token in tokens:
+                  if token in text:
+                      raise SystemExit(f'::error::FIX12 gate forbidden token {token!r} in {path}')
+          
+          
+          def sha256(path):
+              return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+          
+          require('android/app/build.gradle', 'versionCode = 55', 'versionName = "0.3.0-alpha4-fix12-structural"')
+          
+          # UX cleanup and localization.
+          hacks = data('android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsSections.kt')
+          start = hacks.find('private fun HacksSettingsSection(')
+          if start < 0:
+              raise SystemExit('::error::FIX12 HacksSettingsSection missing')
+          end = hacks.find('\n@Composable', start + 1)
+          if end < 0:
+              end = len(hacks)
+          hacks_body = hacks[start:end]
+          if 'checked = cfg.turboMode' in hacks_body:
+              raise SystemExit('::error::FIX12 Turbo still duplicated in HACKs')
+          require('android/app/src/main/java/org/vita3k/emulator/ui/screens/settings/SettingsSections.kt', 'settings_gpu_turbo_mode')
+          require('android/app/src/main/res/values-pt-rBR/strings.xml',
+                  'Grade: Ativada', 'Grade: Desativada',
+                  'O jogo em execução será encerrado antes de reiniciar o VitaStation.',
+                  'Reinício necessário', 'Reiniciar agora')
+          
+          # Uncharted: preserve R2 and add only explicit producer-consumer visibility.
+          require('vita3k/renderer/src/vulkan/surface_cache.cpp',
+                  '[VS-UNCHARTED-PHASE10R2]', '[VS-UNCHARTED-PHASE11-PERSIST]',
+                  '[VS-UNCHARTED-VISIBLE12]', 'eColorAttachmentWrite', 'eTransferRead')
+          require('vita3k/renderer/include/renderer/vulkan/surface_cache.h',
+                  '[VS-UNCHARTED-PHASE11-PERSIST]')
+          
+          # Gintama High-safe remains title-scoped and Standard path is preserved.
+          require('vita3k/renderer/src/vulkan/renderer.cpp',
+                  '[VS-GINTAMA-HIGH-SAFE11]', '[VS-GINTAMA-HIGH-SAFE12]',
+                  'game_id == "PCSG01073"', '(!use_high_accuracy || gintama_high_safe)')
+          
+          # LORD SPIR-V compatibility patch.
+          require('vita3k/shader/include/shader/usse_utilities.h',
+                  '[VS-LORD-SPIRV12]', 'extract_vector_component', 'insert_vector_component')
+          require('vita3k/shader/src/usse_utilities.cpp',
+                  '[VS-LORD-SPIRV12]', 'createCompositeExtract', 'createCompositeInsert')
+          require('vita3k/shader/src/translator/data.cpp',
+                  '[VS-LORD-SPIRV12]', 'vs12_result_comps')
+          require('vita3k/shader/src/translator/texture.cpp', 'utils::extract_vector_component')
+          
+          # Touch editor / gamepad backend.
+          require('android/app/src/main/java/org/vita3k/emulator/overlay/InputOverlay.java',
+                  '[VS-TOUCH-SNAP-SAFE12]', '[VS-PAD-BRIDGE12]', 'post(this::refreshControls)')
+          require('android/app/src/main/java/org/vita3k/emulator/Emulator.java',
+                  '[VS-PAD-BRIDGE12]', '[VS-PAD-AXIS12]', '[VS-PAD-KEY12]',
+                  'NativeLib.INSTANCE.getGlobalConfig()', 'controllerBinds', 'controllerAxisBinds')
+          require('android/app/src/main/java/org/vita3k/emulator/ui/components/OverlayEditorPalette.kt',
+                  'emulation_controls_grid_on', 'emulation_controls_grid_off')
+          
+          # Restart helper must be separate from the native process and in-game restart must use it.
+          require('android/app/src/main/java/org/vita3k/emulator/RestartActivity.kt',
+                  '[VS-RESTART-HELPER12]', 'EXTRA_OLD_PID', 'MainActivity::class.java')
+          require('android/app/src/main/AndroidManifest.xml',
+                  '.RestartActivity', 'android:process=":restart"')
+          require('android/app/src/main/java/org/vita3k/emulator/MainActivity.kt',
+                  '[VS-RESTART-HELPER12]', 'RestartActivity.EXTRA_OLD_PID')
+          require('android/app/src/main/java/org/vita3k/emulator/Vita3KApplication.kt',
+                  '[VS-RESTART-HELPER12]', '[VS-ANDROID-CRASH12]', ':restart')
+          require('android/app/src/main/java/org/vita3k/emulator/Emulator.java',
+                  '[VS-RESTART-GRACEFUL12]', 'requestFullAppRestart')
+          require('android/app/src/main/java/org/vita3k/emulator/ui/screens/emulation/EmulationPauseMenu.kt',
+                  '[VS-RESTART-GRACEFUL12]', 'settings_restart_game_warning')
+          forbid('android/app/src/main/java/org/vita3k/emulator/MainActivity.kt',
+                 'AlarmManager.ELAPSED_REALTIME', 'Process.killProcess(Process.myPid())')
+          
+          # Frozen working features.
+          framegen = sha256('vita3k/renderer/src/vulkan/frame_generation.cpp')
+          if framegen != '1e7cc634f3308566b6ea3d972b73c55086f8f781':
+              raise SystemExit(f'::error::FIX12 FrameGen drift actual={framegen}')
+          
+          # R2 shader source and binary are protected by the patch itself; keep marker gates too.
+          require('vita3k/renderer/src/vulkan/surface_cache.cpp', '[VS-TYPELESS-HD-STAGING]', '[VS-UNCHARTED-TYPELESS-CACHE9]')
+          
+          print('[VS-FIX12] structural regression gates passed')
+          print('[VS-FIX12] R2 Typeless + FrameGen + Gintama Standard protection retained')
+          PY
+
       - name: Set up Java 17
         uses: actions/setup-java@v5
         with:
@@ -3923,13 +5113,13 @@ jobs:
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build signed VitaStation FIX11 MEGA APK
+      - name: Build signed VitaStation FIX12 STRUCTURAL APK
         shell: bash
         run: |
           set -euo pipefail
           bash ./.ci/build-android.sh artifacts/vitastation-android
 
-      - name: Verify frozen R2 shader is packaged in FIX11 APK
+      - name: Verify frozen R2 shader is packaged in FIX12 APK
         shell: bash
         run: |
           set -euo pipefail
@@ -3974,23 +5164,23 @@ jobs:
           print('[VS-FIX10-R2] FrameGen remained byte-identical')
           PY
 
-      - name: Rename and hash FIX11 MEGA APK
+      - name: Rename and hash FIX12 STRUCTURAL APK
         shell: bash
         run: |
           set -euo pipefail
           SRC='artifacts/vitastation-android/app.apk'
-          DST="artifacts/vitastation-android/$FIX11_APK_NAME"
+          DST="artifacts/vitastation-android/$FIX12_APK_NAME"
           test -s "$SRC"
           mv "$SRC" "$DST"
-          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX11_APK_NAME.sha256"
+          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX12_APK_NAME.sha256"
           ls -lh "$DST"
 
-      - name: Upload VitaStation FIX11 MEGA APK
+      - name: Upload VitaStation FIX12 STRUCTURAL APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.3.0-Alpha4-FIX11-Mega-Android-Signed
+          name: VitaStation-v0.3.0-Alpha4-FIX12-Structural-Android-Signed
           path: |
-            artifacts/vitastation-android/${{ env.FIX11_APK_NAME }}
-            artifacts/vitastation-android/${{ env.FIX11_APK_NAME }}.sha256
+            artifacts/vitastation-android/${{ env.FIX12_APK_NAME }}
+            artifacts/vitastation-android/${{ env.FIX12_APK_NAME }}.sha256
           if-no-files-found: error
           retention-days: 30

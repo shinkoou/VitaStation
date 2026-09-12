@@ -5305,14 +5305,23 @@ jobs:
           '''
           content = replace_once(content, cleanup_anchor, cleanup_block, 'PendingCast13 cleanup')
 
-          queue_anchor = '''        casted->texture.transition_to(
-                      cmd_buffer, vkutil::ImageLayout::ColorAttachmentReadWrite);
+          # Insert immediately before the existing late-resolve resume block.
+          # FIX12 changed the exact transition formatting, so do not depend on a
+          # whitespace-fragile multi-line anchor here.
+          pending_marker13 = '\n        if (late_resolve_in_renderpass) {'
+          pending_hits13 = []
+          search_from13 = 0
+          while True:
+              hit13 = content.find(pending_marker13, search_from13)
+              if hit13 < 0:
+                  break
+              pending_hits13.append(hit13)
+              search_from13 = hit13 + 1
+          if len(pending_hits13) != 1:
+              raise SystemExit(
+                  f'::error::FIX13 late-resolve insertion marker: expected one occurrence, found {len(pending_hits13)}')
 
-                  if (late_resolve_in_renderpass) {
-          '''
-          queue_block = r'''        casted->texture.transition_to(
-                      cmd_buffer, vkutil::ImageLayout::ColorAttachmentReadWrite);
-
+          queue_block13 = r'''
                   if (state.app_title_id == "PCSA00029"
                       && needs_late_resolve
                       && bytes_per_pixel_requested == bytes_per_pixel_in_store) {
@@ -5407,10 +5416,9 @@ jobs:
                               read_region.extent.height);
                       }
                   }
-
-                  if (late_resolve_in_renderpass) {
           '''
-          content = replace_once(content, queue_anchor, queue_block, 'Uncharted draw-time refresh queue')
+          insert_at13 = pending_hits13[0]
+          content = content[:insert_at13] + queue_block13 + content[insert_at13:]
           write(path, content)
 
           path = 'vita3k/renderer/src/vulkan/scene.cpp'

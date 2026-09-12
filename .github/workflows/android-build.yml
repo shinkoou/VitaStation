@@ -4035,14 +4035,18 @@ jobs:
           # -----------------------------------------------------------------------------
           path = 'vita3k/renderer/src/vulkan/surface_cache.cpp'
           content = read(path)
-          anchor = '''        if (late_resolve_in_renderpass) {
-                      context->stop_render_pass();
-                  }
+          anchor = '''        casted->scene_timestamp = scene_timestamp;
+                  casted->source_generation = source_generation;
+
+                  if (bytes_per_pixel_requested == bytes_per_pixel_in_store) {
           '''
-          barrier = anchor + '''
-                  // [VS-UNCHARTED-VISIBLE12] PCSA00029 combines the proven R2 Typeless
-                  // reinterpret with the producer/consumer visibility rule used by Vita3K-Plus.
-                  if (needs_late_resolve && state.app_title_id == "PCSA00029") {
+          barrier = '''        casted->scene_timestamp = scene_timestamp;
+                  casted->source_generation = source_generation;
+
+                  // [VS-UNCHARTED-VISIBLE12] PCSA00029 keeps FIX10-R2 Typeless semantics,
+                  // but makes prior color/shader writes visible before the cached surface
+                  // is consumed by transfer or compute reinterpretation.
+                  if (state.app_title_id == "PCSA00029") {
                       vk::ImageMemoryBarrier store_visible{
                           .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eShaderWrite,
                           .dstAccessMask = vk::AccessFlagBits::eTransferRead | vk::AccessFlagBits::eShaderRead,
@@ -4059,11 +4063,13 @@ jobs:
                           vk::DependencyFlags{}, {}, {}, store_visible);
                       static thread_local uint64_t vs_uncharted_visible12 = 0;
                       if (((++vs_uncharted_visible12 & 0x7FFu) == 1u))
-                          LOG_DEBUG("[VS-UNCHARTED-VISIBLE12] surface={} generation={} scene={} draw={}",
-                              log_hex(ite->first), source_generation, scene_timestamp, context->draw_timestamp);
+                          LOG_DEBUG("[VS-UNCHARTED-VISIBLE12] surface={} generation={} scene={}",
+                              log_hex(ite->first), source_generation, scene_timestamp);
                   }
+
+                  if (bytes_per_pixel_requested == bytes_per_pixel_in_store) {
           '''
-          content = replace_once(content, anchor, barrier, 'Uncharted late-resolve visibility barrier')
+          content = replace_once(content, anchor, barrier, 'Uncharted surface-consumer visibility barrier')
           write(path, content)
           
           # -----------------------------------------------------------------------------

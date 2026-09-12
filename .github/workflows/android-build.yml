@@ -1,9 +1,9 @@
-# VitaStation Alpha 4 FIX12 STRUCTURAL UPDATE
+# VitaStation Alpha 4 FIX13 UNCHARTED PENDINGCAST
 # Replays the verified FIX9 stack, then applies one title-scoped Uncharted Typeless phase-view delta.
 # FIX10-R2 recompiles and verifies the SPIR-V actually packaged in the APK.
 # No Bootstrap. Gintama sync and frozen FrameGen remain protected.
 
-name: VitaStation Android APK - Alpha 4 FIX12 STRUCTURAL UPDATE
+name: VitaStation Android APK - Alpha 4 FIX13 UNCHARTED PENDINGCAST
 
 "on":
   workflow_dispatch:
@@ -15,17 +15,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: vitastation-android-fix12-structural-${{ github.ref }}
+  group: vitastation-android-fix13-uncharted-pendingcast-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   VCPKG_ROOT: /usr/local/share/vcpkg
   VITASTATION_SIGNING_CERT_SHA256: fc57542b62221ad0c0550d12b2791e4e40794e980c9f26a86d83250d67ed5d30
-  FIX12_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX12-Structural-Uncharted-Lord-Gintama-Controls-Signed.apk
+  FIX13_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX13-Uncharted-PendingCast-Signed.apk
 
 jobs:
   android-build:
-    name: Build VitaStation v0.3.0 Alpha 4 FIX12 STRUCTURAL UPDATE
+    name: Build VitaStation v0.3.0 Alpha 4 FIX13 UNCHARTED PENDINGCAST
     runs-on: ubuntu-latest
 
     steps:
@@ -5084,6 +5084,431 @@ jobs:
           print('[VS-FIX12] R2 Typeless + FrameGen + Gintama Standard protection retained')
           PY
 
+
+      - name: Apply FIX13 Uncharted draw-time PendingCast delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          def read(path):
+              return Path(path).read_text(encoding='utf-8')
+
+          def write(path, content):
+              Path(path).write_text(content, encoding='utf-8')
+
+          def replace_once(content, old, new, label):
+              count = content.count(old)
+              if count != 1:
+                  raise SystemExit(f'::error::FIX13 {label}: expected one anchor, found {count}')
+              return content.replace(old, new, 1)
+
+          path = 'android/app/build.gradle'
+          content = read(path)
+          content = replace_once(content, 'versionCode = 55', 'versionCode = 56', 'versionCode')
+          content = replace_once(
+              content,
+              'versionName = "0.3.0-alpha4-fix12-structural"',
+              'versionName = "0.3.0-alpha4-fix13-uncharted-pendingcast"',
+              'versionName',
+          )
+          write(path, content)
+
+          path = 'vita3k/renderer/include/renderer/vulkan/surface_cache.h'
+          content = read(path)
+
+          if '#include <functional>' not in content:
+              content = replace_once(
+                  content,
+                  '#include <optional>\n',
+                  '#include <functional>\n#include <optional>\n',
+                  'surface_cache functional include',
+              )
+
+          if 'struct VKContext;' not in content:
+              content = replace_once(
+                  content,
+                  'struct VKRenderTarget;\nstruct VKState;\n',
+                  'struct VKContext;\nstruct VKRenderTarget;\nstruct VKState;\n',
+                  'VKContext forward declaration',
+              )
+
+          pending_anchor = '''    ColorSurfaceCacheInfo *last_written_surface = nullptr;
+          '''
+          pending_block = '''    ColorSurfaceCacheInfo *last_written_surface = nullptr;
+
+              // [VS-UNCHARTED-PENDING13] Vita3K-Plus style draw-time refresh queue.
+              // Title-scoped at enqueue/call sites so every non-PCSA00029 game keeps
+              // the verified VitaStation FIX12 path byte-for-byte.
+              struct PendingCast13 {
+                  vk::ImageView view = nullptr;
+                  ColorSurfaceCacheInfo *info = nullptr;
+                  vk::Rect2D read_region{};
+                  std::function<void(vk::CommandBuffer)> record;
+              };
+              std::vector<PendingCast13> pending_casts13;
+
+              void record_pending_cast13(PendingCast13 &cast, VKContext &context);
+          '''
+          content = replace_once(content, pending_anchor, pending_block, 'PendingCast13 storage')
+
+          public_anchor = '''    std::optional<TextureLookupResult> retrieve_color_surface_as_texture(const SceGxmTexture &texture, const SceGxmColorBaseFormat base_format, TextureViewport *texture_viewport);
+
+              SurfaceRetrieveResult retrieve_depth_stencil_for_framebuffer'''
+          public_block = '''    std::optional<TextureLookupResult> retrieve_color_surface_as_texture(const SceGxmTexture &texture, const SceGxmColorBaseFormat base_format, TextureViewport *texture_viewport);
+
+              // [VS-UNCHARTED-PENDING13] Execute only casts referenced by the draw's
+              // currently bound texture views.
+              void perform_pending_casts13(
+                  VKContext &context,
+                  uint16_t vert_texture_count,
+                  uint16_t frag_texture_count);
+
+              SurfaceRetrieveResult retrieve_depth_stencil_for_framebuffer'''
+          content = replace_once(content, public_anchor, public_block, 'PendingCast13 public API')
+          write(path, content)
+
+          path = 'vita3k/renderer/src/vulkan/surface_cache.cpp'
+          content = read(path)
+
+          if '#include <algorithm>' not in content:
+              content = replace_once(
+                  content,
+                  '#include <array>\n',
+                  '#include <algorithm>\n#include <array>\n',
+                  'surface_cache algorithm include',
+              )
+
+          methods_anchor = '''void VKSurfaceCache::destroy_surface(ColorSurfaceCacheInfo &info) {
+              vkutil::DestroyQueue &destroy_queue = state.frame().destroy_queue;
+          '''
+          methods_block = r'''void VKSurfaceCache::record_pending_cast13(PendingCast13 &cast, VKContext &context) {
+              if (!cast.info || !cast.info->texture.image || !cast.record)
+                  return;
+
+              ColorSurfaceCacheInfo &info = *cast.info;
+              const bool was_in_renderpass = context.in_renderpass;
+
+              if (was_in_renderpass) {
+                  context.stop_render_pass();
+
+                  context.current_render_pass = state.pipeline_cache.retrieve_render_pass(
+                      context.current_color_format, true, true, !context.record.color_surface.data);
+                  if (state.features.support_shader_interlock) {
+                      context.current_shader_interlock_pass = state.pipeline_cache.retrieve_render_pass(
+                          context.current_color_format, true, true, !context.record.color_surface.data, true);
+                  }
+              }
+
+              vk::ImageMemoryBarrier store_visible{
+                  .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eShaderWrite,
+                  .dstAccessMask = vk::AccessFlagBits::eTransferRead | vk::AccessFlagBits::eShaderRead,
+                  .oldLayout = vk::ImageLayout::eGeneral,
+                  .newLayout = vk::ImageLayout::eGeneral,
+                  .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                  .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                  .image = info.texture.image,
+                  .subresourceRange = vkutil::color_subresource_range
+              };
+              context.render_cmd.pipelineBarrier(
+                  vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eFragmentShader,
+                  vk::PipelineStageFlagBits::eTransfer | vk::PipelineStageFlagBits::eComputeShader,
+                  vk::DependencyFlags{}, {}, {}, store_visible);
+
+              cast.record(context.render_cmd);
+
+              info.last_resolve_scene = context.scene_timestamp;
+              info.last_resolve_generation = info.write_generation;
+              subtract_resolved_region(info.pending_write_regions, cast.read_region);
+
+              static thread_local uint64_t pending_exec_log13 = 0;
+              if (((++pending_exec_log13 & 0x1FFu) == 1u)) {
+                  LOG_INFO(
+                      "[VS-UNCHARTED-PENDING13] execute scene={} draw={} generation={} pending_regions={}",
+                      context.scene_timestamp,
+                      context.draw_timestamp,
+                      info.write_generation,
+                      info.pending_write_regions.size());
+              }
+
+              if (was_in_renderpass) {
+                  vk::ImageMemoryBarrier back_to_render{
+                      .srcAccessMask = vk::AccessFlagBits::eTransferRead,
+                      .dstAccessMask = vk::AccessFlagBits::eColorAttachmentRead
+                          | vk::AccessFlagBits::eColorAttachmentWrite
+                          | vk::AccessFlagBits::eShaderRead
+                          | vk::AccessFlagBits::eShaderWrite,
+                      .oldLayout = vk::ImageLayout::eGeneral,
+                      .newLayout = vk::ImageLayout::eGeneral,
+                      .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                      .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                      .image = info.texture.image,
+                      .subresourceRange = vkutil::color_subresource_range
+                  };
+                  context.render_cmd.pipelineBarrier(
+                      vk::PipelineStageFlagBits::eTransfer,
+                      vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eFragmentShader,
+                      vk::DependencyFlags{}, {}, {}, back_to_render);
+                  context.start_render_pass(false);
+              }
+          }
+
+          void VKSurfaceCache::perform_pending_casts13(
+              VKContext &context,
+              const uint16_t vert_texture_count,
+              const uint16_t frag_texture_count) {
+              if (pending_casts13.empty())
+                  return;
+
+              for (size_t i = 0; i < pending_casts13.size();) {
+                  bool used = false;
+
+                  for (uint16_t unit = 0; unit < frag_texture_count && !used; ++unit)
+                      used = pending_casts13[i].view == context.fragment_textures[unit].imageView;
+
+                  for (uint16_t unit = 0; unit < vert_texture_count && !used; ++unit)
+                      used = pending_casts13[i].view == context.vertex_textures[unit].imageView;
+
+                  if (!used) {
+                      ++i;
+                      continue;
+                  }
+
+                  PendingCast13 cast = std::move(pending_casts13[i]);
+                  pending_casts13.erase(pending_casts13.begin() + i);
+                  record_pending_cast13(cast, context);
+                  i = 0;
+              }
+          }
+
+          void VKSurfaceCache::destroy_surface(ColorSurfaceCacheInfo &info) {
+              pending_casts13.erase(
+                  std::remove_if(
+                      pending_casts13.begin(),
+                      pending_casts13.end(),
+                      [&info](const PendingCast13 &cast) { return cast.info == &info; }),
+                  pending_casts13.end());
+
+              vkutil::DestroyQueue &destroy_queue = state.frame().destroy_queue;
+          '''
+          content = replace_once(content, methods_anchor, methods_block, 'PendingCast13 implementation')
+
+          cleanup_anchor = '''    cpu_surfaces_changed.clear();
+              target = nullptr;
+              last_written_surface = nullptr;
+          '''
+          cleanup_block = '''    cpu_surfaces_changed.clear();
+              pending_casts13.clear(); // [VS-UNCHARTED-PENDING13]
+              target = nullptr;
+              last_written_surface = nullptr;
+          '''
+          content = replace_once(content, cleanup_anchor, cleanup_block, 'PendingCast13 cleanup')
+
+          queue_anchor = '''        casted->texture.transition_to(
+                      cmd_buffer, vkutil::ImageLayout::ColorAttachmentReadWrite);
+
+                  if (late_resolve_in_renderpass) {
+          '''
+          queue_block = r'''        casted->texture.transition_to(
+                      cmd_buffer, vkutil::ImageLayout::ColorAttachmentReadWrite);
+
+                  if (state.app_title_id == "PCSA00029"
+                      && needs_late_resolve
+                      && bytes_per_pixel_requested == bytes_per_pixel_in_store) {
+                      const size_t casted_index13 =
+                          static_cast<size_t>(casted - casted_vec.data());
+                      ColorSurfaceCacheInfo *info_ptr13 = &info;
+                      const vk::ImageView pending_view13 = casted->texture.view;
+
+                      pending_casts13.erase(
+                          std::remove_if(
+                              pending_casts13.begin(),
+                              pending_casts13.end(),
+                              [pending_view13](const PendingCast13 &pending) {
+                                  return pending.view == pending_view13;
+                              }),
+                          pending_casts13.end());
+
+                      auto record_cast13 = [
+                          info_ptr13,
+                          casted_index13,
+                          start_x,
+                          start_sourced_line,
+                          width,
+                          height](vk::CommandBuffer pending_cmd) {
+                          if (!info_ptr13
+                              || casted_index13 >= info_ptr13->casted_textures.size())
+                              return;
+
+                          CastedTexture &pending_casted =
+                              info_ptr13->casted_textures[casted_index13];
+
+                          pending_casted.texture.transition_to(
+                              pending_cmd, vkutil::ImageLayout::TransferDst);
+
+                          const uint32_t available_w =
+                              info_ptr13->width > start_x
+                              ? info_ptr13->width - start_x
+                              : 0u;
+                          const uint32_t available_h =
+                              info_ptr13->height > start_sourced_line
+                              ? info_ptr13->height - start_sourced_line
+                              : 0u;
+                          const uint32_t copy_w = std::min<uint32_t>(width, available_w);
+                          const uint32_t copy_h = std::min<uint32_t>(height, available_h);
+                          if (copy_w == 0 || copy_h == 0) {
+                              pending_casted.texture.transition_to(
+                                  pending_cmd, vkutil::ImageLayout::ColorAttachmentReadWrite);
+                              return;
+                          }
+
+                          vk::ImageCopy pending_copy{
+                              .srcSubresource = vkutil::color_subresource_layer,
+                              .srcOffset = {
+                                  static_cast<int32_t>(start_x),
+                                  static_cast<int32_t>(start_sourced_line),
+                                  0 },
+                              .dstSubresource = vkutil::color_subresource_layer,
+                              .dstOffset = { 0, 0, 0 },
+                              .extent = { copy_w, copy_h, 1 }
+                          };
+                          pending_cmd.copyImage(
+                              info_ptr13->texture.image,
+                              vk::ImageLayout::eGeneral,
+                              pending_casted.texture.image,
+                              vk::ImageLayout::eTransferDstOptimal,
+                              pending_copy);
+
+                          pending_casted.texture.transition_to(
+                              pending_cmd, vkutil::ImageLayout::ColorAttachmentReadWrite);
+                          pending_casted.source_generation =
+                              info_ptr13->write_generation;
+                      };
+
+                      pending_casts13.push_back(PendingCast13{
+                          .view = pending_view13,
+                          .info = info_ptr13,
+                          .read_region = read_region,
+                          .record = std::move(record_cast13)
+                      });
+
+                      static thread_local uint64_t pending_queue_log13 = 0;
+                      if (((++pending_queue_log13 & 0x1FFu) == 1u)) {
+                          LOG_INFO(
+                              "[VS-UNCHARTED-PENDING13] queue surface={} scene={} draw={} generation={} region=({},{} {}x{})",
+                              log_hex(ite->first),
+                              scene_timestamp,
+                              context->draw_timestamp,
+                              info.write_generation,
+                              read_region.offset.x,
+                              read_region.offset.y,
+                              read_region.extent.width,
+                              read_region.extent.height);
+                      }
+                  }
+
+                  if (late_resolve_in_renderpass) {
+          '''
+          content = replace_once(content, queue_anchor, queue_block, 'Uncharted draw-time refresh queue')
+          write(path, content)
+
+          path = 'vita3k/renderer/src/vulkan/scene.cpp'
+          content = read(path)
+          scene_anchor = '''    void *indices_ptr = indices.get(mem);
+
+              context.check_for_macroblock_change(true);
+          '''
+          scene_block = '''    void *indices_ptr = indices.get(mem);
+
+              if (context.state.app_title_id == "PCSA00029") { // [VS-UNCHARTED-PENDING13]
+                  const auto &vert_data13 =
+                      context.record.vertex_program.get(mem)->renderer_data;
+                  const auto &frag_data13 =
+                      context.record.fragment_program.get(mem)->renderer_data;
+                  context.state.surface_cache.perform_pending_casts13(
+                      context,
+                      vert_data13->texture_count,
+                      frag_data13->texture_count);
+              }
+
+              context.check_for_macroblock_change(true);
+          '''
+          content = replace_once(content, scene_anchor, scene_block, 'Uncharted draw hook')
+          write(path, content)
+
+          print('[VS-FIX13] PCSA00029 draw-time PendingCast refresh applied')
+          print('[VS-FIX13] R2 Typeless remains untouched; Gintama path untouched')
+          PY
+
+      - name: FIX13 Uncharted PendingCast regression gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          def require(path, *tokens):
+              text = Path(path).read_text(encoding='utf-8')
+              for token in tokens:
+                  if token not in text:
+                      raise SystemExit(f'::error::FIX13 gate missing {token!r} in {path}')
+
+          def forbid(path, *tokens):
+              text = Path(path).read_text(encoding='utf-8')
+              for token in tokens:
+                  if token in text:
+                      raise SystemExit(f'::error::FIX13 gate forbidden {token!r} in {path}')
+
+          require(
+              'android/app/build.gradle',
+              'versionCode = 56',
+              'versionName = "0.3.0-alpha4-fix13-uncharted-pendingcast"',
+          )
+          require(
+              'vita3k/renderer/include/renderer/vulkan/surface_cache.h',
+              '[VS-UNCHARTED-PENDING13]',
+              'perform_pending_casts13',
+              'std::function<void(vk::CommandBuffer)> record',
+          )
+          require(
+              'vita3k/renderer/src/vulkan/surface_cache.cpp',
+              '[VS-UNCHARTED-PENDING13]',
+              'record_pending_cast13',
+              'perform_pending_casts13',
+              'state.app_title_id == "PCSA00029"',
+              'bytes_per_pixel_requested == bytes_per_pixel_in_store',
+              '[VS-UNCHARTED-VISIBLE12]',
+              '[VS-UNCHARTED-PHASE10R2]',
+              '[VS-UNCHARTED-PHASE11-PERSIST]',
+          )
+          require(
+              'vita3k/renderer/src/vulkan/scene.cpp',
+              '[VS-UNCHARTED-PENDING13]',
+              'context.state.app_title_id == "PCSA00029"',
+              'perform_pending_casts13',
+          )
+          require(
+              'vita3k/renderer/src/vulkan/renderer.cpp',
+              '[VS-GINTAMA-HIGH-SAFE11]',
+              '[VS-GINTAMA-HIGH-SAFE12]',
+              'game_id == "PCSG01073"',
+          )
+          require(
+              'vita3k/renderer/src/vulkan/surface_cache.cpp',
+              '[VS-TYPELESS-HD-STAGING]',
+              '[VS-UNCHARTED-TYPELESS-CACHE9]',
+          )
+          forbid(
+              'vita3k/renderer/src/vulkan/scene.cpp',
+              'PCSG01073',
+              'PCSG00008',
+          )
+
+          print('[VS-FIX13] PendingCast regression gates passed')
+          print('[VS-FIX13] Gintama safe path and R2 Typeless markers preserved')
+          PY
+
       - name: Set up Java 17
         uses: actions/setup-java@v5
         with:
@@ -5140,13 +5565,13 @@ jobs:
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build signed VitaStation FIX12 STRUCTURAL APK
+      - name: Build signed VitaStation FIX13 UNCHARTED PENDINGCAST APK
         shell: bash
         run: |
           set -euo pipefail
           bash ./.ci/build-android.sh artifacts/vitastation-android
 
-      - name: Verify frozen R2 shader is packaged in FIX12 APK
+      - name: Verify frozen R2 shader is packaged in FIX13 APK
         shell: bash
         run: |
           set -euo pipefail
@@ -5191,23 +5616,23 @@ jobs:
           print('[VS-FIX10-R2] FrameGen remained byte-identical')
           PY
 
-      - name: Rename and hash FIX12 STRUCTURAL APK
+      - name: Rename and hash FIX13 UNCHARTED PENDINGCAST APK
         shell: bash
         run: |
           set -euo pipefail
           SRC='artifacts/vitastation-android/app.apk'
-          DST="artifacts/vitastation-android/$FIX12_APK_NAME"
+          DST="artifacts/vitastation-android/$FIX13_APK_NAME"
           test -s "$SRC"
           mv "$SRC" "$DST"
-          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX12_APK_NAME.sha256"
+          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX13_APK_NAME.sha256"
           ls -lh "$DST"
 
-      - name: Upload VitaStation FIX12 STRUCTURAL APK
+      - name: Upload VitaStation FIX13 UNCHARTED PENDINGCAST APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.3.0-Alpha4-FIX12-Structural-Android-Signed
+          name: VitaStation-v0.3.0-Alpha4-FIX13-Uncharted-PendingCast-Android-Signed
           path: |
-            artifacts/vitastation-android/${{ env.FIX12_APK_NAME }}
-            artifacts/vitastation-android/${{ env.FIX12_APK_NAME }}.sha256
+            artifacts/vitastation-android/${{ env.FIX13_APK_NAME }}
+            artifacts/vitastation-android/${{ env.FIX13_APK_NAME }}.sha256
           if-no-files-found: error
           retention-days: 30

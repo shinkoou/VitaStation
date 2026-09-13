@@ -6,7 +6,7 @@
 # FrameGen, kernel sync and Uncharted remain frozen. No driver-name workaround.
 # Replace .github/workflows/android-build.yml with this workflow.
 
-name: VitaStation Android APK - Alpha 4 FIX20-R2 LORD + GINTAMA SIGNED BDA
+name: VitaStation Android APK - Alpha 4 FIX20-R3 LORD + GINTAMA SIGNED BDA
 
 "on":
   workflow_dispatch:
@@ -18,17 +18,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: vitastation-android-fix20-r2-lord-gintama-signed-bda-${{ github.ref }}
+  group: vitastation-android-fix20-r3-lord-gintama-signed-bda-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   VCPKG_ROOT: /usr/local/share/vcpkg
   VITASTATION_SIGNING_CERT_SHA256: fc57542b62221ad0c0550d12b2791e4e40794e980c9f26a86d83250d67ed5d30
-  FIX20_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX20-R2-Lord-Gintama-SignedBDA-Signed.apk
+  FIX20_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX20-R3-Lord-Gintama-SignedBDA-Signed.apk
 
 jobs:
   android-build:
-    name: Build VitaStation v0.3.0 Alpha 4 FIX18-B LORD PRECOMPUTED HOSTMEM + GINTAMA DRAWTIME
+    name: Build VitaStation v0.3.0 Alpha 4 FIX20-R3 LORD + GINTAMA SIGNED BDA
     runs-on: ubuntu-latest
 
     steps:
@@ -5889,299 +5889,7 @@ jobs:
           print('[VS-FIX17-R2] LORD: FIX16 + duplicate-create vertex/fragment ring rebind')
           PY
 
-      - name: Apply FIX18-A-R3 LORD precomputed draw semantics from Vita3K-Plus
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 <<'PY'
-          from pathlib import Path
-
-          def read(path):
-              return Path(path).read_text(encoding='utf-8')
-
-          def write(path, content):
-              Path(path).write_text(content, encoding='utf-8')
-
-          def replace_once(content, old, new, label):
-              count = content.count(old)
-              if count != 1:
-                  raise SystemExit(f'::error::FIX18-A-R3 {label}: expected one anchor, found {count}')
-              return content.replace(old, new, 1)
-
-          def find_or_die(content, needle, start, label):
-              pos = content.find(needle, start)
-              if pos < 0:
-                  raise SystemExit(f'::error::FIX18-A-R3 {label}: marker not found: {needle!r}')
-              return pos
-
-          # FIX17-R2 has already completed and passed its gates.
-          path = 'android/app/build.gradle'
-          content = read(path)
-          content = replace_once(content, 'versionCode = 61', 'versionCode = 62', 'versionCode')
-          content = replace_once(
-              content,
-              'versionName = "0.3.0-alpha4-fix17r2-gintama-drawtime-lord-ringrebind"',
-              'versionName = "0.3.0-alpha4-fix18a-r3-lord-precomputed-gintama-drawtime"',
-              'versionName',
-          )
-          write(path, content)
-
-          path = 'vita3k/modules/SceGxm/SceGxm.cpp'
-          content = read(path)
-
-          fn_start = find_or_die(
-              content, 'static int gxmDrawElementGeneral(', 0,
-              'gxmDrawElementGeneral start')
-          fn_end = find_or_die(
-              content, '\nEXPORT(int, sceGxmDraw,', fn_start,
-              'gxmDrawElementGeneral end')
-          fn = content[fn_start:fn_end]
-
-          # 1) Program selection. Replace only the two ordinary program reads.
-          p1 = find_or_die(
-              fn,
-              'const SceGxmFragmentProgram &gxm_fragment_program = *context->state.fragment_program.get(emuenv.mem);',
-              0, 'fragment program read')
-          p1 = fn.rfind('\n', 0, p1) + 1
-          p2 = find_or_die(
-              fn,
-              'const SceGxmVertexProgram &gxm_vertex_program = *context->state.vertex_program.get(emuenv.mem);',
-              p1, 'vertex program read')
-          p2 = fn.find('\n', p2)
-          if p2 < 0:
-              raise SystemExit('::error::FIX18-A-R3 vertex program line end not found')
-          p2 += 1
-
-          program_block = '''    const bool lord_precomputed18 = emuenv.io.app_path == "PCSG00008";
-
-              // [VS-LORD-PRECOMPUTED18]
-              // Vita3K-Plus semantics: an active precomputed state supplies the
-              // program/uniform/texture state to normal draws until cleared.
-              SceGxmPrecomputedVertexState *pre_vert18 = lord_precomputed18
-                  ? context->state.precomputed_vertex_state.cast<SceGxmPrecomputedVertexState>().get(emuenv.mem)
-                  : nullptr;
-              SceGxmPrecomputedFragmentState *pre_frag18 = lord_precomputed18
-                  ? context->state.precomputed_fragment_state.cast<SceGxmPrecomputedFragmentState>().get(emuenv.mem)
-                  : nullptr;
-
-              const Ptr<const SceGxmFragmentProgram> frag_program_ptr18 =
-                  (pre_frag18 && pre_frag18->program)
-                  ? pre_frag18->program
-                  : context->state.fragment_program;
-              const Ptr<const SceGxmVertexProgram> vert_program_ptr18 =
-                  (pre_vert18 && pre_vert18->program)
-                  ? pre_vert18->program
-                  : context->state.vertex_program;
-
-              const SceGxmFragmentProgram &gxm_fragment_program =
-                  *frag_program_ptr18.get(emuenv.mem);
-              const SceGxmVertexProgram &gxm_vertex_program =
-                  *vert_program_ptr18.get(emuenv.mem);
-          '''
-          fn = fn[:p1] + program_block + fn[p2:]
-
-          # 2) Uniform buffers. Find the existing vertex call and consume through
-          # the following fragment call, independent of formatting.
-          u1 = find_or_die(
-              fn,
-              'gxmSetUniformBuffers(*emuenv.renderer, emuenv.gxm, context, vertex_program_gxp,',
-              0, 'vertex uniform upload')
-          u1 = fn.rfind('\n', 0, u1) + 1
-          ufrag = find_or_die(
-              fn,
-              'gxmSetUniformBuffers(*emuenv.renderer, emuenv.gxm, context, fragment_program_gxp,',
-              u1, 'fragment uniform upload')
-          u2 = find_or_die(fn, 'emuenv.mem);', ufrag, 'fragment uniform upload end')
-          u2 = fn.find('\n', u2)
-          if u2 < 0:
-              raise SystemExit('::error::FIX18-A-R3 uniform block line end not found')
-          u2 += 1
-
-          uniform_block = '''    std::span<UniformBuffer> vert_buffers18 =
-                  (pre_vert18 && pre_vert18->uniform_buffers)
-                  ? std::span(pre_vert18->uniform_buffers.get(emuenv.mem), pre_vert18->buffer_count)
-                  : std::span(context->state.vertex_uniform_buffers);
-              std::span<UniformBuffer> frag_buffers18 =
-                  (pre_frag18 && pre_frag18->uniform_buffers)
-                  ? std::span(pre_frag18->uniform_buffers.get(emuenv.mem), pre_frag18->buffer_count)
-                  : std::span(context->state.fragment_uniform_buffers);
-
-              gxmSetUniformBuffers(
-                  *emuenv.renderer, emuenv.gxm, context,
-                  vertex_program_gxp, vert_buffers18,
-                  gxm_vertex_program.renderer_data->uniform_buffer_sizes,
-                  emuenv.mem);
-              gxmSetUniformBuffers(
-                  *emuenv.renderer, emuenv.gxm, context,
-                  fragment_program_gxp, frag_buffers18,
-                  gxm_fragment_program.renderer_data->uniform_buffer_sizes,
-                  emuenv.mem);
-
-              if (lord_precomputed18 && (pre_vert18 || pre_frag18)) {
-                  LOG_INFO_ONCE(
-                      "[VS-LORD-PRECOMPUTED18] PCSG00008 normal draw uses precomputed program/uniform state");
-              }
-          '''
-          fn = fn[:u1] + uniform_block + fn[u2:]
-
-          # 3) Replace the old "last_precomputed" restore section up to the texture
-          # state block. This avoids depending on its comments/whitespace.
-          r1 = find_or_die(fn, 'if (context->last_precomputed)', 0, 'old precomputed restore')
-          r1 = fn.rfind('\n', 0, r1) + 1
-          r2 = find_or_die(fn, '// set textures that are dirty', r1, 'texture-state boundary')
-          r2 = fn.rfind('\n', 0, r2) + 1
-
-          rebind_block = '''    if (context->last_precomputed
-                  || (lord_precomputed18 && (pre_vert18 || pre_frag18))) {
-                  renderer::set_program(
-                      *emuenv.renderer, context->renderer.get(),
-                      vert_program_ptr18, false);
-                  renderer::set_program(
-                      *emuenv.renderer, context->renderer.get(),
-                      frag_program_ptr18, true);
-                  context->last_precomputed = false;
-              }
-
-          '''
-          fn = fn[:r1] + rebind_block + fn[r2:]
-
-          # 4) Replace texture-selection bookkeeping up to the existing for-loop.
-          t1 = find_or_die(fn, '// set textures that are dirty', 0, 'texture-state start')
-          t1 = fn.rfind('\n', 0, t1) + 1
-          t2 = find_or_die(fn, 'for (uint16_t texture_index = 0;', t1, 'texture loop')
-          t2 = fn.rfind('\n', 0, t2) + 1
-
-          texture_state = '''    const gxp::TextureInfo vert_textures_used18 =
-                  gxm_vertex_program.renderer_data->textures_used;
-              const gxp::TextureInfo frag_textures_used18 =
-                  gxm_fragment_program.renderer_data->textures_used;
-
-              // [VS-LORD-TEXTURE-REFRESH18]
-              // Dirty bits track rebinding, not changes to sampled contents.
-              const gxp::TextureInfo vert_textures_sync =
-                  lord_precomputed18
-                  ? vert_textures_used18
-                  : (vert_textures_used18 & context->is_vert_texture_dirty);
-              const gxp::TextureInfo frag_textures_sync =
-                  lord_precomputed18
-                  ? frag_textures_used18
-                  : (frag_textures_used18 & context->is_frag_texture_dirty);
-
-              context->is_vert_texture_dirty &= ~vert_textures_sync;
-              context->is_frag_texture_dirty &= ~frag_textures_sync;
-
-              const auto &textures = context->state.textures;
-              const SceGxmTexture *frag_textures18 =
-                  (lord_precomputed18 && pre_frag18 && pre_frag18->textures)
-                  ? pre_frag18->textures.get(emuenv.mem)
-                  : textures.data();
-              const SceGxmTexture *vert_textures18 =
-                  (lord_precomputed18 && pre_vert18 && pre_vert18->textures)
-                  ? pre_vert18->textures.get(emuenv.mem)
-                  : (textures.data() + SCE_GXM_MAX_TEXTURE_UNITS);
-          '''
-          fn = fn[:t1] + texture_state + fn[t2:]
-
-          fn = replace_once(
-              fn,
-              'renderer::set_texture(*emuenv.renderer, context->renderer.get(), index_position, textures[index_position]);',
-              'renderer::set_texture(*emuenv.renderer, context->renderer.get(), index_position, vert_textures18[texture_index]);',
-              'vertex texture source',
-          )
-          fn = replace_once(
-              fn,
-              'renderer::set_texture(*emuenv.renderer, context->renderer.get(), texture_index, textures[texture_index]);',
-              'renderer::set_texture(*emuenv.renderer, context->renderer.get(), texture_index, frag_textures18[texture_index]);',
-              'fragment texture source',
-          )
-
-          # 5) Insert the one-shot marker just before vertex uploads.
-          marker_pos = find_or_die(fn, '// Update vertex data.', 0, 'vertex-data boundary')
-          marker_pos = fn.rfind('\n', 0, marker_pos) + 1
-          marker_block = '''    if (lord_precomputed18) {
-                  LOG_INFO_ONCE(
-                      "[VS-LORD-TEXTURE-REFRESH18] PCSG00008 refreshes every sampled texture and honors precomputed texture arrays");
-              }
-
-          '''
-          fn = fn[:marker_pos] + marker_block + fn[marker_pos:]
-
-          content = content[:fn_start] + fn + content[fn_end:]
-          write(path, content)
-
-          print('[VS-FIX18-A-R3] positional structural patch applied')
-          print('[VS-FIX18-A-R3] PCSG00008 honors active precomputed programs/uniforms/textures')
-          print('[VS-FIX18-A-R3] FIX17-R2 Gintama and LORD HOSTCMD/RINGREBIND retained')
-          PY
-
-      - name: FIX18-A-R3 LORD graphics regression gates
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 <<'PY'
-          from pathlib import Path
-          import subprocess
-
-          def require(path, *tokens):
-              text = Path(path).read_text(encoding='utf-8')
-              for token in tokens:
-                  if token not in text:
-                      raise SystemExit(f'::error::FIX18-A-R3 gate missing {token!r} in {path}')
-              return text
-
-          require(
-              'android/app/build.gradle',
-              'versionCode = 62',
-              'versionName = "0.3.0-alpha4-fix18a-r3-lord-precomputed-gintama-drawtime"',
-          )
-
-          sce = require(
-              'vita3k/modules/SceGxm/SceGxm.cpp',
-              '[VS-LORD-HOSTCMD16]',
-              '[VS-LORD-RINGREBIND17R2]',
-              '[VS-LORD-PRECOMPUTED18]',
-              '[VS-LORD-TEXTURE-REFRESH18]',
-              'lord_precomputed18',
-              'precomputed_vertex_state.cast<SceGxmPrecomputedVertexState>()',
-              'precomputed_fragment_state.cast<SceGxmPrecomputedFragmentState>()',
-              'std::span<UniformBuffer> vert_buffers18',
-              'std::span<UniformBuffer> frag_buffers18',
-              'vert_program_ptr18',
-              'frag_program_ptr18',
-              'vert_textures18',
-              'frag_textures18',
-          )
-
-          # Gintama known-bad experiments must stay absent.
-          surf = require(
-              'vita3k/renderer/src/vulkan/surface_cache.cpp',
-              '[VS-GINTAMA-FEEDBACK-BOUNDARY14]',
-              '[VS-GINTAMA-DRAWTIME17]',
-          )
-          for forbidden in (
-              '[VS-GINTAMA-FEEDBACK-BARRIER15]',
-              'gintama_feedback_outside_pass15',
-              'gintama_to_transfer15',
-          ):
-              if forbidden in surf:
-                  raise SystemExit(f'::error::FIX18-A forbidden Gintama token {forbidden!r}')
-
-          pipeline = Path('vita3k/renderer/src/vulkan/pipeline_cache.cpp').read_text(encoding='utf-8')
-          if '[VS-GINTAMA-OUTGOING16]' in pipeline or 'gintama_outgoing_transfer16' in pipeline:
-              raise SystemExit('::error::FIX18-A OUTGOING16 must not return')
-
-          got = subprocess.check_output(
-              ['git', 'hash-object', 'vita3k/renderer/src/vulkan/frame_generation.cpp'],
-              text=True,
-          ).strip()
-          wanted = '1e7cc634f3308566b6ea3d972b73c55086f8f781'
-          if got != wanted:
-              raise SystemExit(f'::error::FIX18-A FrameGen drift expected={wanted} actual={got}')
-
-          print('[VS-FIX18-A-R3] regression gates passed')
-          PY
-
-      - name: Apply FIX19 plus FIX20 compact payload
+      - name: Apply FIX18A plus FIX19 plus FIX20-R3 compact payload
         shell: bash
         run: |
           set -euo pipefail
@@ -6192,76 +5900,90 @@ jobs:
           import zlib
 
           payload = (
-              "eNrtPGlz20iu3/UrerJVkbQRZclOHI8cZ8uH7HElPlayMztvJsVqkS2Ja4rk8rCt9fi/P6AP3tQR29mZ91Y1E0tsNBpAo9EAGs2AhURjkUs8y2Njatk1bx5O"
-              "XWeLfPhQv/ylXhv77ox4NJza1ohYM8/1Q3IJP2s1k42Jz6jZwNZmr0bg47Mw8h0OIB63EUIP2X3YYI7hmpYz2atH4VjbqTcFijvfChkHbhHDdULmhBJZCgsH"
-              "EmgkTItU4POZZ1OD6a5jsATYtc0Wcdhdi9h0xGw5guFGTkj21Lht/rsBsE3ebI0lxA97pCt6cCapFTAynAchm/XvrbAxrvd6zPddv9c7Pv1H90fywAd57BF2"
-              "7zEjZCZxHUaoY0xdv0XGgNMkDxz1Y72ZFpwiRDLRSMjuAnt/IYh+R9vXBltkSgNCbRTvHOYnCJjZxubNDrE4Dst1qG3PiemygDhuSKjnwc+fLoZXZ/2z7s5B"
-              "u4ayBe7r1DF91zI3AGJjFFm22Z741LRZvSbpAaBkpjMPy2Rdv2V+AMMfuiYDoO3NevHZ29yzeiVaOVECN/+h+p3TGeJ61WlvtTsatb0pfauNrfvuDtX8Lc12"
-              "fVPzfGa4My+COdAmIBg6o5rp07vQmrFX9RXx/ShwTd0gnLFZjCegY6YFIYXfkzJc8KhZK1NvnEntaR/AcHJ6frV/tk8uD4cnnW7n/VbtL/D0CJi7Aua674nn"
-              "u7egeuGUkcCYMjOygVDiuUA+sQJya9GRzUAzyRWonuW1yCgKERqwBJFhsCAYRzax3QkJpu4daBuB3zbZ7Lzdud98t90hgUM9aALVsmcgG8KA+TkZ+8B7G0mx"
-              "QPgw1IxOmPaR/yGhT51gzHyY4xm1nAChJ5YgAwkFmj3fYiH154AhhBYTQB2T+cxvk0+MeRyM3VPAnOYVFWbG1Q+5GLu+wSQvY8bMETVuEnLDqe9GkykwFJMz"
-              "isbwp8dFSMOQGlNEJmgn2sc8ID4K6MxD8mK0HJhjuJqCfGf0BlYeUotsbASh6zMywrUPzKFlsC3DCsmdBfYWSDZ9C8SnOSA8wADzZdyAyMFQKABhInAKD/YH"
-              "g9P+oPuOuD65uL46uTg9P+lut59BrZRJuLVCunWzoUS/YTmGHZkseXAb2TfU2Qgif4xL1QCJsfZ0PYtRsrTrdWVlI1DTrU0dBWRymjq7tULblFmTaZg0Pu7W"
-              "AMXz4Mo0juYhC3SP+bpn3TObQ5GNDfLrl6EmF6I2vNo/wYn48WuRFg/khlNnUFgnI89bYBuqpiDwjXKpG4CuXO41ky9B3XC9OaIUEoFtrYFP9Dvc2Drk9WvC"
-              "f075zyZ5iNm/ven1TlGrDxEBAiVt+GkDTcNo5LPAjXDB7UGPCLS91zNcMJl6kLTpNp0zv1XofjEeBwzJzmLGD5jW0DJ0FNkHOQ8fG/irDS1+qN83W2v3mZf0"
-              "6ZDHHF1mED6FLeiesEU6Lf5fYRBwZsSEPQjx37XkNMBmTx5j2MdEG/kc36N3gCqhGzOzjT34DDUyyC1n7LYRNvJZm9ul7ODxxH6mc7At4L6cMIf51M6CoeDA"
-              "r1gL0ZW0lEcgBA+22QJOoLgpVysukFoNt1BmKiX119ZSEAssKqTkiN1aBhta/2ZE7ss6X7jgku3VqtQk2/GjHLSZgf/r8h7TtXqgRuZsCgglxoDM/6CkjwK1"
-              "0J/TxebTFn8yw/3+O6kED1AeH/ISaeZWHJLL2nzzbjTbJgtC353r/4pYxNrUNCWyRtUozd1SzcmDpdbSgUCYJ2s1PG3LsUJFU2FFo7gF+usAdOvYppMDKwyy"
-              "2lno9fsK/Ya+kaLwsVYrDpkYTL5e9NCVdHZ/zFlP8Tg2FZ1WWfPAvfvMnAnfE6SdKAPjo/6ktjBpSLKAnJyn2DWO4A9psDll/ZUN6koW9co9KFGvZ7asFWs7"
-              "C1zQo7SpSBTvjM1cf35AfXCg/Xi58wixoHqw8+5zF/+MBjdcEXo98aBE6X9GP6W4x62OYAA0FLf+v6NtOaYzy56fgvjvAcuXT/rfr/vXff14/+z08y/66cn5"
-              "xaB/VBz7m/vGZmitGWi7VYuUG1c++M8/XXzu68PT/+mvuHdjygVCMiZnrFHQo0sJMAzLjVHrGXocMXRNmWPMETx4eGwR/D+nPfiwXOkSayfkhmrK9fX/mrWr"
-              "9OOe2fYIsV65JV7dWir7Er5bYYrTOiEsOQbXmPKzXYPaPH7afgvxk9InnvRCdywdZb15k2vezThCjXzn16Rzv3UcNcneHulGeUfm88WJfnp+fFF0C16VR2si"
-              "ybf38EgCA2w1fsEUEX8Aqxv+3sNX7p/gswm35yh++PWqdEdLU1sEUBPPR9MxEwVdZl41IFKzGK64UOLn02oKpctVBOCbnMi5Jtxm/J7EfV8ltiepOFTYFunv"
-              "y+g4lcgRkJx0nmQRpPJw+ZvSCHyJqrCf/80t3zjsF18SHpvluYR1EebtVyGRkHsCJhecbly7FaSkhMW98zidUJVP8GERNuqo+zw7/RVWyOAoTsC5TionTN7w"
-              "H4dnR91t+D6ABTLoH5yeH3XfDzbrzRJcJyIZms7FOe4dQctq37Igyb7dWkm6TZO7sJrdMsRxkmsjyXBJogkdBcDbLjnGaAX8q40b5jvM3rh2jCk4jcwksPTc"
-              "CJOegPvyF4gxv/mcQ36H3cLzXfRv1DHDvyJQVSntv4buDXMCeayAixYmdsVTEOwxdn3CUcDSE1+CXtoGijbM4mM74OlltGr5icQEgjsys4IAk1APHN0P/iNi"
-              "e0AKc8cQOEKtplgUald5SJBNfKcS/M+aXAdFDvgmnqVKJslmrhnZLNgYGuzkfib/8MSYpAIVC9Vei9X7a6Epq+3F9stB//Di7PL6qn/U3Sk2X/X/cXU96GuD"
-              "/vGgP/xJgDRrmKurInu13F5qILV5Hff7Rwf7h5+0g4vr86P9wS/dt1/L4I4G+z9fnZ71u+9Lm5M9ULUWop90Q8Y1UQ05T5HzPIXv3MlezPWqSeWVKM+ZUaEy"
-              "uK7g/5FlmmJtNRbJUlmcGKdURl0ZMR3cpMAymY4Hbt13eTDwi5SF443SHMD6zdCA7K1zmph0VsZWmIOHuAGWMh5/qoBC2Z5FaqZgU3q22EwBFxmxJVb5ax25"
-              "igcHkccSAXlNXNSOWC7bGWB5apwXQV4CqR1gFgUhN4TCVCHbExetbWKg2/zwBMf2olBM+K9AUYhHjlMaTDV39E/wMfgJZLWAeCYs5f5wEX1txQZ+78qPwKFu"
-              "toPQt7xGs3ZHHdx59ki9y94bxvbW2/HWVmfn3fb2aJvRLfPH95uj91vGu3edne3xzvj9TreOQkXqfwBPgveukEdBJdTGh6dG4zA+Zt57EGgeCTXCiNp7D4Cd"
-              "qwb8tm6Zfuf6N2Mb9melIW2QyzQabaiGYEPaeU3Y+PnMXqwXbegEsavQDxQnDwNcR6uD/1AfuW4I8qEeR4QznyNkRQVIlsCBwggKAPoE9LB6qZMzthwIQHw2"
-              "AVcENyC+BQbyqPzJXsF/qx8qlHOz84LVD3xKwQEhYIOd0Arn362G4W1JDcO7l6xh+MaagzJcmx3N3xToFJqRCaisicNMTWS2/gP1C8eMYmaCr8seCfHIHP/L"
-              "FK/AHNvALzgfzMTj7cTBx5NxUW/ghlPwNTgkKhLGB3joDspDgin3Q6hpciPgTF7giHws2AhibyZ+IE5Unn4mzjMvrmvDmseKDX3G87z6DFQdvfk9MqZ2wPA4"
-              "euMDORUlB6g35OTymghgGVaDRLEXE0UFZHI/k+1/+82pf9/RcoOBmspklp7MFtiS1HD8rP3gaH+z85UI3d1wGAXQUBVlmEzYRB5OBcwWxodrRpAwKPVuiLND"
-              "AB8Z23SyUNevgEXD9X2Bj48Co3FP5AaDXRSB2HCJE81G0OaOQXzgFzBUaMCQZY0FvwILLqEgHxtonQErFmaxNWRIi2tEJDgxKOJwUN0JhyPSD+UjR46FOAj1"
-              "fZoyiFI9xRKIlVP+jIAI4ZPZNHR9PZx7LHi28g0sMMpzrFtmKqsHALcWu8P9VOfuVXWzsE+8PZ+OealxYoCs0p3Hc3tLbcssm1Q56e3MEBJObbedNCNDz/Jv"
-              "h3xSLik6dSHY30yP1StF5NyiDxsgWl3Uvlk28xfUiKw7ueK0HRO73W09VNqn55hURrBdbkX+lhVKT2WDK5DLJHYRexSwuFHNJCDPwveyIv9Ts8HRB94tRKCg"
-              "LUE7R28ZGznbmVa+y9OB9iXLA7jHYFux+O2Ft/9L5BHtl3CrIW4hX1CPP2mXdqSWgBabQGF+MQ7jFXYXsLsj+FBEGz14RKRt3ON2k3z8SDZ3+OP47I4/x8OD"
-              "zlh8OKpDZdmzSBoc+g1C73T4pylwougaaufZfLdNzqwDMqIBa/L+hk1nnsQSuiVGooQmjTREhw8fYICmMh6N4enJef9I4PXZP0U1pefCFGHl5psNrStGF9gC"
-              "DifdOsAr3CAxEKiiy39vv9VGltisJU1JxWJI/Qmg4XDm3KEzyyCfjwYYAIFZcmBLFQmMEbhcKCxNZJJH6N7PKFg+iL75Y5mnqAewr0+moZacWAm4e+mZPb83"
-              "lrKBfI/DAz8YGNbYgio5DF1hTfV6pyYKRY9umbGp84BS5VxlRxEGOYHOHB7p/+Y84urCos3AA9sp+er1cHD4F0YPlLPD46l0pCXQNJfFV5lMbyHYSoZGkuRJ"
-              "Vuk4PA9AYg3Rp8z2RJIOj3GyW90+aA+VgGRrk6sMJtiUOoXovHAxKYWSytRGRLi0oR8PnsOM75Re4d50HlgGtdVhAE5Gu1Y+D/zpAYZ1APh61CIKDCCSH6GL"
-              "60wXZKtjQWGLFUi0tYlHLm0szr0GzFfg+DS2Npu7JbBWCvZ0MagQhQL+Asy6PoeH8VqkvA+SCiKL7JC7X3HvYehHRjjgLQmOiI+szH+aXStV2zZqW0HM1qgN"
-              "qxm/nZqNrGiSUjXYwdoGrIWQXTvgcl54QtQX3oEV4glyC6XQykk27t3LNuxmyMNnGdLEOAeWA6NkS8/EkMOpNQ4HaDD2YdeZgi9kGblCGKAl80CJIHdMrabs"
-              "EAUOO0tjq9uUcyCoWso1lznCNndLZF7C1kJEisz8DPLcWYqaQxetO+y4/XswmUbY4OrNUXRyhPCuFbRUi/gUFvYhBArzrMByqpht5COViT1HkYF4S6gpMBWT"
-              "Llnr5hBFHrdLyxEl0lEoqroKiaSEIPtx+JYg/WkoUroiZ3V9Qag5lumwQj+uzmgcGtzetMiDnBxJNJ4Ti0P5lPOeSvCpvJrYEFq5jeANUc8x2+bapu75DOJy"
-              "UTh+6xYiHp3yeq+icRZ2rjy0eS0c15ZovoYN8jhyuGMHbXy/VP0zcfpr5Su3yAUQi9kfLFFt8QALv8n4rZU2rygYVcCPkRD4KU6oY01HqsEZ6XFb0EoHbJZ5"
-              "3xLZCStQHjW/xVG+tayxXfyb+W4aNrZTnbyFSEjRIejcVY5EI3mORTBaN10EAzuw3FKFU8mzaiJVwNXkLYENO8A4FmVUyxX3yKFSVimj+YmR/uxOcPuWO4QQ"
-              "d5EjcGdThSNAmg8h1K3IXGSo5DTFLoPyTVMWyq8iCWztHfhM+6i6C2lpdJWDrZF4Q3gkzAaH62GRHPKIEpC4kr1s1lTwAnEZKnavJ4iX60Y3ptRyGsqZGYJm"
-              "YSmdDRHYtQjjWkRGebJEDMtyYFBc90WasgFhOh/SbOV5epRkF+hU8v3sgnecbZVknruX4MtZQVIQBHOaCzbiWcSoKDOVhQETNw8XJAojPyp+EfUvtZrD7v5r"
-              "lF7KKK3jGr+sAcP2ODdSkRnOV/1l45dLy7jhGliI04XJ4YrpUzw5yGMJpxSMpQ/zT0PM8YTuHfWFeouNPWATTI+0c7da0uIZWYDfzN05WeKhlXhqrVKAghOc"
-              "tpHlLcV5EpbwfTN33SJv+57AQHGjWI8bIcNV+RHbTDZYAC0qy5J9JAXlKc7gjN4L3Vxx/LKBtNgtLYiHRxKuPrImlSMslXNa1icc2L8C3W1VAguqD8B28KXd"
-              "XACZUYNqOCmlEi6XKlKaySvfWoVJfqBTTUylJomIhUt7KSuryiSvbOmZddiEYpHD80ztZ7B433te0bz/CSZVCXoxI2tMabrxsZbfGYYiHSadHJ/ZYpZlYjU+"
-              "b0ynhBdtEjjs1Hq6jf3Mxt9qYldQh2UefeKcP2WzG0ajZ9vshFzzCxTmb18dj6iMYzrHHUzdyDblIavNJhZefwiZPc9jGWGu25mTGSgfrzkk9I7Ohc+LIUys"
-              "B/JuRlED2L3nc5cOiznUuSPYHzwbvO+Ks4bdWpllAdgnq8zSrWI1c7KOs5HjM68+ae5s92ncLbaWz8+atgZvI/o0l1Au8gv/KcwJFapus931FvcCM7+Cia9c"
-              "3lJe5Y3VVl0Gi6X3gfSL88N+xaWgTFmJChqUmUDzoCLWuMREHAibr9K3YvKZBGkxLnxrwivXUgeW/LSD16mIIqbIoTBWUq/S/qO65essjhfYKVK5npejuzRP"
-              "lLr39B0yRskbSKozR1kVaRXtTllKKQNVnl7KgKybalrmNFalngrZ8lVTULWS6B+AmX/LEk9cHpCTuylz5A7NY/skQ1DLZk6580YuktLCgNyolw+5aj1HjjQY"
-              "QJ8lahMWsrYsp5E6lcsef1alxVIHcesl0lYu+kmOAcTvJAOnrl2UZd9iM/nCNSR9boTTZ8xoWl3HnnPTyqsTMCsn6xGw+jN1181COm1rhAX+4OiRieuwnnyH"
-              "Gvh1YbAhkQapCj9AIYsaZWXEFFw58Oko7vFkNMf6clQtK3zJ1zGl7inEb8eqLnAYOzp/mULqKGhsOWZD5E+/fOLZzF7PRguD79VoiOsecbcPpLNKnT6ILUZB"
-              "RE+snuAF33VOhaiayNLwm5OlwrAZdSKv0ay3YgoUOdj/W4jBfllSEjJ+VYP0xABfazVRqo5yz6zaqoJY+Q0awqlrYjnHmXhyxh/0ekdWwJ2FXSwF4ZzIygwx"
-              "ULoCpLr6o1D5UU6OpF0WguRH4jUgcsnPhJ7IerhlXNaSRMmq3ArTvMzopVBP8MYN6MLeHnnF32oHn51X+G6bQgu+7+5Vkk1eJ1uM/uDP+4PzEn8w7Qs+PJKI"
-              "r+RypzAdOyprtxsLR3qHxQvikpHsw8Wyz7wsiWsuzKo6ylW3KlJzys9vC4e/v/aUnn8lbwAD/JNaAKD3va8vWevP38c3Bh6nRFYdooHGQjKSdXwDLIzG2v02"
-              "7PVkbOGTdP3zVJU9w06U9cpxUiJfbetowNEC8z3gLvWuTAOQ7xL+8i3M6tOQeK5tGXPM46T2ie9guUuu4FUUqFUf5cd3MEPWBnXRuQyLa0hVfDaWQuJqWwTE"
-              "F16T7+vfQNUPK1OVhcS3fy0CSlG1/kv1RM1esFKNdDmn8R68yhSsAoyzsARuOcuZK3Fo0nAtbKg7pFGQLswrN3J4OyJ25ZolGFPelDjXh6UVv79AWUMitwrw"
-              "tyI8FqMTiF5K0eUNhIFVhMpOCPNQ2k/xhFf/3oJlS72M4A2JrwrL20H89l+5cBa8/CDd+f/9CwVg1/6WFwogm+Im53fl8hs5TO6cyuvW3+GtCe+e+UpfM0/P"
-              "ypfWUnfuhUOknlR4WHyw0rHWu4FUOW7ZTZqlg1behVEvL1jrJsVKw5WUnVfylIny1UN5NB+/ObZIXkx9NvesHmeT/KmnKjmePIpTyvHsLnGklU6JrWmd91pk"
-              "4tRKiawbAhToLnWhOdWZ2J9f3huxTMwfR/uiMERUgoiIHpxQoLNdk9brm5mNX0EiyIjZjlnlux6aVLxSqfG3IIEpAMsiLghuqMt+aH4WrO8/1ItFKtbMC72z"
-              "hUcsnxz3ztHwwEW5BngX3bcwPgrQk5yDX0PN1Sd0TeE9+5tECu/2WEpxWXTxB33DB6y9F3rDh9jy/yyv+ajO9TzX+z6E1qzy0o/af/qtHxkPbKW3fqAXD1Z6"
-              "o/qdH0X4C8wVJ9YXk8Xx5iIzbOmr3yVJHxEP/C+vxUSZ"
+              "eNrtPWlz2ziy3/UrMElVJE0k2ZJzOHKcLTs+xjVx7PUxx8u6WJQISVxTJJeHbY3H77e/blwEeOhwnHmzu+OajCUSaHQ3+kKjAcc0IW2aBiR0QzqyXa8WzpJJ"
+              "4G+Q9+/rp7/Wa6MomJLQTiaeOyDuNAyihJzC11rNoSMSUdtp4Ntmv0bgJ6JJGvmsAX/cwRZWQu+SBvWHgeP64+16mozam/UmB3EbuQlljVtkGPgJ9RMBTIPC"
+              "GnEwok2LVMCLaOjZQ2oF/pBmjQPPaRGf3raIZw+oJ0YYBqmfkG05bod9b0DbJnvtjkSL77ZJl/dgRNpuTMn5LE7odP/OTRqjer9PoyiI+v2Do1+6m+2d9tkG"
+              "uWcjPfQJvQvpMKEOCXxKbH84CaIWGQFgh9wz+A/1ps49iY2gpJHh3hU0jlzfsYLIclyNRJ9Sx6MtEid2lJh0hkGsUYm9G0ZrRS42fE/WH0/r1I6uaUT8IOEU"
+              "9sk9H+m7KEclDFWrPScI5G37rEcmdkxsD8VlBphOQ48iy2xgUmjHMXx0k5iM7YTGnRoKBRBUh7dR4DprdhiuDVLXczrjyIbB6jVBKzTKRNR4WCYk9RsaxW7g"
+              "fwwcCo3edOvFZ73cs3olWCFhHDb7Ivt9tqcI69l6Z6Oz3ra9cGK/ao/cu+7bqNceu35iT+22E9m3iTulbS+InHYEgh7RAczcs/qSwDbtdrTBe4cRRZamwNEC"
+              "/DJ48KhZK1PMmmL9jZvYG9dr08BJPRqvnQ/p4d1U/OoMw7BiCmoj32IiB491KTaYRerQJHGHBFAl47vpHqC679EpvDukPo1srwGzsC7wLm3A5RomB8ajIENz"
+              "R/uHv//L6cnZRcPFrzGjAUG2YBSJ79zBYAQ2VKZkX2S/PkfgCmW92ySnUQAiOiUx9cAmALs75IwLDVgHb0aSCSXJbUBg1lzfjmYkFB2Qhyj53TJSRr5AD0aP"
+              "E8Jn4SCyx4ikHPIF4G6NxENLwt0m3zOU75L2B+Q67eSbdMYUjPc0pf5NZ0qnzS0hMOvAOdnWQBNYwdH0OxGzNcBgNl8kBA68JN1a2Fuaip9oBMgZNNywR3Mo"
+              "MBtU4R92uSZD0wL6PY6+hn3Ya9bQQPYy+1iwjaWmMTeC54ITQIlUJpKP9xJcDGgXb2UNvGB4jWpWrwtRBYYMgsAjqM+Wps/dTWgmqHODDlhCi6somITTj+eH"
+              "6/Cz+WyrxjBeWyNffjpvfzo522ufnu1/PDk+vbzY3+tuXsnXP6Fa/9g+9dIYZHRq+6CGcR/MMLFBXG8o0YYmjNskTsPQc2mMsivBCDrWUt8dBdF0DWcnjajo"
+              "kQRAfTQFxUEjFBNwga5Hhh61I+p0GAw++afZYFwOzln/7wEJJgWM+CJHlPf6G8lJhtZMihF/MbTj5P28QT80mnlBUsP0iZ96XphEW+W4S03UsEfF+SrslZbO"
+              "w98YeEkKapnAnSbR+zkW5QNBJKSaWdAbKVIwGxqdL16Q7Fv7g+jS1Egtea1ht8BEbc1B2jAgH5g6zkdZCJZAmX+rRDn3uhpl0yYZbF7JXKsRvi8yv2DpCoMs"
+              "YU2zAYqsKg4ABor7vZH/pR92r8C8mzbsJb4Je33mAHtNcsktAhmkoxEEHB1yADaWuT1658YJhDnSYg5tz2PxHxKQQpCTTKIgHU8ADjYfBZ4X3GJ75YSwRwuC"
+              "BoeGYGHxSQCxMlqaBAF3aul87wnsOKeJwHCXI9j4XtAbIciIQuguHkDrlpzlFjHZaI3vwpbmJwVJwhySNPQC5mjScj+ZCj+ZImnfDOW8cOlIp13duxfxzjtw"
+              "QIjUTSdLGPbVYETUlBZ9bcp9bbqyr5UDcNErdbWpdLWibd7VxonT78eh7b83mCoMh5DaZY2GGoN3042HGqcxp0Ne31oGdN7IYktI3ZRnoMttUB4rbiYqCWd2"
+              "ppLwcgO/NOEVHcoJl41XJlxJepF01r1UizJDuJQ6qeYlliAnPFnbogFWo1iOndh5xlix+xuNs/4FY/+klJQaiJw8mLQU1g6Pp0amJBolES9Im651v/+uiUez"
+              "Se4VxE8nh9bR54MT6+Tzx/2MD/jzrCISJipq1oNUksYQ4erBby7E5aHtMzEND6ZjTJljNC0Oc4ypcIwbTbUMRN8WeA555kFIp9P9DFYncRJgFM2XjmBHMZRm"
+              "S0YeXwMkHmGzITrkYuLGxL4JXCcm3Cmiv4SemEsBuDhV8drtBBb6oDZD2qlF3TLDjtOgVCqPV5P7rDoirTNIYAs2Nyr3cpHwclGpM4FVREwTSRmuLuyEwAKB"
+              "OG6UzOrYHVqJ121BNhp5WDXjmL3yMXt8zBpPpuSt/1xClfiAvK0ulbpYSq0Aa0WVrpjiWVRVhZd8xIxks2V0K8ZsoLC2F1MhmN929GJI2iJJlOqDV3IXpwsR"
+              "lQpkalDENMiYNKZAkVCgV5oCSZGQKRZcOF9fUxqi8Gc6o+JNUMq2FwRhp5Z0HyWJ6wVBlNmnpFzyEyH5SankAz6kkbp+0n1jqWEtDGvvoPk6hlaJJvsEccex"
+              "yiU+kRIvAXEMc7kFsOz9/gVvceSPAi5IkmQLrJ9j+P7Fjsvoq69ECkMxqZk/1CK/khuskOy42P/l4vJsv322f3C2f/6DlvDYwzkkAzSISWSDWHEZA7losbhx"
+              "OLH9MU56QGIbs9KOTPHFndrS/Itn/lAjae6iv4zzWpDTKJ2ZF5liubGlN7GYlDZXmIFVkC2bOx3Z0rk1kdWbKGRrhq0oJYm82Cb/W2TzVqFrcQDWtUi0sSq3"
+              "U5jyF0rpt/MLevmmuMgWnBUrdNnODJ3L3Ud1QC2hVKVM5Ps5GR7VBFWm0ZyDt8HUZfEuXwFV4Z1/PwfvRg5xsGbnH/etw1+OreOdXyyh2tbl56OL83xGImFu"
+              "w7R8zG8kzG+wdsVNG7W6Nj2lANNY3jmyXARYyCB20RG11Bx8MV9cqaT00w+Zm8wvhj/RBhYpCpWpDdJoyDeCvjmXDJQ0JlWh+tQD5vS0clyVyChhEsQgr5vk"
+              "yI+BjTyG9yEYmIAHEVui/0wxhU9HGMDLdBDLg4Af4U0svk1bFn9chg6KruiHetARcQd/1MZHevhrQiwEBdlrHhyI7yXRcFHhV15fFZ2vtsaK6AiYPgELS4GU"
+              "mXKyksWYAJwEsBIzV1/qdRTZszhbdpnqn5GJZsAgklmB7D1ag2zDUm7i9eUu3hVrD//TtvdApqBXxS5pBOFbo44syNJTV0RqJdufjNIhkAAfofNwQmy2i8J2"
+              "g8o7ZzwT/CjZkRHhUSxXpbHceYmr4aod+EO+M8xYjhNHfjg5v/h4vLd2dvT58Gx/9+jzHm7e267P0Dz9tVaLH10+Ij7H6QBwHtI4ltUb/0rdSDL0+yS4pn4s"
+              "qhiQFJicJYtLmImCSJqBAKvIP8RZaQNIN3+HYR6+Bzh9Q4SXLH7AogQydeMYFxP3DOZ30QOCvEc0c3UPOAwuPzmd3LBU1jGYW/NaDcKTlwCA0MZDygy9jtnC"
+              "bX6BiVJ2ITPdN1eFV5kYdd+e9YrvzTxM4XXRjMgmRRsl33zVfl8ZkEdtu0lAS+aWFzY3M3C6AzcX37rfKn+TCw6MDsZj5uCkgbj2g1u/PcAU/l1II5elkcgU"
+              "HRywZUbsQYx1RrU4jUZVEiVd8locDdduUu/a9tewPcYYQ3s4oXnpOjz6fLFzvNM+2N/f2935+GN79+Ty897O2a/dV1dl7fbOdn6+ODre77694lEM2AL4N3Ad"
+              "h9uDxjzYO2dnR/tn3dcKtNAZa0SpM4B1ohWkSew61MLqpO7rfLMksGA56ccwReylMGHuyMQBKV6p2ErrLmeDG7F79YJXWtXQIrMdEGEx5zFettU4P9+4Ah0G"
+              "404uLw5PQL1R7ZEuNTgwXfEEODYOAEzGmTdG42V3ekg2Ghc6NODcuiLh4wC9ROZYOkASny9QTj7pXwCnBAu5JnY8aQeDf9Ih+zqHRaASU2qNWcEPq9tBJl21"
+              "lGPavohSCvPcAcfuho1m7db2eVar3qVvh8M3G69GGxvrm6/fvBm8ofaG8+5tb/B2Y/j69frmm9Hm6O1mt45sRey/2ya8dwVHSsTiANE7BDlwIneUqJLD7XsO"
+              "6AGDhdT2tu8BPheP8mAgomNQeXQqvNZOFN99tbv/q1q0avbefatCUV5bKWIUvbqST2kHX/fWscYOYLCg1JsRJ4A5R33CcHTGIsDj/ePu5u4fVnTZKym6fPUt"
+              "iy6/ok6yFN47DmsSxMmUThWc2B6x7DB8H69Yc/mctL/uB303t9R8FdFdf7tRew5PsZbxAojrvsWlww3llRgxWEyI9zCcDQOswXRjcuPaAw9XteQCRM8NW2SQ"
+              "soUu7jmlQzS0oxTL08YEVr23IG0Evnukt/5q8673+s06iX07ZAti25sCb8R6j9nVDqICIcIQhpraY9r+wH4R6Shgjqew7IhZ5ONyNBBRwBnsGCxJohlWhbge"
+              "23YSa33yI6WhyPSD9TNoRYGZMvFDKsB18o03ACL9e4auKDsBghQ6PPbqMxbaSQJOk6UFONLtD/mG+EiuaxVY1phBYLt0U/ual9AxMtb4Rp9c0KNl8Nyhm5Bb"
+              "F+wtoAxmHtjX9oF5AIF5uJgt3GQDbiJwClUsg844c52dJxCrXDGw8puuP/RSh2YPSgO8yWoWo0S1eZqC1auAmG70LGSQw3Baz7ac1LsJdceTJHv5wLKFTwPL"
+              "eDmYgeu0QkwtuHfUY63kfoQMmc4vdg5xIt5dFXGRO7W4vCADFgcvWY+9XFhdUZvtMBW0hkE4y2+JhjPrFh3bOiZ42dcJ+6ong26u+/0jlOqPCAAb3RvL6Q7g"
+              "dJ4OIL5gaTMY4uY6BWnv94cBmEwrzt5Znj2jUavQ/WQ0whhkm5iQef0KloxbbEUm5uFDA791WAbHusvtVS7TZ1bSZ5085PBy4uRryILuGVmYnMP/CoNAMMMn"
+              "7J6z/7YlpgGcPXlQbR8KO60iH2oNp04He7AZMlN1rj8K5H5Gh9ml3KaynNhP9gxsC4QvovDdbIaMg7hiJUAXwlLuARNCcLMFmICxUVNRQxcKC3EhpNHKUsp3"
+              "PBCTPXrjDum5+xvbr0W/bDHFhZBsu1YlJmbHD2LQprl7vrjHZKUeKJE5myL3yCTx30nuI0NZklFkCDr8lzHc77+TyuZYk0Pe5znSzGmcqqua0kaz41BY9QQz"
+              "618pTWnHdhwBrFE1ilYQoEtOvpmmSzz30cijtRycjuu7MsHSKGg0spuDv4xBtg48e7zrJrEpnYVevy/R7zwaahg+1GrFITODyfQFEwccz+67nPXkj5WpWG+V"
+              "vT4Lbj9Rf8x8grATZc3YqD9IFyYMidmQofM1do0B+FMabIbZ/tIGdSmLehHslojXE1vWCt02GxfkSDcVmeAd02kQzXbtCALoSKk7WyEWRA887w4L8Y/t+JoJ"
+              "Qr/PH5QI/c8YpxR93PIAzgCHouv/O9qWA3vqerMjUQrz04/W3y/3L/etg53jo0+/WkeHn0/O9veKYz+6rzJDK81AJ6hSUmZc2eA//3Dyad86P/qf/SV9t8yS"
+              "iRlrFOToVDQ4T8qNUesJeuyJyvrhDJvH9w8tgv9y0oMPy4Uus3aiAhTElMnrf5q1q4zjntj2cLZeBCVR3Uoi+y1it8IU6zIhTnjC4hpTfl4wtD22fnrzykqU"
+              "PLGkF4Zj+irr5cvc6y0jEGrkO78g63cbB2kTj8R103wgI3ewi2HBs/LVGk/ybd8/4EFRn+IHTBGxB6Dd8PsOPrL4BJ9lGWP49qzUo+nYFhvIiWejWZiJgi7T"
+              "sLohYjO/XVFR1PNJNYYi5Co2YE6O51wzao24Jwvfl1nbE20dym2LiPfF6lhL5PCWDHWWZOGo8v2qx6QRmIrKZT/7nVNfteznHzIam+W5hFUB5u1XIZGQe2Lh"
+              "5hqN9epkExWNWSw6V+mE5SoXQN71UoDuG/KSmPu4WH8Q0+iGOltauhhThiyNzGsUXJ9nm4tVCDCA3MjSUPWDW6wfD7wbGmcpuRs3y8G1hWuWU14GWGW+1rQd"
+              "I55KFHuUW2rjZO2aRj711i794QQiSergqdQgxUzoX7UObJviDy9zePXEGfd/0xKH5p9pH73wOnOMdXV6P7ck0l8Y8UpW6GCEj4zmCXxmkfd8qpfNNC+Fec62"
+              "cpH5D6gbePdfXzXw7q+agTxDVq4Y4K7cug2i65EH/llKSAf4MkkHa/JFvCbsfJvb+NnUmy8XHegEC1ouH8hOtjYI/HYdgo36IAgS4I8dMkA48zlElhSATAV2"
+              "JUQsPoU5g6iwXhr5jFys1PyrJOIPLonorX/D67Oe44UDMKsQgxAX7whwk9kfVtvwqqS24fW3rG14ZC1CGSyYFVkmIcEMHADljn3qtHnGa+W6hgs38QATiAxg"
+              "fkfUZjXdI88ed/Ibm+JlrDy+esC3Iqo2k9GmAPbyxLHtOEyZ/TEsRmQ0LDpyAeUShiOzHAbeuUN9rH2wpixjak1BODAElucVydra2ntyxDfvkdPk8PSS8MZi"
+              "gerNCPaifHseT7SJ93/7h1/Xp7V0ygvTnqGZ/44GU6FdQbaOONuR3t3b6a1fET6ToCk2ntyV6yuHciOBJwfUYPUDznx+oQ30Z3MmGlTP9ud0OgCQwYjc2J7r"
+              "EBM5Gn+5AlaDK9SveBPTH08wHFSTL76m0IvHBZ6dBJGVzELoO08UsJpFvz6AH6hcQhC0jgpfy3W2nngCsywXXktW179qZxrFjK3AzxJYpawwp/k8dKObc8br"
+              "UxvjhQT02ui0cM4PqCgq4uEEP7DBMmXq7Lqav6pZx5AqRlQsXp/lejSaU8eA8xyHNxBh41GITo7G3BUEnIolBIDvG6tjuRKMPCskwUuz1Eljql7euPSWOf6/"
+              "EbN9n7M8c5a6G+Xj87xlPy9ImtOVjs5Yz+fFy7QR//BZZm8lJuXshSEp+NPNvnJ/TMHIZHjzayCRm9+Mk5mIV1542dRTIoXbLhcHkjw2KUdZ3pcm+axfO6MO"
+              "0+J6iV9IaGAnLpkLYgNB1foJsSy9FacoXLm9BHkgSmH0knSvjCZPJlU5qHJofeT+lSZqVZbnYxCx5LAz8+0pzMqnvTNhutrCQirnNs/wMB+DO0FugoZ0/tWW"
+              "4qwfAgoKBtmy2Y5no65fgmlIgYLAjJhqteQtSHzWS8c0JlsayH7/yCFYrJHe0GHPYqufUkM4oV7IczH1et10Qec8aNjotQcuXrfF9r9eEgYR4l32VKDSqZWP"
+              "yZ7uYrANY7wYtIhsBi2yL0mAJFk8SJGbONySyCbpBt6AMOhgKeUlQL6AaKCx0TNOOsu2rtb2aH5TTots/BOIVBCx9jBei5T3QVSB5tRLWEyiep+zU39n7E0G"
+              "I2Uj14Ty6OS6rKcbK3IGeIQVPx05DZMl+gnrQWcIgpnQS7xC9CTkLD4Jd90E9/laSH0rx1H9oLj+YstAC58xlDj8XdcH6NmeHh/mfOKOkjPczdgB1ZxA1OAO"
+              "zTHdVsb6j8g4sJuNjW5TXkVljlJFBeMdtm1ulfBuWQASpfwMsKSEBuQjBB54fBM3byMIZhpMPBmI9RwCrGsOh3JWHe04zkcIiWatvMi0OBSJX26EIfaZh5xC"
+              "QaDYzQFIw3BZ6mTXfBdOkUaIaM/atTiKj+uqzenCWcgTKudCJAMK/Zi4oRI2mF63yL1kNEcSd8/EMeLSaMs8Eyws48vitb9X4oz8AkOfXTAMQDzqNzhE0Oba"
+              "IHBmmkPJqhyBEp8dQWTFJNssmA5GDVl9jDcN1Xnv0rE1uNnozOFofZ7A5SC0rILdcEA+vcXzmrBAFU5ljrcsuAdxZUXp0uQFDzxa/PUleO2D1GeXAME7dOKx"
+              "7G+sYF/IWLNFToD7WEePJY0ttkbCTxb3bC3dwKPIyIJvc1K0F/7AUu/ilr7mcp27Fl+nu7G6Dw2r/sud2yoOawU/+BuNAh2ussbreXuYoW3BanNLXc+WPUdZ"
+              "bHf1Agt8r8L4inREviAjF1+wS5xkUoL0Xr8hx+4uGdgxvxoAr3Uitsxd8Fnq5ENXjd6Ba8d0jl0usc/CdfEZLzKqS96/J723zVwpqsmupQfMfOenYOwObU+M"
+              "zvEuG7+32dTraiTbyyLwD6TA7SKHpvYdn8ySscqAtpWDKJDDfHFgDdzxYvp1HhyyhtHFxPYlxbugKEyOm60ca1sS4xIsKifhInIXIcEET4UtjAo1VB6HOQzw"
+              "6dhmJRArceATaMey5KMKf0PaJQF8oAWUP9Tm6B52mbirqcInOsprQo78Ko0wEh+gu5Xhx3k6MFSco5nXKUYKvQsjZsMxgS58ArhSdi3bXXed/ZgjS9qh7Uq0"
+              "L1ABhmlxygusyOGZ54uOnRcsj9088VwWtfYKuOFVA8siJ6TlJCpDjk9DSxA8X0q4npSphEBJagT2y4uLeTHOs4VpdkxO5LMSYt/BeabX0rGsWs6IP7GvqfJ0"
+              "S+pV1XCw7LqFWHLHX+RRhUvdbDLfUiwkzLOghPw8yKxJdlNQSXAjZ2CbsFix3+d0iVDUGk5s18/ok6mKc4jasKzZs+NY3NTRIsJVinJdLJGE0TO9uF/oXfVd"
+              "hoLVZ8sUjfYMcTkXnwLbaZhvBbqfA7yqxI2zIs0CkEUxm5ZqMHM5gxbJj8m0Q8suZB3SeT22arl60dL1l7aQyNZg2TKm8n6m52TfF+eZvRmvcMRoUhTHtGRN"
+              "IyohblGoIksiN/+mgUM7yxy+VMeRqxOHVYtEvir66Ue2Run3PZREPMjUqH9FelBB4XeUGusy9bdy8qlpExH8Qx1+GuK9Nub6UfR/JD75nPSCP6cji4m4WVWJ"
+              "y5FftnmjBLpqK1d8ghfJJHCwXuGYPzlmD/r9PTdmxljfrhn5uZ2aBWUO5l25Jcwox06QIurO84Nm1Q/qVHt2ePcJ6eYGc5Fl0O9txeInkBvzL9Hg2cPCG7yP"
+              "4Fm2pFxlyYiO9ueds89VN9AJr8uq80v3t7XdAel4txRbhAculu4LEloLOGwcXeUJIXEfn9izk/Us2uyxOpUnvIvuOTnAG/YI39NgpUgxqxYeBGC9bOACq65J"
+              "sBQjXsqmlRT+LaqPKd2rrPPSDfybRWz0orTIepLGwpYoV/MaMRFrsmKUR2D13dJYmS3xHPK8RhpWqx/v5xMafwX/lXNaZgqWaYyzsKDdYpKNOjxmGKuiZqw8"
+              "mX97ougu8rQuBtcjvL9Q3sRZmnOsgoJxwposoB0VlUpYC8xw/tcfGOAO7TFnBtgfuGTFmn8ooY8nMqssFUXVf8DZiNdPXLXXzOOzdNmdVlkvQjF5iWBF1R0O"
+              "VjrWajVeleOW1TUtHLSyxEgeUVitnmiZ4UoKCyppMlZZ8qHIPKtLY4roKezNVIt8bOaZtKcyv5M9UlkVNbsLYjQpU9wXrHJ6xVgxVXJk1eiygHdpvMawfq6f"
+              "Y5vya5vJOPBpX1yZNuSVJTGYB1gdRvgHIXwymLG68BidUqcmDNijiVUHjTgaiuzsEmC8tAqtKlacttkBSH7B6Rq7tVr9WRo0P3P0+091fKhCZ77RySwWGv+o"
+              "rjKVfl2/0pTdZuqAe1l+Qldk3pOfFyqc4FmIcVk0/yc9x8P97Tc6ysMd/7/LeZ7avDzCU53t4bKzzAGf2v/3CZ98KLbUIR8R14PFXqs+5VPa5QTzhpkxxuSh"
+              "8jViHSDdBAhAWZKBnx/6PzdwOEM="
           )
           script = zlib.decompress(base64.b64decode(payload))
-          path = pathlib.Path('/tmp/vitastation-fix20-r2.sh')
+          path = pathlib.Path('/tmp/vitastation-fix20-r3.sh')
           path.write_bytes(script)
           subprocess.run(['bash', str(path)], check=True)
           PY
@@ -6322,13 +6044,13 @@ jobs:
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build signed VitaStation FIX20-R2 LORD + GINTAMA SIGNED BDA APK
+      - name: Build signed VitaStation FIX20-R3 LORD + GINTAMA SIGNED BDA APK
         shell: bash
         run: |
           set -euo pipefail
           bash ./.ci/build-android.sh artifacts/vitastation-android
 
-      - name: Verify frozen R2 shader is packaged in FIX20-R2 APK
+      - name: Verify frozen R2 shader is packaged in FIX20-R3 APK
         shell: bash
         run: |
           set -euo pipefail
@@ -6373,7 +6095,7 @@ jobs:
           print('[VS-FIX10-R2] FrameGen remained byte-identical')
           PY
 
-      - name: Rename and hash FIX20-R2 LORD + GINTAMA SIGNED BDA APK
+      - name: Rename and hash FIX20-R3 LORD + GINTAMA SIGNED BDA APK
         shell: bash
         run: |
           set -euo pipefail
@@ -6384,10 +6106,10 @@ jobs:
           sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX20_APK_NAME.sha256"
           ls -lh "$DST"
 
-      - name: Upload VitaStation FIX20-R2 LORD + GINTAMA SIGNED BDA APK
+      - name: Upload VitaStation FIX20-R3 LORD + GINTAMA SIGNED BDA APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.3.0-Alpha4-FIX20-R2-Lord-Gintama-SignedBDA-Android-Signed
+          name: VitaStation-v0.3.0-Alpha4-FIX20-R3-Lord-Gintama-SignedBDA-Android-Signed
           path: |
             artifacts/vitastation-android/${{ env.FIX20_APK_NAME }}
             artifacts/vitastation-android/${{ env.FIX20_APK_NAME }}.sha256

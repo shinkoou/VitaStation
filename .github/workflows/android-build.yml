@@ -6,7 +6,7 @@
 # FrameGen, kernel sync and Uncharted remain frozen. No driver-name workaround.
 # Replace .github/workflows/android-build.yml with this workflow.
 
-name: VitaStation Android APK - Alpha 4 FIX20-R3 LORD + GINTAMA SIGNED BDA
+name: VitaStation Android APK - Alpha 4 FIX21 LORD SKIN DIAG + GINTAMA FEEDBACK CAP
 
 "on":
   workflow_dispatch:
@@ -18,17 +18,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: vitastation-android-fix20-r3-lord-gintama-signed-bda-${{ github.ref }}
+  group: vitastation-android-fix21-lord-skin-diag-gintama-feedback-cap-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   VCPKG_ROOT: /usr/local/share/vcpkg
   VITASTATION_SIGNING_CERT_SHA256: fc57542b62221ad0c0550d12b2791e4e40794e980c9f26a86d83250d67ed5d30
-  FIX20_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX20-R3-Lord-Gintama-SignedBDA-Signed.apk
+  FIX21_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX21-Lord-SkinDiag-Gintama-FeedbackCap-Signed.apk
 
 jobs:
   android-build:
-    name: Build VitaStation v0.3.0 Alpha 4 FIX20-R3 LORD + GINTAMA SIGNED BDA
+    name: Build VitaStation v0.3.0 Alpha 4 FIX21 LORD SKIN DIAG + GINTAMA FEEDBACK CAP
     runs-on: ubuntu-latest
 
     steps:
@@ -5988,6 +5988,471 @@ jobs:
           subprocess.run(['bash', str(path)], check=True)
           PY
 
+      - name: Apply FIX21 LORD skin diagnostics + Gintama feedback capability probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          def read(path):
+              return Path(path).read_text(encoding='utf-8')
+
+          def write(path, content):
+              Path(path).write_text(content, encoding='utf-8')
+
+          def replace_once(content, old, new, label):
+              count = content.count(old)
+              if count != 1:
+                  raise SystemExit(f'::error::FIX21 {label}: expected one anchor, found {count}')
+              return content.replace(old, new, 1)
+
+          path = 'android/app/build.gradle'
+          content = read(path)
+          content = replace_once(content, 'versionCode = 65', 'versionCode = 66', 'versionCode')
+          content = replace_once(
+              content,
+              'versionName = "0.3.0-alpha4-fix20-r3-lord-gintama-bda-signed-offset"',
+              'versionName = "0.3.0-alpha4-fix21-lord-skin-diag-gintama-feedback-cap"',
+              'versionName',
+          )
+          write(path, content)
+
+          # LORD: retain raw vertex UBO bytes for the critical skin shader.
+          path = 'vita3k/renderer/src/state_set.cpp'
+          content = read(path)
+
+          if '[VS-LORD-SKIN-DIAG21-HASH]' not in content:
+              hash_block = '''namespace renderer {
+
+          // [VS-LORD-SKIN-DIAG21-HASH]
+          static constexpr Sha256Hash VS_LORD_SKIN_HASH21 = {
+              0x75, 0x28, 0x5c, 0xfd, 0xb1, 0x6b, 0x9b, 0xf8,
+              0x68, 0x01, 0xad, 0x68, 0x99, 0xff, 0x4b, 0x78,
+              0xb2, 0xe3, 0x08, 0x72, 0x94, 0x6a, 0xab, 0x6a,
+              0x51, 0x3b, 0xd9, 0xfa, 0x6f, 0x03, 0x12, 0xa0
+          };
+          '''
+              content = replace_once(
+                  content,
+                  'namespace renderer {\n',
+                  hash_block,
+                  'state_set diagnostic hash',
+              )
+
+          old = '''    const auto offset = program->uniform_buffer_data_offsets.at(block_num);
+              if (offset != static_cast<uint32_t>(-1) && config.log_active_shaders) {
+                  const int base_binding_ubo_relative = is_vertex ? 0 : (SCE_GXM_REAL_MAX_UNIFORM_BUFFER + 1);
+
+                  std::vector<uint8_t> my_data(data.get(mem), data.get(mem) + size);
+                  render_context->ubo_data[base_binding_ubo_relative + block_num] = std::move(my_data);
+              }
+          '''
+          new = '''    const auto offset = program->uniform_buffer_data_offsets.at(block_num);
+              const bool vs_lord_skin_capture21 =
+                  is_vertex && render_context->record.vertex_program_hash == VS_LORD_SKIN_HASH21;
+              if (offset != static_cast<uint32_t>(-1)
+                  && (config.log_active_shaders || vs_lord_skin_capture21)) {
+                  const int base_binding_ubo_relative =
+                      is_vertex ? 0 : (SCE_GXM_REAL_MAX_UNIFORM_BUFFER + 1);
+
+                  std::vector<uint8_t> my_data(data.get(mem), data.get(mem) + size);
+                  render_context->ubo_data[base_binding_ubo_relative + block_num] =
+                      std::move(my_data);
+
+                  if (vs_lord_skin_capture21) {
+                      LOG_WARN(
+                          "[VS-LORD-UBO21] app={} block={} guest=0x{:08X} bytes={} "
+                          "program_offset_words={} program_size_words={}",
+                          renderer.app_title_id,
+                          block_num,
+                          data.address(),
+                          size,
+                          offset,
+                          program->uniform_buffer_sizes.at(block_num));
+                  }
+              }
+          '''
+          if '[VS-LORD-UBO21]' not in content:
+              content = replace_once(content, old, new, 'state_set UBO capture')
+          write(path, content)
+
+          # LORD: final Vulkan draw diagnostic.
+          path = 'vita3k/renderer/src/vulkan/scene.cpp'
+          content = read(path)
+
+          if '[VS-LORD-SKIN-DIAG21-HASH]' not in content:
+              diag_helpers = '''namespace renderer::vulkan {
+
+          // [VS-LORD-SKIN-DIAG21-HASH]
+          static constexpr Sha256Hash VS_LORD_SKIN_HASH21 = {
+              0x75, 0x28, 0x5c, 0xfd, 0xb1, 0x6b, 0x9b, 0xf8,
+              0x68, 0x01, 0xad, 0x68, 0x99, 0xff, 0x4b, 0x78,
+              0xb2, 0xe3, 0x08, 0x72, 0x94, 0x6a, 0xab, 0x6a,
+              0x51, 0x3b, 0xd9, 0xfa, 0x6f, 0x03, 0x12, 0xa0
+          };
+
+          static std::string vs_lord_hex21(const uint8_t *data, size_t size) {
+              static constexpr char hex[] = "0123456789abcdef";
+              std::string out;
+              out.resize(size * 2);
+              for (size_t i = 0; i < size; ++i) {
+                  const uint8_t v = data[i];
+                  out[i * 2] = hex[v >> 4];
+                  out[i * 2 + 1] = hex[v & 0x0f];
+              }
+              return out;
+          }
+
+          static uint32_t vs_lord_skin_diag_seq21 = 0;
+          '''
+              content = replace_once(
+                  content,
+                  'namespace renderer::vulkan {\n',
+                  diag_helpers,
+                  'scene diagnostic helpers',
+              )
+
+          bind_anchor = '''    // bind the vertex streams
+              bind_vertex_streams(context, mem, instance_count, max_index);
+
+              context.render_cmd.drawIndexed(count, instance_count, 0, 0, 0);
+          '''
+          if '[VS-LORD-SKIN-DRAW21]' not in content:
+              diag_draw = '''    // [VS-LORD-SKIN-DRAW21]
+              const bool vs_lord_skin_draw21 =
+                  context.record.vertex_program_hash == VS_LORD_SKIN_HASH21;
+              uint32_t vs_lord_diag_seq21 = 0;
+              std::array<Address, SCE_GXM_MAX_VERTEX_STREAMS> vs_lord_stream_addr21{};
+              std::array<size_t, SCE_GXM_MAX_VERTEX_STREAMS> vs_lord_stream_size21{};
+
+              if (vs_lord_skin_draw21 && vs_lord_skin_diag_seq21 < 48) {
+                  vs_lord_diag_seq21 = ++vs_lord_skin_diag_seq21;
+                  for (size_t i = 0; i < SCE_GXM_MAX_VERTEX_STREAMS; ++i) {
+                      vs_lord_stream_addr21[i] = context.record.vertex_streams[i].data.address();
+                      vs_lord_stream_size21[i] = context.record.vertex_streams[i].size;
+                  }
+
+                  const auto &vs_prog21 = *context.record.vertex_program.get(mem);
+                  const auto *vs_meta21 = vs_prog21.renderer_data.get();
+                  const std::string vs_hash21 = hex_string(context.record.vertex_program_hash);
+                  const std::string fs_hash21 = hex_string(context.record.fragment_program_hash);
+
+                  LOG_WARN(
+                      "[VS-LORD-SKIN-DRAW21] BEGIN seq={} app={} frame={} scene={} draw={} "
+                      "vs={} fs={} mapping_enabled={} mapping_method={} "
+                      "index_guest=0x{:08X} index_count={} index_type={} max_index={} instances={}",
+                      vs_lord_diag_seq21,
+                      context.state.app_title_id,
+                      context.frame_timestamp,
+                      context.scene_timestamp,
+                      context.draw_timestamp,
+                      vs_hash21,
+                      fs_hash21,
+                      context.state.features.enable_memory_mapping,
+                      static_cast<int>(context.state.mapping_method),
+                      indices.address(),
+                      count,
+                      static_cast<int>(format),
+                      max_index,
+                      instance_count);
+
+                  std::string index_values21;
+                  const size_t index_dump_count21 = std::min<size_t>(count, 16);
+                  for (size_t i = 0; i < index_dump_count21; ++i) {
+                      if (i)
+                          index_values21 += ",";
+                      if (format == SCE_GXM_INDEX_FORMAT_U16)
+                          index_values21 += std::to_string(
+                              static_cast<const uint16_t *>(indices_ptr)[i]);
+                      else
+                          index_values21 += std::to_string(
+                              static_cast<const uint32_t *>(indices_ptr)[i]);
+                  }
+                  LOG_WARN(
+                      "[VS-LORD-SKIN-INDEX21] seq={} first{}=[{}]",
+                      vs_lord_diag_seq21,
+                      index_dump_count21,
+                      index_values21);
+
+                  LOG_WARN(
+                      "[VS-LORD-SKIN-UNIFORM-META21] seq={} buffer_count={} "
+                      "vertex_ssbo_dynamic_offset={} render_info_dynamic_offset={}",
+                      vs_lord_diag_seq21,
+                      vs_meta21->buffer_count,
+                      context.vertex_uniform_stream_ring_buffer.data_offset,
+                      context.vertex_info_uniform_buffer.data_offset);
+
+                  for (uint16_t b = 0; b < vs_meta21->buffer_count; ++b) {
+                      LOG_WARN(
+                          "[VS-LORD-SKIN-UBO-META21] seq={} block={} offset_words={} "
+                          "size_words={} device_address=0x{:016X}",
+                          vs_lord_diag_seq21,
+                          b,
+                          vs_meta21->uniform_buffer_data_offsets.at(b),
+                          vs_meta21->uniform_buffer_sizes.at(b),
+                          context.curr_vert_ublock.buffer_addresses[b]);
+
+                      const auto ubo_it21 = context.ubo_data.find(b);
+                      if (ubo_it21 != context.ubo_data.end()) {
+                          const auto &raw21 = ubo_it21->second;
+                          LOG_WARN(
+                              "[VS-LORD-SKIN-UBO-RAW21] seq={} block={} bytes={} hex={}",
+                              vs_lord_diag_seq21,
+                              b,
+                              raw21.size(),
+                              vs_lord_hex21(raw21.data(), raw21.size()));
+                      } else {
+                          LOG_WARN(
+                              "[VS-LORD-SKIN-UBO-RAW21] seq={} block={} MISSING",
+                              vs_lord_diag_seq21,
+                              b);
+                      }
+                  }
+
+                  for (const SceGxmVertexAttribute &attr21 : vs_prog21.attributes) {
+                      const auto &stream21 = vs_prog21.streams[attr21.streamIndex];
+                      LOG_WARN(
+                          "[VS-LORD-SKIN-ATTR21] seq={} reg={} stream={} offset={} "
+                          "format={} comps={} stride={} index_source={}",
+                          vs_lord_diag_seq21,
+                          attr21.regIndex,
+                          attr21.streamIndex,
+                          attr21.offset,
+                          static_cast<int>(attr21.format),
+                          attr21.componentCount,
+                          stream21.stride,
+                          static_cast<int>(stream21.indexSource));
+                  }
+
+                  std::array<size_t, SCE_GXM_MAX_VERTEX_STREAMS> wanted_stream_bytes21{};
+                  for (const SceGxmVertexAttribute &attr21 : vs_prog21.attributes) {
+                      const auto &stream21 = vs_prog21.streams[attr21.streamIndex];
+                      const auto fmt21 = static_cast<SceGxmAttributeFormat>(attr21.format);
+                      const size_t attr_bytes21 =
+                          gxm::attribute_format_size(fmt21) * attr21.componentCount;
+                      const auto idx_source21 =
+                          static_cast<SceGxmIndexSource>(stream21.indexSource);
+                      const size_t advance21 = gxm::is_stream_instancing(idx_source21)
+                          ? ((instance_count ? instance_count - 1 : 0) * stream21.stride)
+                          : (static_cast<size_t>(max_index) * stream21.stride);
+                      const size_t needed21 = attr21.offset + advance21 + attr_bytes21;
+                      wanted_stream_bytes21[attr21.streamIndex] =
+                          std::max(wanted_stream_bytes21[attr21.streamIndex], needed21);
+                  }
+
+                  for (size_t i = 0; i < SCE_GXM_MAX_VERTEX_STREAMS; ++i) {
+                      if (!vs_lord_stream_addr21[i])
+                          continue;
+
+                      const size_t available_bytes21 =
+                          wanted_stream_bytes21[i]
+                          ? wanted_stream_bytes21[i]
+                          : vs_lord_stream_size21[i];
+                      const size_t safe_bytes21 =
+                          std::min<size_t>(available_bytes21, 256);
+                      if (safe_bytes21) {
+                          const auto ptr21 =
+                              Ptr<const uint8_t>(vs_lord_stream_addr21[i]).get(mem);
+                          LOG_WARN(
+                              "[VS-LORD-SKIN-STREAM-GUEST21] seq={} stream={} guest=0x{:08X} "
+                              "recorded_size={} wanted_size={} first_bytes={} hex={}",
+                              vs_lord_diag_seq21,
+                              i,
+                              vs_lord_stream_addr21[i],
+                              vs_lord_stream_size21[i],
+                              wanted_stream_bytes21[i],
+                              safe_bytes21,
+                              vs_lord_hex21(ptr21, safe_bytes21));
+                      } else {
+                          LOG_WARN(
+                              "[VS-LORD-SKIN-STREAM-GUEST21] seq={} stream={} guest=0x{:08X} "
+                              "recorded_size={} wanted_size={} first_bytes=0",
+                              vs_lord_diag_seq21,
+                              i,
+                              vs_lord_stream_addr21[i],
+                              vs_lord_stream_size21[i],
+                              wanted_stream_bytes21[i]);
+                      }
+                  }
+              }
+
+              // bind the vertex streams
+              bind_vertex_streams(context, mem, instance_count, max_index);
+
+              if (vs_lord_diag_seq21) {
+                  const auto &vs_prog21 = *context.record.vertex_program.get(mem);
+                  int max_stream21 = -1;
+                  for (const auto &attr21 : vs_prog21.attributes)
+                      max_stream21 = std::max<int>(max_stream21, attr21.streamIndex);
+                  for (int i = 0; i <= max_stream21; ++i) {
+                      LOG_WARN(
+                          "[VS-LORD-SKIN-STREAM-VK21] seq={} stream={} vk_offset={}",
+                          vs_lord_diag_seq21,
+                          i,
+                          context.vertex_stream_offsets[i]);
+                  }
+                  LOG_WARN(
+                      "[VS-LORD-SKIN-DRAW21] END seq={} scene={} draw={}",
+                      vs_lord_diag_seq21,
+                      context.scene_timestamp,
+                      context.draw_timestamp);
+              }
+
+              context.render_cmd.drawIndexed(count, instance_count, 0, 0, 0);
+          '''
+              content = replace_once(content, bind_anchor, diag_draw, 'scene draw hook')
+          write(path, content)
+
+          # Gintama capability probe and title identity.
+          path = 'vita3k/renderer/src/vulkan/renderer.cpp'
+          content = read(path)
+          late_start = content.find('void VKState::late_init(')
+          if late_start < 0:
+              raise SystemExit('::error::FIX21 late_init not found')
+          late_end = content.find('\nvoid VKState::cleanup()', late_start)
+          if late_end < 0:
+              raise SystemExit('::error::FIX21 late_init end not found')
+          late = content[late_start:late_end]
+
+          if '[VS-TITLE-DIAG21]' not in late:
+              insert = '''    this->mem = &mem;
+
+              if (game_id == "PCSG00008" || game_id == "PCSG01073") {
+                  LOG_WARN(
+                      "[VS-TITLE-DIAG21] late_init game_id={} app_title_id={}",
+                      game_id,
+                      app_title_id);
+              }
+
+              if (game_id == "PCSG01073") {
+                  const auto extensions21 =
+                      physical_device.enumerateDeviceExtensionProperties();
+                  bool feedback_ext21 = false;
+                  for (const auto &ext21 : extensions21) {
+                      if (std::string_view(ext21.extensionName.data())
+                          == "VK_EXT_attachment_feedback_loop_layout") {
+                          feedback_ext21 = true;
+                          break;
+                      }
+                  }
+
+                  LOG_WARN(
+                      "[VS-GINTAMA-FEEDBACK-CAP21] extension={} "
+                      "raster_order_access={} shader_interlock={} high_accuracy={}",
+                      feedback_ext21,
+                      support_rasterized_order_access,
+                      features.support_shader_interlock,
+                      cfg.current_config.high_accuracy);
+              }
+          '''
+              late = replace_once(
+                  late,
+                  '    this->mem = &mem;\n',
+                  insert,
+                  'late_init capability probe',
+              )
+          content = content[:late_start] + late + content[late_end:]
+
+          # Surface the vertex-stride validation message during this diagnostic build.
+          if 'VUID-vkCmdDrawIndexed-None-02721' in content:
+              content = content.replace(
+                  '        "VUID-vkCmdDrawIndexed-None-02721", // using r8g8b8a8 with non-multiple of 4 stride\n',
+                  '        // [VS-VALIDATION-DIAG21] 02721 deliberately NOT ignored in FIX21\n',
+                  1,
+              )
+          write(path, content)
+
+          print('[VS-FIX21] LORD critical skin shader diagnostics applied')
+          print('[VS-FIX21] Gintama feedback capability probe applied')
+          print('[VS-FIX21] Rendering behavior remains FIX20-R3')
+          PY
+
+      - name: FIX21 diagnostic regression gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          def require(path, *tokens):
+              text = Path(path).read_text(encoding='utf-8')
+              for token in tokens:
+                  if token not in text:
+                      raise SystemExit(f'::error::FIX21 gate missing {token!r} in {path}')
+              return text
+
+          def forbid(path, *tokens):
+              text = Path(path).read_text(encoding='utf-8')
+              for token in tokens:
+                  if token in text:
+                      raise SystemExit(f'::error::FIX21 forbidden token {token!r} in {path}')
+              return text
+
+          require(
+              'android/app/build.gradle',
+              'versionCode = 66',
+              'versionName = "0.3.0-alpha4-fix21-lord-skin-diag-gintama-feedback-cap"',
+          )
+          require(
+              'vita3k/renderer/src/state_set.cpp',
+              '[VS-LORD-SKIN-DIAG21-HASH]',
+              '[VS-LORD-UBO21]',
+              'VS_LORD_SKIN_HASH21',
+          )
+          require(
+              'vita3k/renderer/src/vulkan/scene.cpp',
+              '[VS-LORD-SKIN-DRAW21]',
+              '[VS-LORD-SKIN-INDEX21]',
+              '[VS-LORD-SKIN-UBO-META21]',
+              '[VS-LORD-SKIN-UBO-RAW21]',
+              '[VS-LORD-SKIN-ATTR21]',
+              '[VS-LORD-SKIN-STREAM-GUEST21]',
+              '[VS-LORD-SKIN-STREAM-VK21]',
+          )
+          require(
+              'vita3k/renderer/src/vulkan/renderer.cpp',
+              '[VS-TITLE-DIAG21]',
+              '[VS-GINTAMA-FEEDBACK-CAP21]',
+              '[VS-VALIDATION-DIAG21]',
+              'VK_EXT_attachment_feedback_loop_layout',
+              '[VS-BDA20]',
+          )
+          require(
+              'vita3k/renderer/src/vulkan/surface_cache.cpp',
+              '[VS-GINTAMA-FEEDBACK-BOUNDARY14]',
+              '[VS-GINTAMA-DRAWTIME17]',
+              '[VS-GINTAMA-STAGING19]',
+          )
+          forbid(
+              'vita3k/renderer/src/vulkan/surface_cache.cpp',
+              '[VS-GINTAMA-FEEDBACK-BARRIER15]',
+              'gintama_feedback_outside_pass15',
+              'gintama_to_transfer15',
+          )
+          pipeline = Path('vita3k/renderer/src/vulkan/pipeline_cache.cpp').read_text(encoding='utf-8')
+          if '[VS-GINTAMA-OUTGOING16]' in pipeline or 'gintama_outgoing_transfer16' in pipeline:
+              raise SystemExit('::error::FIX21 OUTGOING16 must not return')
+
+          got = subprocess.check_output(
+              ['git', 'hash-object', 'vita3k/renderer/src/vulkan/frame_generation.cpp'],
+              text=True,
+          ).strip()
+          wanted = '1e7cc634f3308566b6ea3d972b73c55086f8f781'
+          if got != wanted:
+              raise SystemExit(
+                  f'::error::FIX21 FrameGen drift expected={wanted} actual={got}')
+
+          active = Path('.github/workflows/android-build.yml').read_text(
+              encoding='utf-8').lower()
+          if 'vitastation-' + 'bootstrap.yml' in active:
+              raise SystemExit('::error::FIX21 forbidden Bootstrap reference')
+
+          print('[VS-FIX21] diagnostic/regression gates passed')
+          PY
+
       - name: Set up Java 17
         uses: actions/setup-java@v5
         with:
@@ -6044,13 +6509,13 @@ jobs:
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build signed VitaStation FIX20-R3 LORD + GINTAMA SIGNED BDA APK
+      - name: Build signed VitaStation FIX21 LORD SKIN DIAG + GINTAMA FEEDBACK CAP APK
         shell: bash
         run: |
           set -euo pipefail
           bash ./.ci/build-android.sh artifacts/vitastation-android
 
-      - name: Verify frozen R2 shader is packaged in FIX20-R3 APK
+      - name: Verify frozen R2 shader is packaged in FIX21 APK
         shell: bash
         run: |
           set -euo pipefail
@@ -6095,23 +6560,23 @@ jobs:
           print('[VS-FIX10-R2] FrameGen remained byte-identical')
           PY
 
-      - name: Rename and hash FIX20-R3 LORD + GINTAMA SIGNED BDA APK
+      - name: Rename and hash FIX21 LORD SKIN DIAG + GINTAMA FEEDBACK CAP APK
         shell: bash
         run: |
           set -euo pipefail
           SRC='artifacts/vitastation-android/app.apk'
-          DST="artifacts/vitastation-android/$FIX20_APK_NAME"
+          DST="artifacts/vitastation-android/$FIX21_APK_NAME"
           test -s "$SRC"
           mv "$SRC" "$DST"
-          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX20_APK_NAME.sha256"
+          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX21_APK_NAME.sha256"
           ls -lh "$DST"
 
-      - name: Upload VitaStation FIX20-R3 LORD + GINTAMA SIGNED BDA APK
+      - name: Upload VitaStation FIX21 LORD SKIN DIAG + GINTAMA FEEDBACK CAP APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.3.0-Alpha4-FIX20-R3-Lord-Gintama-SignedBDA-Android-Signed
+          name: VitaStation-v0.3.0-Alpha4-FIX21-Lord-SkinDiag-Gintama-FeedbackCap-Android-Signed
           path: |
-            artifacts/vitastation-android/${{ env.FIX20_APK_NAME }}
-            artifacts/vitastation-android/${{ env.FIX20_APK_NAME }}.sha256
+            artifacts/vitastation-android/${{ env.FIX21_APK_NAME }}
+            artifacts/vitastation-android/${{ env.FIX21_APK_NAME }}.sha256
           if-no-files-found: error
           retention-days: 30

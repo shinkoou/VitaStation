@@ -6,7 +6,7 @@
 # FrameGen, kernel sync and Uncharted remain frozen. No driver-name workaround.
 # Replace .github/workflows/android-build.yml with this workflow.
 
-name: VitaStation Android APK - Alpha 4 FIX19-R2 LORD HOSTMEM + GINTAMA SAFE STAGING
+name: VitaStation Android APK - Alpha 4 FIX20 LORD + GINTAMA SIGNED BDA
 
 "on":
   workflow_dispatch:
@@ -18,13 +18,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: vitastation-android-fix19-r2-lord-hostmem-gintama-safe-staging-${{ github.ref }}
+  group: vitastation-android-fix20-lord-gintama-signed-bda-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   VCPKG_ROOT: /usr/local/share/vcpkg
   VITASTATION_SIGNING_CERT_SHA256: fc57542b62221ad0c0550d12b2791e4e40794e980c9f26a86d83250d67ed5d30
-  FIX19_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX19-Lord-HostMem-Gintama-SafeStaging-Signed.apk
+  FIX20_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX20-Lord-Gintama-SignedBDA-Signed.apk
 
 jobs:
   android-build:
@@ -6181,122 +6181,6 @@ jobs:
           print('[VS-FIX18-A-R3] regression gates passed')
           PY
 
-      - name: Apply FIX18-B-R2 LORD host-copy memory fallback
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 <<'PY'
-          from pathlib import Path
-
-          def read(path):
-              return Path(path).read_text(encoding='utf-8')
-
-          def write(path, content):
-              Path(path).write_text(content, encoding='utf-8')
-
-          def replace_once(content, old, new, label):
-              count = content.count(old)
-              if count != 1:
-                  raise SystemExit(f'::error::FIX18-B-R2 {label}: expected one anchor, found {count}')
-              return content.replace(old, new, 1)
-
-          # Identity after FIX18-A-R3.
-          path = 'android/app/build.gradle'
-          content = read(path)
-          content = replace_once(content, 'versionCode = 62', 'versionCode = 63', 'versionCode')
-          content = replace_once(
-              content,
-              'versionName = "0.3.0-alpha4-fix18a-r3-lord-precomputed-gintama-drawtime"',
-              'versionName = "0.3.0-alpha4-fix18b-r3-lord-precomputed-hostmem-gintama-drawtime"',
-              'versionName',
-          )
-          write(path, content)
-
-          # Patch only inside VKState::late_init. The previous workflow matched a
-          # whitespace-sensitive multi-line block; R2 uses the single semantic line
-          # after the requested mapping method has already been selected.
-          path = 'vita3k/renderer/src/vulkan/renderer.cpp'
-          content = read(path)
-
-          fn_start = content.find('void VKState::late_init(')
-          if fn_start < 0:
-              raise SystemExit('::error::FIX18-B-R2 VKState::late_init start not found')
-          fn_end = content.find('\nvoid VKState::cleanup()', fn_start)
-          if fn_end < 0:
-              raise SystemExit('::error::FIX18-B-R2 VKState::late_init end not found')
-
-          fn = content[fn_start:fn_end]
-          anchor = '    features.enable_memory_mapping = mapping_method != MappingMethod::Disabled;\n'
-          if fn.count(anchor) != 1:
-              raise SystemExit(
-                  f'::error::FIX18-B-R2 enable_memory_mapping anchor count={fn.count(anchor)}')
-
-          replacement = '''    // [VS-LORD-HOSTMEM18B]
-              // PCSG00008: force the existing non-mapped renderer path so
-              // vertex/index/uniform data is copied through host ring buffers
-              // instead of consuming mapped GPU addresses directly.
-              if (game_id == "PCSG00008") {
-                  mapping_method = MappingMethod::Disabled;
-                  LOG_WARN_ONCE(
-                      "[VS-LORD-HOSTMEM18B] PCSG00008 forcing host-copy vertex/index/uniform path");
-              }
-
-              features.enable_memory_mapping =
-                  mapping_method != MappingMethod::Disabled;
-          '''
-          fn = fn.replace(anchor, replacement, 1)
-          content = content[:fn_start] + fn + content[fn_end:]
-          write(path, content)
-
-          print('[VS-FIX18-B-R2] PCSG00008 host-copy path applied inside VKState::late_init')
-          print('[VS-FIX18-B-R2] FIX18-A-R3 precomputed/texture behavior retained')
-          PY
-
-      - name: FIX18-B-R2 LORD host-memory regression gates
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 <<'PY'
-          from pathlib import Path
-          import subprocess
-
-          def require(path, *tokens):
-              text = Path(path).read_text(encoding='utf-8')
-              for token in tokens:
-                  if token not in text:
-                      raise SystemExit(f'::error::FIX18-B gate missing {token!r} in {path}')
-              return text
-
-          require(
-              'android/app/build.gradle',
-              'versionCode = 63',
-              'versionName = "0.3.0-alpha4-fix18b-r3-lord-precomputed-hostmem-gintama-drawtime"',
-          )
-          require(
-              'vita3k/renderer/src/vulkan/renderer.cpp',
-              '[VS-LORD-HOSTMEM18B]',
-              'game_id == "PCSG00008"',
-              'mapping_method = MappingMethod::Disabled',
-          )
-          require(
-              'vita3k/modules/SceGxm/SceGxm.cpp',
-              '[VS-LORD-HOSTCMD16]',
-              '[VS-LORD-RINGREBIND17R2]',
-              '[VS-LORD-PRECOMPUTED18]',
-              '[VS-LORD-TEXTURE-REFRESH18]',
-          )
-
-          got = subprocess.check_output(
-              ['git', 'hash-object', 'vita3k/renderer/src/vulkan/frame_generation.cpp'],
-              text=True,
-          ).strip()
-          wanted = '1e7cc634f3308566b6ea3d972b73c55086f8f781'
-          if got != wanted:
-              raise SystemExit(f'::error::FIX18-B FrameGen drift expected={wanted} actual={got}')
-
-          print('[VS-FIX18-B] regression gates passed')
-          PY
-
       - name: Apply FIX19 Gintama safe staging and final identity
         shell: bash
         run: |
@@ -6316,13 +6200,13 @@ jobs:
                   raise SystemExit(f'::error::FIX19 {label}: expected one anchor, found {count}')
               return content.replace(old, new, 1)
 
-          # FIX18-B-R3 has already applied LORD host-copy and passed its gate.
+          # FIX18-A-R3 has already passed. FIX20 intentionally does not apply HOSTMEM18B.
           path = 'android/app/build.gradle'
           content = read(path)
-          content = replace_once(content, 'versionCode = 63', 'versionCode = 64', 'versionCode')
+          content = replace_once(content, 'versionCode = 62', 'versionCode = 64', 'versionCode')
           content = replace_once(
               content,
-              'versionName = "0.3.0-alpha4-fix18b-r3-lord-precomputed-hostmem-gintama-drawtime"',
+              'versionName = "0.3.0-alpha4-fix18a-r3-lord-precomputed-gintama-drawtime"',
               'versionName = "0.3.0-alpha4-fix19-lord-hostmem-gintama-safe-staging"',
               'versionName',
           )
@@ -6513,13 +6397,6 @@ jobs:
               '[VS-LORD-PRECOMPUTED18]',
               '[VS-LORD-TEXTURE-REFRESH18]',
           )
-          require(
-              'vita3k/renderer/src/vulkan/renderer.cpp',
-              '[VS-LORD-HOSTMEM18B]',
-              'game_id == "PCSG00008"',
-              'mapping_method = MappingMethod::Disabled',
-          )
-
           surf = require(
               'vita3k/renderer/src/vulkan/surface_cache.cpp',
               '[VS-GINTAMA-FEEDBACK-BOUNDARY14]',
@@ -6560,6 +6437,509 @@ jobs:
               raise SystemExit('::error::FIX19 forbidden Bootstrap reference')
 
           print('[VS-FIX19] final regression gates passed')
+          PY
+
+      - name: Apply FIX20 signed buffer-address correction from Vita3K-Plus
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          def read(path):
+              return Path(path).read_text(encoding='utf-8')
+
+          def write(path, content):
+              Path(path).write_text(content, encoding='utf-8')
+
+          def replace_once(content, old, new, label):
+              count = content.count(old)
+              if count != 1:
+                  raise SystemExit(f'::error::FIX20 {label}: expected one anchor, found {count}')
+              return content.replace(old, new, 1)
+
+          # Final app identity.
+          path = 'android/app/build.gradle'
+          content = read(path)
+          content = replace_once(content, 'versionCode = 64', 'versionCode = 65', 'versionCode')
+          content = replace_once(
+              content,
+              'versionName = "0.3.0-alpha4-fix19-lord-hostmem-gintama-safe-staging"',
+              'versionName = "0.3.0-alpha4-fix20-lord-gintama-bda-signed-offset"',
+              'versionName',
+          )
+          write(path, content)
+
+          # ---------------------------------------------------------------
+          # Feature gate: this is intentionally title-scoped.
+          # Uncharted and every other title retain the old shader addressing.
+          # ---------------------------------------------------------------
+          path = 'vita3k/features/include/features/state.h'
+          content = read(path)
+          content = replace_once(
+              content,
+              '    bool enable_memory_mapping = false; ///< Is the host GPU memory directly mapped with gxm memory?\n',
+              '    bool enable_memory_mapping = false; ///< Is the host GPU memory directly mapped with gxm memory?\n'
+              '    bool fix_buffer_addressing20 = false; // [VS-BDA20] signed/nearest buffer decoding for selected titles\n',
+              'FeatureState BDA flag',
+          )
+          write(path, content)
+
+          # The corrected decoder must know the actual number of entries in
+          # buffer_addresses[] so a malformed/index-near-boundary address can
+          # never index outside the uniform array.
+          path = 'vita3k/shader/include/shader/usse_translator_types.h'
+          content = read(path)
+          content = replace_once(
+              content,
+              '''    int buffer_addresses_id;
+                  int viewport_ratio_id;
+                  int viewport_offset_id;
+          ''',
+              '''    int buffer_addresses_id;
+                  int viewport_ratio_id;
+                  int viewport_offset_id;
+
+                  // [VS-BDA20] Number of valid buffer_addresses[] entries.
+                  int buffer_count = 0;
+          ''',
+              'SpirvShaderParameters buffer_count',
+          )
+          write(path, content)
+
+          path = 'vita3k/shader/src/spirv_recompiler.cpp'
+          content = read(path)
+          content = replace_once(
+              content,
+              '''    const uint16_t uniform_buffer_count = features.enable_memory_mapping ? buffer_count : 0;
+              const uint16_t uniform_texture_count = features.use_texture_viewport ? texture_count : 0;
+          ''',
+              '''    const uint16_t uniform_buffer_count = features.enable_memory_mapping ? buffer_count : 0;
+              const uint16_t uniform_texture_count = features.use_texture_viewport ? texture_count : 0;
+
+              spv_params.buffer_count = uniform_buffer_count; // [VS-BDA20]
+          ''',
+              'SPIR-V buffer_count assignment',
+          )
+          write(path, content)
+
+          # ---------------------------------------------------------------
+          # Port the important Vita3K-Plus buffer-address correction.
+          #
+          # Old VitaStation:
+          #   index = addr >> 28
+          #   offset = addr & 0x0fffffff
+          #
+          # Corrected:
+          #   index = (addr + 0x08000000) >> 28    (nearest 256 MiB base)
+          #   clamp index to buffer_addresses[]
+          #   offset = addr - (index << 28)        (SIGNED)
+          #   reject impossible +/-16 MiB offsets
+          #   signed-add the offset into the 64-bit GPU address
+          #
+          # This targets the dynamic LDR pattern seen in both:
+          # - LORD bone matrices
+          # - Gintama's fight-transition matrix shader
+          # ---------------------------------------------------------------
+          path = 'vita3k/shader/src/usse_utilities.cpp'
+          content = read(path)
+
+          if 'spv::Id add_uvec2_int(' not in content:
+              ns_end = '\n} // namespace shader::usse::utils\n'
+              if content.count(ns_end) != 1:
+                  raise SystemExit(
+                      f'::error::FIX20 namespace end count={content.count(ns_end)}')
+
+              signed_helper = r'''
+          // [VS-BDA20] Add a signed 32-bit byte offset to a uvec2 64-bit address.
+          // Ported from the corrected Vita3K-Plus physical-buffer path.
+          spv::Id add_uvec2_int(spv::Builder &b, spv::Id vec, spv::Id to_add_signed) {
+              const spv::Id u32 = b.makeUintType(32);
+              const spv::Id i32 = b.makeIntType(32);
+              const spv::Id uvec2 = b.makeVectorType(u32, 2);
+              const spv::Id add_result_type = b.makeStructResultType(u32, u32);
+
+              spv::Id to_add_i =
+                  b.isUintType(b.getTypeId(to_add_signed))
+                  ? b.createUnaryOp(spv::OpBitcast, i32, to_add_signed)
+                  : to_add_signed;
+              spv::Id sign =
+                  b.createBinOp(
+                      spv::OpShiftRightArithmetic,
+                      i32,
+                      to_add_i,
+                      b.makeIntConstant(31));
+              sign = b.createUnaryOp(spv::OpBitcast, u32, sign);
+              spv::Id to_add =
+                  b.createUnaryOp(spv::OpBitcast, u32, to_add_i);
+
+              spv::Id lower = b.createCompositeExtract(vec, u32, 0);
+              spv::Id lower_add =
+                  b.createBinOp(
+                      spv::OpIAddCarry,
+                      add_result_type,
+                      lower,
+                      to_add);
+              spv::Id carry =
+                  b.createCompositeExtract(lower_add, u32, 1);
+              spv::Id upper =
+                  b.createCompositeExtract(vec, u32, 1);
+              upper =
+                  b.createBinOp(spv::OpIAdd, u32, upper, carry);
+              upper =
+                  b.createBinOp(spv::OpIAdd, u32, upper, sign);
+              lower =
+                  b.createCompositeExtract(lower_add, u32, 0);
+              return b.createCompositeConstruct(uvec2, { lower, upper });
+          }
+          '''
+              content = content.replace(ns_end, signed_helper + ns_end, 1)
+
+          old_prefix = '''void buffer_address_access(spv::Builder &b, const SpirvShaderParameters &params, SpirvUtilFunctions &utils, const FeatureState &features, Operand dest, int dest_offset, spv::Id addr, uint32_t component_size, uint32_t nb_components, int buffer_idx, bool is_buffer_store) {
+              const spv::Id i32 = b.makeIntType(32);
+              const spv::Id zero = b.makeIntConstant(0);
+
+              spv::Id buffer_idx_val;
+              if (buffer_idx == -1) {
+                  // buffer index is in the upper 4 bits of addr
+                  buffer_idx_val = b.createBinOp(spv::OpShiftRightLogical, i32, addr, b.makeIntConstant(28));
+                  // remove the buffer index bits from the address
+                  addr = b.createBinOp(spv::OpBitwiseAnd, i32, addr, b.makeIntConstant((1 << 28) - 1));
+              } else {
+                  buffer_idx_val = b.makeIntConstant(buffer_idx);
+              }
+
+              spv::Id buffer_address = utils::create_access_chain(b, spv::StorageClassUniform, params.render_info_id, { b.makeIntConstant(params.buffer_addresses_id), buffer_idx_val });
+              buffer_address = b.createLoad(buffer_address, spv::NoPrecision);
+              // add the offset from the base address
+              buffer_address = add_uvec2_uint(b, buffer_address, addr);
+          '''
+
+          new_prefix = '''void buffer_address_access(spv::Builder &b, const SpirvShaderParameters &params, SpirvUtilFunctions &utils, const FeatureState &features, Operand dest, int dest_offset, spv::Id addr, uint32_t component_size, uint32_t nb_components, int buffer_idx, bool is_buffer_store) {
+              const spv::Id i32 = b.makeIntType(32);
+              const spv::Id u32 = b.makeUintType(32);
+              const spv::Id zero = b.makeIntConstant(0);
+
+              spv::Id buffer_idx_val;
+              if (buffer_idx == -1) {
+                  if (features.fix_buffer_addressing20) {
+                      // [VS-BDA20] Pick the nearest 256 MiB buffer base rather
+                      // than truncating toward the lower segment.
+                      const spv::Id biased =
+                          b.createBinOp(
+                              spv::OpIAdd,
+                              i32,
+                              addr,
+                              b.makeIntConstant(1 << 27));
+                      buffer_idx_val =
+                          b.createBinOp(
+                              spv::OpShiftRightLogical,
+                              i32,
+                              biased,
+                              b.makeIntConstant(28));
+
+                      if (params.buffer_count > 0) {
+                          const spv::Id max_idx =
+                              b.makeIntConstant(params.buffer_count - 1);
+                          spv::Id too_big =
+                              b.createBinOp(
+                                  spv::OpSGreaterThan,
+                                  b.makeBoolType(),
+                                  buffer_idx_val,
+                                  max_idx);
+                          buffer_idx_val =
+                              b.createTriOp(
+                                  spv::OpSelect,
+                                  i32,
+                                  too_big,
+                                  max_idx,
+                                  buffer_idx_val);
+
+                          spv::Id negative =
+                              b.createBinOp(
+                                  spv::OpSLessThan,
+                                  b.makeBoolType(),
+                                  buffer_idx_val,
+                                  zero);
+                          buffer_idx_val =
+                              b.createTriOp(
+                                  spv::OpSelect,
+                                  i32,
+                                  negative,
+                                  zero,
+                                  buffer_idx_val);
+                      }
+
+                      // Signed offset relative to the selected 256 MiB base.
+                      const spv::Id idx_hi =
+                          b.createBinOp(
+                              spv::OpShiftLeftLogical,
+                              i32,
+                              buffer_idx_val,
+                              b.makeIntConstant(28));
+                      addr =
+                          b.createBinOp(
+                              spv::OpISub,
+                              i32,
+                              addr,
+                              idx_hi);
+
+                      // A uniform-buffer dynamic LDR should never legitimately
+                      // be many megabytes away from its selected buffer.
+                      constexpr int safe_offset_max = 0x1000000;
+                      spv::Id off_hi =
+                          b.createBinOp(
+                              spv::OpSGreaterThan,
+                              b.makeBoolType(),
+                              addr,
+                              b.makeIntConstant(safe_offset_max));
+                      spv::Id off_lo =
+                          b.createBinOp(
+                              spv::OpSLessThan,
+                              b.makeBoolType(),
+                              addr,
+                              b.makeIntConstant(-safe_offset_max));
+                      spv::Id off_bad =
+                          b.createBinOp(
+                              spv::OpLogicalOr,
+                              b.makeBoolType(),
+                              off_hi,
+                              off_lo);
+                      addr =
+                          b.createTriOp(
+                              spv::OpSelect,
+                              i32,
+                              off_bad,
+                              zero,
+                              addr);
+
+                      LOG_INFO_ONCE(
+                          "[VS-BDA20] signed nearest-buffer LDR address decoding enabled");
+                  } else {
+                      // Original VitaStation path for every unaffected title.
+                      buffer_idx_val =
+                          b.createBinOp(
+                              spv::OpShiftRightLogical,
+                              i32,
+                              addr,
+                              b.makeIntConstant(28));
+                      addr =
+                          b.createBinOp(
+                              spv::OpBitwiseAnd,
+                              i32,
+                              addr,
+                              b.makeIntConstant((1 << 28) - 1));
+                  }
+              } else {
+                  buffer_idx_val = b.makeIntConstant(buffer_idx);
+              }
+
+              spv::Id buffer_address =
+                  utils::create_access_chain(
+                      b,
+                      spv::StorageClassUniform,
+                      params.render_info_id,
+                      { b.makeIntConstant(params.buffer_addresses_id),
+                          buffer_idx_val });
+              buffer_address =
+                  b.createLoad(buffer_address, spv::NoPrecision);
+
+              // [VS-BDA20] Preserve negative offsets when selecting the nearest
+              // buffer base. Other titles keep the original unsigned addition.
+              buffer_address =
+                  features.fix_buffer_addressing20
+                  ? add_uvec2_int(b, buffer_address, addr)
+                  : add_uvec2_uint(b, buffer_address, addr);
+          '''
+
+          content = replace_once(
+              content,
+              old_prefix,
+              new_prefix,
+              'buffer_address_access decoding',
+          )
+          write(path, content)
+
+          # ---------------------------------------------------------------
+          # Enable the correction only for LORD and Gintama.
+          # HOSTMEM18B is deliberately gone: FIX20 tests/corrects the actual
+          # mapped LDR path instead of bypassing it.
+          # ---------------------------------------------------------------
+          path = 'vita3k/renderer/src/vulkan/renderer.cpp'
+          content = read(path)
+          fn_start = content.find('void VKState::late_init(')
+          if fn_start < 0:
+              raise SystemExit('::error::FIX20 late_init start not found')
+          fn_end = content.find('\nvoid VKState::cleanup()', fn_start)
+          if fn_end < 0:
+              raise SystemExit('::error::FIX20 late_init end not found')
+          fn = content[fn_start:fn_end]
+
+          anchor = '    features.enable_memory_mapping = mapping_method != MappingMethod::Disabled;\n'
+          if fn.count(anchor) != 1:
+              raise SystemExit(
+                  f'::error::FIX20 enable_memory_mapping anchor count={fn.count(anchor)}')
+
+          replacement = '''    features.enable_memory_mapping =
+                  mapping_method != MappingMethod::Disabled;
+
+              features.fix_buffer_addressing20 =
+                  game_id == "PCSG00008" || game_id == "PCSG01073";
+              if (features.fix_buffer_addressing20) {
+                  LOG_WARN_ONCE(
+                      "[VS-BDA20] {} using signed nearest-buffer dynamic LDR decoding; mapping_enabled={}",
+                      game_id,
+                      features.enable_memory_mapping);
+              }
+          '''
+          fn = fn.replace(anchor, replacement, 1)
+          content = content[:fn_start] + fn + content[fn_end:]
+          write(path, content)
+
+          # ---------------------------------------------------------------
+          # Force fresh SPIR-V for both affected titles so old .spv files can
+          # never hide the new address decoder during the test.
+          # LORD was already cold; extend that policy to Gintama.
+          # ---------------------------------------------------------------
+          path = 'vita3k/renderer/src/vulkan/pipeline_cache.cpp'
+          content = read(path)
+
+          content = content.replace(
+              'state.app_title_id == "PCSG00008"',
+              '(state.app_title_id == "PCSG00008" || state.app_title_id == "PCSG01073")',
+          )
+          content = content.replace(
+              'state.app_title_id != "PCSG00008"',
+              '(state.app_title_id != "PCSG00008" && state.app_title_id != "PCSG01073")',
+          )
+          write(path, content)
+
+          path = 'vita3k/renderer/src/shaders.cpp'
+          content = read(path)
+          content = content.replace(
+              'renderer.app_title_id == "PCSG00008"',
+              '(renderer.app_title_id == "PCSG00008" || renderer.app_title_id == "PCSG01073")',
+          )
+          write(path, content)
+
+          print('[VS-FIX20] LORD/Gintama use corrected signed nearest-buffer BDA decoding')
+          print('[VS-FIX20] HOSTMEM18B removed; requested mapping method is used again')
+          print('[VS-FIX20] fresh SPIR-V forced for both titles')
+          print('[VS-FIX20] Gintama FIX14 + DrawTime17 + STAGING19 retained')
+          print('[VS-FIX20] LORD HOSTCMD16 + RINGREBIND17R2 retained')
+          PY
+
+      - name: FIX20 BDA and protected-regression gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          def require(path, *tokens):
+              text = Path(path).read_text(encoding='utf-8')
+              for token in tokens:
+                  if token not in text:
+                      raise SystemExit(f'::error::FIX20 gate missing {token!r} in {path}')
+              return text
+
+          def forbid(path, *tokens):
+              text = Path(path).read_text(encoding='utf-8')
+              for token in tokens:
+                  if token in text:
+                      raise SystemExit(f'::error::FIX20 forbidden token {token!r} in {path}')
+              return text
+
+          require(
+              'android/app/build.gradle',
+              'versionCode = 65',
+              'versionName = "0.3.0-alpha4-fix20-lord-gintama-bda-signed-offset"',
+          )
+
+          require(
+              'vita3k/features/include/features/state.h',
+              '[VS-BDA20]',
+              'fix_buffer_addressing20',
+          )
+          require(
+              'vita3k/shader/include/shader/usse_translator_types.h',
+              '[VS-BDA20]',
+              'int buffer_count = 0',
+          )
+          require(
+              'vita3k/shader/src/spirv_recompiler.cpp',
+              'spv_params.buffer_count = uniform_buffer_count',
+          )
+          require(
+              'vita3k/shader/src/usse_utilities.cpp',
+              '[VS-BDA20]',
+              'add_uvec2_int',
+              '1 << 27',
+              'params.buffer_count',
+              'safe_offset_max',
+              'OpSGreaterThan',
+              'OpSLessThan',
+              'OpLogicalOr',
+              'features.fix_buffer_addressing20',
+          )
+
+          renderer = require(
+              'vita3k/renderer/src/vulkan/renderer.cpp',
+              '[VS-BDA20]',
+              'game_id == "PCSG00008" || game_id == "PCSG01073"',
+              'features.enable_memory_mapping',
+          )
+          # HOSTMEM18B must be gone: FIX20 corrects rather than bypasses BDA.
+          forbid(
+              'vita3k/renderer/src/vulkan/renderer.cpp',
+              '[VS-LORD-HOSTMEM18B]',
+              'PCSG00008 forcing host-copy vertex/index/uniform path',
+          )
+
+          require(
+              'vita3k/renderer/src/vulkan/surface_cache.cpp',
+              '[VS-GINTAMA-FEEDBACK-BOUNDARY14]',
+              '[VS-GINTAMA-DRAWTIME17]',
+              '[VS-GINTAMA-STAGING19]',
+          )
+          require(
+              'vita3k/modules/SceGxm/SceGxm.cpp',
+              '[VS-LORD-HOSTCMD16]',
+              '[VS-LORD-RINGREBIND17R2]',
+          )
+
+          # Known-bad Gintama experiments stay dead.
+          forbid(
+              'vita3k/renderer/src/vulkan/surface_cache.cpp',
+              '[VS-GINTAMA-FEEDBACK-BARRIER15]',
+              'gintama_feedback_outside_pass15',
+              'gintama_to_transfer15',
+          )
+          pipeline = Path(
+              'vita3k/renderer/src/vulkan/pipeline_cache.cpp'
+          ).read_text(encoding='utf-8')
+          if '[VS-GINTAMA-OUTGOING16]' in pipeline or 'gintama_outgoing_transfer16' in pipeline:
+              raise SystemExit('::error::FIX20 OUTGOING16 must not return')
+
+          got = subprocess.check_output(
+              ['git', 'hash-object',
+               'vita3k/renderer/src/vulkan/frame_generation.cpp'],
+              text=True,
+          ).strip()
+          wanted = '1e7cc634f3308566b6ea3d972b73c55086f8f781'
+          if got != wanted:
+              raise SystemExit(
+                  f'::error::FIX20 FrameGen drift expected={wanted} actual={got}')
+
+          active_workflow = Path(
+              '.github/workflows/android-build.yml'
+          ).read_text(encoding='utf-8').lower()
+          if 'vitastation-' + 'bootstrap.yml' in active_workflow:
+              raise SystemExit('::error::FIX20 forbidden Bootstrap reference')
+
+          print('[VS-FIX20] BDA/regression gates passed')
+          print('[VS-FIX20] Only PCSG00008 and PCSG01073 enable corrected dynamic LDR decoding')
           PY
 
       - name: Set up Java 17
@@ -6618,13 +6998,13 @@ jobs:
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build signed VitaStation FIX19 LORD HOSTMEM + GINTAMA SAFE STAGING APK
+      - name: Build signed VitaStation FIX20 LORD + GINTAMA SIGNED BDA APK
         shell: bash
         run: |
           set -euo pipefail
           bash ./.ci/build-android.sh artifacts/vitastation-android
 
-      - name: Verify frozen R2 shader is packaged in FIX19 APK
+      - name: Verify frozen R2 shader is packaged in FIX20 APK
         shell: bash
         run: |
           set -euo pipefail
@@ -6669,23 +7049,23 @@ jobs:
           print('[VS-FIX10-R2] FrameGen remained byte-identical')
           PY
 
-      - name: Rename and hash FIX19 LORD HOSTMEM + GINTAMA SAFE STAGING APK
+      - name: Rename and hash FIX20 LORD + GINTAMA SIGNED BDA APK
         shell: bash
         run: |
           set -euo pipefail
           SRC='artifacts/vitastation-android/app.apk'
-          DST="artifacts/vitastation-android/$FIX19_APK_NAME"
+          DST="artifacts/vitastation-android/$FIX20_APK_NAME"
           test -s "$SRC"
           mv "$SRC" "$DST"
-          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX19_APK_NAME.sha256"
+          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX20_APK_NAME.sha256"
           ls -lh "$DST"
 
-      - name: Upload VitaStation FIX19 LORD HOSTMEM + GINTAMA SAFE STAGING APK
+      - name: Upload VitaStation FIX20 LORD + GINTAMA SIGNED BDA APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.3.0-Alpha4-FIX19-Lord-HostMem-Gintama-SafeStaging-Android-Signed
+          name: VitaStation-v0.3.0-Alpha4-FIX20-Lord-Gintama-SignedBDA-Android-Signed
           path: |
-            artifacts/vitastation-android/${{ env.FIX19_APK_NAME }}
-            artifacts/vitastation-android/${{ env.FIX19_APK_NAME }}.sha256
+            artifacts/vitastation-android/${{ env.FIX20_APK_NAME }}
+            artifacts/vitastation-android/${{ env.FIX20_APK_NAME }}.sha256
           if-no-files-found: error
           retention-days: 30

@@ -1,12 +1,13 @@
-# VitaStation Alpha 4 FIX15 GINTAMA BARRIER + LORD COLD PIPELINE
-# FIX12 is the verified structural base. FIX14 boundary remains intact.
-# FIX15 adds exactly one isolated delta per title:
-# - PCSG01073: explicit producer->transfer barrier when same-image feedback resolves with no render pass open.
-# - PCSG00008: skip Vulkan pipeline-cache load only; shader cache stays enabled.
+# VitaStation Alpha 4 FIX16 GINTAMA OUTGOING + LORD HOSTCMD/COLD SPIR-V
+# FIX12 is the verified structural base. FIX14 between-draw boundary remains intact.
+# FIX16 removes the regressive FIX15 per-feedback barrier and adds:
+# - PCSG01073: render-pass outgoing color-write -> transfer-read dependency.
+# - PCSG00008: host-backed immediate GXM commands after duplicate-context recovery,
+#              plus cold Vulkan pipeline/SPIR-V reads so SPIRV12 is really regenerated.
 # Keep FrameGen, kernel sync and Uncharted R2/Visible12 frozen. No driver-name workaround.
-# Upload/replace as .github/workflows/android-build.yml for the controlled FIX15 build.
+# Upload/replace as .github/workflows/android-build.yml for the controlled FIX16 build.
 
-name: VitaStation Android APK - Alpha 4 FIX15 GINTAMA BARRIER + LORD COLD PIPELINE
+name: VitaStation Android APK - Alpha 4 FIX16 GINTAMA OUTGOING + LORD HOSTCMD COLDSPIRV
 
 "on":
   workflow_dispatch:
@@ -18,17 +19,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: vitastation-android-fix15-gintama-barrier-lord-cold-pipeline-${{ github.ref }}
+  group: vitastation-android-fix16-gintama-outgoing-lord-hostcmd-coldspirv-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   VCPKG_ROOT: /usr/local/share/vcpkg
   VITASTATION_SIGNING_CERT_SHA256: fc57542b62221ad0c0550d12b2791e4e40794e980c9f26a86d83250d67ed5d30
-  FIX15_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX15-Gintama-Barrier-Lord-Cold-Pipeline-Signed.apk
+  FIX16_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX16-Gintama-Outgoing-Lord-HostCmd-ColdSPIRV-Signed.apk
 
 jobs:
   android-build:
-    name: Build VitaStation v0.3.0 Alpha 4 FIX15 GINTAMA BARRIER + LORD COLD PIPELINE
+    name: Build VitaStation v0.3.0 Alpha 4 FIX16 GINTAMA OUTGOING + LORD HOSTCMD COLDSPIRV
     runs-on: ubuntu-latest
 
     steps:
@@ -5282,7 +5283,7 @@ jobs:
           print('[VS-FIX14] title-scoped between-draw feedback boundary verified')
           PY
 
-      - name: Apply FIX15 Gintama out-of-pass barrier and LORD cold pipeline cache
+      - name: Apply FIX16 Gintama outgoing dependency and LORD host-command cold-SPIRV path
         shell: bash
         run: |
           set -euo pipefail
@@ -5298,149 +5299,270 @@ jobs:
           def replace_once(content, old, new, label):
               count = content.count(old)
               if count != 1:
-                  raise SystemExit(f'::error::FIX15 {label}: expected one anchor, found {count}')
+                  raise SystemExit(f'::error::FIX16 {label}: expected one anchor, found {count}')
               return content.replace(old, new, 1)
 
+          # Versioning. This step runs after FIX14-R2, so the source is still vCode 57.
           path = 'android/app/build.gradle'
           content = read(path)
-          content = replace_once(content, 'versionCode = 57', 'versionCode = 58', 'versionCode')
+          content = replace_once(content, 'versionCode = 57', 'versionCode = 59', 'versionCode')
           content = replace_once(
               content,
               'versionName = "0.3.0-alpha4-fix14-gintama-feedback-boundary"',
-              'versionName = "0.3.0-alpha4-fix15-gintama-barrier-lord-cold-pipeline"',
+              'versionName = "0.3.0-alpha4-fix16-gintama-outgoing-lord-hostcmd-coldspirv"',
               'versionName',
           )
           write(path, content)
 
-          path = 'vita3k/renderer/src/vulkan/surface_cache.cpp'
-          content = read(path)
-          state_anchor = '''        const bool gintama_feedback_boundary14 =
-                      state.app_title_id == "PCSG01073"
-                      && is_same_image
-                      && late_resolve_in_renderpass; // [VS-GINTAMA-FEEDBACK-BOUNDARY14]
-                  vk::CommandBuffer cmd_buffer = needs_late_resolve
-          '''
-          state_new = '''        const bool gintama_feedback_boundary14 =
-                      state.app_title_id == "PCSG01073"
-                      && is_same_image
-                      && late_resolve_in_renderpass; // [VS-GINTAMA-FEEDBACK-BOUNDARY14]
-                  const bool gintama_feedback_outside_pass15 =
-                      state.app_title_id == "PCSG01073"
-                      && is_same_image
-                      && needs_late_resolve
-                      && !late_resolve_in_renderpass; // [VS-GINTAMA-FEEDBACK-BARRIER15]
-                  vk::CommandBuffer cmd_buffer = needs_late_resolve
-          '''
-          content = replace_once(content, state_anchor, state_new, 'Gintama out-of-pass state')
-
-          barrier_anchor = '''            if (state.features.support_shader_interlock) {
-                          context->current_shader_interlock_pass = state.pipeline_cache.retrieve_render_pass(
-                              context->current_color_format, true, true, !context->record.color_surface.data, true);
-                      }
-                  }
-
-                  if (casted == nullptr) {
-          '''
-          barrier_new = '''            if (state.features.support_shader_interlock) {
-                          context->current_shader_interlock_pass = state.pipeline_cache.retrieve_render_pass(
-                              context->current_color_format, true, true, !context->record.color_surface.data, true);
-                      }
-                  }
-
-                  if (gintama_feedback_outside_pass15) {
-                      vk::ImageMemoryBarrier gintama_to_transfer15{
-                          .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eShaderWrite,
-                          .dstAccessMask = vk::AccessFlagBits::eTransferRead,
-                          .oldLayout = vk::ImageLayout::eGeneral,
-                          .newLayout = vk::ImageLayout::eGeneral,
-                          .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                          .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                          .image = info.texture.image,
-                          .subresourceRange = vkutil::color_subresource_range
-                      };
-                      cmd_buffer.pipelineBarrier(
-                          vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eFragmentShader,
-                          vk::PipelineStageFlagBits::eTransfer,
-                          vk::DependencyFlags{}, {}, {}, gintama_to_transfer15);
-
-                      static thread_local uint64_t gintama_feedback_barrier_log15 = 0;
-                      if (((++gintama_feedback_barrier_log15 & 0xFFu) == 1u)) {
-                          LOG_INFO(
-                              "[VS-GINTAMA-FEEDBACK-BARRIER15] out-of-pass producer->transfer barrier surface={} scene={} draw={} generation={}",
-                              log_hex(ite->first), context->scene_timestamp, context->draw_timestamp, source_generation);
-                      }
-                  }
-
-                  if (casted == nullptr) {
-          '''
-          content = replace_once(content, barrier_anchor, barrier_new, 'Gintama out-of-pass barrier')
-          write(path, content)
-
+          # ---------------------------------------------------------------
+          # GINTAMA PCSG01073
+          # Remove FIX15's per-feedback barrier by simply not applying it.
+          # FIX14 remains. Add one subpass->external dependency to Gintama's
+          # normal color render passes so a later transfer read is visible
+          # without issuing a huge barrier hundreds of times at texture lookup.
+          # ---------------------------------------------------------------
           path = 'vita3k/renderer/src/vulkan/pipeline_cache.cpp'
           content = read(path)
-          cache_anchor = '''void PipelineCache::read_pipeline_cache() {
-              const std::string pipeline_cache_name = fmt::format("pipeline-cache-vk{}.dat", shader::CURRENT_VERSION);
-          '''
-          cache_new = '''void PipelineCache::read_pipeline_cache() {
-              if (state.app_title_id == "PCSG00008") {
-                  LOG_INFO_ONCE("[VS-LORD-PIPELINE-CACHE15] skipping Vulkan pipeline-cache load for PCSG00008; shader cache remains enabled");
-                  return;
-              }
 
-              const std::string pipeline_cache_name = fmt::format("pipeline-cache-vk{}.dat", shader::CURRENT_VERSION);
-          '''
-          content = replace_once(content, cache_anchor, cache_new, 'LORD pipeline cache bypass')
+          content = replace_once(
+              content,
+              '    std::array<vk::SubpassDependency, 4> dependencies;\n',
+              '    std::array<vk::SubpassDependency, 5> dependencies{};\n'
+              '    const bool gintama_outgoing_transfer16 =\n'
+              '        state.app_title_id == "PCSG01073" && !no_color; // [VS-GINTAMA-OUTGOING16]\n',
+              'Gintama dependency array',
+          )
+
+          outgoing = (
+              '    // [VS-GINTAMA-OUTGOING16] Export attachment writes at render-pass end.\n'
+              '    // This replaces the repeated per-feedback vkCmdPipelineBarrier from FIX15.\n'
+              '    dependencies[4] = {\n'
+              '        .srcSubpass = 0,\n'
+              '        .dstSubpass = VK_SUBPASS_EXTERNAL,\n'
+              '        .srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput,\n'
+              '        .dstStageMask = vk::PipelineStageFlagBits::eTransfer,\n'
+              '        .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite,\n'
+              '        .dstAccessMask = vk::AccessFlagBits::eTransferRead\n'
+              '    };\n\n'
+          )
+          content = replace_once(
+              content,
+              '    vk::RenderPassCreateInfo pass_info{};\n',
+              outgoing + '    vk::RenderPassCreateInfo pass_info{};\n',
+              'Gintama outgoing dependency',
+          )
+
+          content = replace_once(
+              content,
+              '    pass_info.setDependencies(dependencies);\n',
+              '    pass_info.setDependencies(dependencies);\n'
+              '    if (!gintama_outgoing_transfer16)\n'
+              '        pass_info.setDependencyCount(4);\n',
+              'Gintama dependency count',
+          )
+
+          content = replace_once(
+              content,
+              '    render_passes_map[format] = state.device.createRenderPass(pass_info);\n',
+              '    render_passes_map[format] = state.device.createRenderPass(pass_info);\n'
+              '    if (gintama_outgoing_transfer16)\n'
+              '        LOG_INFO_ONCE("[VS-GINTAMA-OUTGOING16] PCSG01073 color writes exported to later transfer reads; deps={}", pass_info.dependencyCount);\n',
+              'Gintama outgoing marker',
+          )
+
+          # LORD: cold Vulkan pipeline blob.
+          content = replace_once(
+              content,
+              'void PipelineCache::read_pipeline_cache() {\n',
+              'void PipelineCache::read_pipeline_cache() {\n'
+              '    if (state.app_title_id == "PCSG00008") {\n'
+              '        LOG_INFO_ONCE("[VS-LORD-PIPELINE-CACHE16] skipping Vulkan pipeline-cache load for PCSG00008");\n'
+              '        return;\n'
+              '    }\n\n',
+              'LORD pipeline cache bypass',
+          )
+
+          # LORD: precompile_shader() can directly load vk<version>-<hash>.spv.
+          # Bypass that persisted module read for this title.
+          content = replace_once(
+              content,
+              'vk::ShaderModule PipelineCache::precompile_shader(const Sha256Hash &hash, bool search_first) {\n',
+              'vk::ShaderModule PipelineCache::precompile_shader(const Sha256Hash &hash, bool search_first) {\n'
+              '    if (state.app_title_id == "PCSG00008") {\n'
+              '        LOG_INFO_ONCE("[VS-LORD-COLDSPIRV16] bypassing persisted SPIR-V module reads for PCSG00008");\n'
+              '        return nullptr;\n'
+              '    }\n\n',
+              'LORD SPIR-V precompile bypass',
+          )
+
+          # Even after precompile bypass, load_spirv_shader(..., true) can read
+          # the same per-hash .spv. Force regeneration through SPIRV12.
+          content = replace_once(
+              content,
+              '        state.shaders_path, state.shaders_log_path, shader_version, true);\n',
+              '        state.shaders_path, state.shaders_log_path, shader_version,\n'
+              '        state.app_title_id != "PCSG00008"); // [VS-LORD-COLDSPIRV16]\n',
+              'LORD load_spirv cold read',
+          )
           write(path, content)
 
-          print('[VS-FIX15] PCSG01073 out-of-pass same-image resolve now gets an explicit producer->transfer barrier')
-          print('[VS-FIX15] PCSG00008 skips Vulkan pipeline-cache loading only; shader cache/precompile remain enabled')
-          print('[VS-FIX15] FIX14 boundary retained; FrameGen, kernel sync and Uncharted untouched')
+          # LORD: also suppress the 1/N boot shader precompile queue.
+          path = 'vita3k/renderer/src/shaders.cpp'
+          content = read(path)
+          content = replace_once(
+              content,
+              'bool get_shaders_cache_hashs(State &renderer) {\n',
+              'bool get_shaders_cache_hashs(State &renderer) {\n'
+              '    if (renderer.app_title_id == "PCSG00008") {\n'
+              '        renderer.shaders_cache_hashs.clear();\n'
+              '        LOG_INFO_ONCE("[VS-LORD-SHADER-CACHE16] skipping shader hash/precompile cache for PCSG00008");\n'
+              '        return false;\n'
+              '    }\n\n',
+              'LORD shader hash cache bypass',
+          )
+          write(path, content)
+
+          # ---------------------------------------------------------------
+          # LORD immediate renderer command lifetime.
+          # The failed FIX15 trace ended with impossible opcodes 112/248/48
+          # immediately after guest unmaps. Immediate commands normally live
+          # inside the guest VDM buffer. After REUSE7 fires, move future command
+          # nodes to host memory so guest reuse/unmap cannot mutate an in-flight
+          # renderer linked list.
+          # ---------------------------------------------------------------
+          path = 'vita3k/modules/SceGxm/SceGxm.cpp'
+          content = read(path)
+
+          content = replace_once(
+              content,
+              '    uint32_t command_allocator_size = 0;\n',
+              '    uint32_t command_allocator_size = 0;\n'
+              '    bool force_host_immediate_commands = false; // [VS-LORD-HOSTCMD16]\n',
+              'LORD host command state',
+          )
+
+          content = replace_once(
+              content,
+              '            if (command_allocator_size > 0 && command_next_free_pos <= command_last_free_pos.load(std::memory_order_acquire)) {\n',
+              '            if (force_host_immediate_commands) {\n'
+              '                new_command = new renderer::Command;\n'
+              '                new_command->flags |= renderer::Command::FLAG_FROM_HOST;\n'
+              '            } else if (command_allocator_size > 0 && command_next_free_pos <= command_last_free_pos.load(std::memory_order_acquire)) {\n',
+              'LORD host command allocator',
+          )
+
+          content = replace_once(
+              content,
+              '    ctx->state.type = SCE_GXM_CONTEXT_TYPE_IMMEDIATE;\n',
+              '    ctx->state.type = SCE_GXM_CONTEXT_TYPE_IMMEDIATE;\n'
+              '    ctx->force_host_immediate_commands = emuenv.io.app_path == "PCSG00008"; // [VS-LORD-HOSTCMD16]\n'
+              '    if (ctx->force_host_immediate_commands)\n'
+              '        LOG_WARN_ONCE("[VS-LORD-HOSTCMD16] PCSG00008 immediate renderer commands use host backing from context creation");\n',
+              'LORD initial host command enable',
+          )
+
+          content = replace_once(
+              content,
+              '                *context = Ptr<SceGxmContext>(emuenv.gxm.immediate_context);\n',
+              '                existing->force_host_immediate_commands = true; // [VS-LORD-HOSTCMD16]\n'
+              '                *context = Ptr<SceGxmContext>(emuenv.gxm.immediate_context);\n',
+              'LORD duplicate context host command enable',
+          )
+          write(path, content)
+
+          print('[VS-FIX16] PCSG01073 FIX15 barrier storm removed; render-pass outgoing dependency enabled')
+          print('[VS-FIX16] PCSG00008 pipeline cache + shader precompile + persisted SPIR-V reads disabled')
+          print('[VS-FIX16] PCSG00008 immediate commands switch to host backing after REUSE7')
+          print('[VS-FIX16] FIX14 boundary retained; FrameGen, kernel sync and Uncharted untouched')
           PY
 
-      - name: FIX15 Gintama and LORD regression gates
+      - name: FIX16 Gintama and LORD regression gates
         shell: bash
         run: |
           set -euo pipefail
           python3 <<'PY'
           from pathlib import Path
+          import subprocess
 
           def require(path, *tokens):
-              text = Path(path).read_text(encoding='utf-8')
+              content = Path(path).read_text(encoding='utf-8')
               for token in tokens:
-                  if token not in text:
-                      raise SystemExit(f'::error::FIX15 gate missing {token!r} in {path}')
-              return text
+                  if token not in content:
+                      raise SystemExit(f'::error::FIX16 gate missing {token!r} in {path}')
+              return content
+
+          def forbid(path, *tokens):
+              content = Path(path).read_text(encoding='utf-8')
+              for token in tokens:
+                  if token in content:
+                      raise SystemExit(f'::error::FIX16 forbidden token {token!r} remains in {path}')
+              return content
 
           require(
               'android/app/build.gradle',
-              'versionCode = 58',
-              'versionName = "0.3.0-alpha4-fix15-gintama-barrier-lord-cold-pipeline"',
+              'versionCode = 59',
+              'versionName = "0.3.0-alpha4-fix16-gintama-outgoing-lord-hostcmd-coldspirv"',
           )
+
           surface = require(
               'vita3k/renderer/src/vulkan/surface_cache.cpp',
               '[VS-GINTAMA-FEEDBACK-BOUNDARY14]',
+              'gintama_feedback_boundary14',
+              'if (!gintama_feedback_boundary14)',
+          )
+          forbid(
+              'vita3k/renderer/src/vulkan/surface_cache.cpp',
               '[VS-GINTAMA-FEEDBACK-BARRIER15]',
               'gintama_feedback_outside_pass15',
               'gintama_to_transfer15',
-              'vk::AccessFlagBits::eTransferRead',
           )
-          if surface.count('[VS-GINTAMA-FEEDBACK-BARRIER15]') != 2:
-              raise SystemExit('::error::FIX15 expected declaration marker + runtime log marker for Gintama barrier')
 
           pipeline = require(
               'vita3k/renderer/src/vulkan/pipeline_cache.cpp',
-              '[VS-LORD-PIPELINE-CACHE15]',
-              'state.app_title_id == "PCSG00008"',
-              'shader cache remains enabled',
+              '[VS-GINTAMA-OUTGOING16]',
+              'gintama_outgoing_transfer16',
+              '.dstSubpass = VK_SUBPASS_EXTERNAL',
+              '.dstStageMask = vk::PipelineStageFlagBits::eTransfer',
+              '.dstAccessMask = vk::AccessFlagBits::eTransferRead',
+              '[VS-LORD-PIPELINE-CACHE16]',
+              '[VS-LORD-COLDSPIRV16]',
+              'state.app_title_id != "PCSG00008"',
           )
-          func = pipeline[pipeline.index('void PipelineCache::read_pipeline_cache() {'):]
-          func = func[:func.index('void PipelineCache::save_pipeline_cache()')]
-          if func.index('[VS-LORD-PIPELINE-CACHE15]') > func.index('Found pipeline cache, reading...'):
-              raise SystemExit('::error::FIX15 LORD bypass must execute before cache file load')
 
-          print('[VS-FIX15] regression gates passed')
-          print('[VS-FIX15] Gintama barrier is PCSG01073-scoped and out-of-pass only')
-          print('[VS-FIX15] LORD bypass is PCSG00008-scoped; shader cache remains enabled')
+          require(
+              'vita3k/renderer/src/shaders.cpp',
+              '[VS-LORD-SHADER-CACHE16]',
+              'renderer.app_title_id == "PCSG00008"',
+          )
+
+          gxm = require(
+              'vita3k/modules/SceGxm/SceGxm.cpp',
+              '[VS-LORD-HOSTCMD16]',
+              'force_host_immediate_commands',
+              'ctx->force_host_immediate_commands = emuenv.io.app_path == "PCSG00008"',
+              'renderer::Command::FLAG_FROM_HOST',
+              '[VS-GXM-CONTEXT-REUSE7]',
+          )
+          reuse = gxm[gxm.index('if (emuenv.io.app_path == "PCSG00008")'):]
+          reuse = reuse[:reuse.index('return RET_ERROR(SCE_GXM_ERROR_ALREADY_INITIALIZED);')]
+          if 'existing->force_host_immediate_commands = true' not in reuse:
+              raise SystemExit('::error::FIX16 LORD host-command switch escaped the PCSG00008 REUSE7 branch')
+
+          got = subprocess.check_output(
+              ['git', 'hash-object', 'vita3k/renderer/src/vulkan/frame_generation.cpp'],
+              text=True,
+          ).strip()
+          wanted = '1e7cc634f3308566b6ea3d972b73c55086f8f781'
+          if got != wanted:
+              raise SystemExit(f'::error::FIX16 FrameGen drift expected={wanted} actual={got}')
+
+          active_workflow = Path('.github/workflows/android-build.yml').read_text(encoding='utf-8').lower()
+          if 'vitastation-' + 'bootstrap.yml' in active_workflow:
+              raise SystemExit('::error::FIX16 forbidden Bootstrap reference')
+
+          print('[VS-FIX16] regression gates passed')
+          print('[VS-FIX16] Gintama: FIX14 + outgoing render-pass transfer dependency; no FIX15 barrier storm')
+          print('[VS-FIX16] LORD: cold pipeline/SPIR-V path + title-scoped host-backed immediate commands')
           PY
 
       - name: Set up Java 17
@@ -5499,13 +5621,13 @@ jobs:
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build signed VitaStation FIX15 GINTAMA BARRIER + LORD COLD PIPELINE APK
+      - name: Build signed VitaStation FIX16 GINTAMA OUTGOING + LORD HOSTCMD COLDSPIRV APK
         shell: bash
         run: |
           set -euo pipefail
           bash ./.ci/build-android.sh artifacts/vitastation-android
 
-      - name: Verify frozen R2 shader is packaged in FIX15 APK
+      - name: Verify frozen R2 shader is packaged in FIX16 APK
         shell: bash
         run: |
           set -euo pipefail
@@ -5550,23 +5672,23 @@ jobs:
           print('[VS-FIX10-R2] FrameGen remained byte-identical')
           PY
 
-      - name: Rename and hash FIX15 GINTAMA BARRIER + LORD COLD PIPELINE APK
+      - name: Rename and hash FIX16 GINTAMA OUTGOING + LORD HOSTCMD COLDSPIRV APK
         shell: bash
         run: |
           set -euo pipefail
           SRC='artifacts/vitastation-android/app.apk'
-          DST="artifacts/vitastation-android/$FIX15_APK_NAME"
+          DST="artifacts/vitastation-android/$FIX16_APK_NAME"
           test -s "$SRC"
           mv "$SRC" "$DST"
-          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX15_APK_NAME.sha256"
+          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX16_APK_NAME.sha256"
           ls -lh "$DST"
 
-      - name: Upload VitaStation FIX15 GINTAMA BARRIER + LORD COLD PIPELINE APK
+      - name: Upload VitaStation FIX16 GINTAMA OUTGOING + LORD HOSTCMD COLDSPIRV APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.3.0-Alpha4-FIX15-Gintama-Barrier-Lord-Cold-Pipeline-Android-Signed
+          name: VitaStation-v0.3.0-Alpha4-FIX16-Gintama-Outgoing-Lord-HostCmd-ColdSPIRV-Android-Signed
           path: |
-            artifacts/vitastation-android/${{ env.FIX15_APK_NAME }}
-            artifacts/vitastation-android/${{ env.FIX15_APK_NAME }}.sha256
+            artifacts/vitastation-android/${{ env.FIX16_APK_NAME }}
+            artifacts/vitastation-android/${{ env.FIX16_APK_NAME }}.sha256
           if-no-files-found: error
           retention-days: 30

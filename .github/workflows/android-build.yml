@@ -1,4 +1,4 @@
-# VitaStation Alpha 4 FIX17 GINTAMA DRAWTIME + LORD16
+# VitaStation Alpha 4 FIX17-R2 GINTAMA DRAWTIME + LORD RING REBIND
 # FIX14 remains the Gintama baseline. FIX16's OUTGOING16 dependency is removed.
 # PCSG01073 gets a title-scoped, deduplicated draw-time same-image cast only for
 # the out-of-pass late-resolve branch that escaped FIX14.
@@ -6,7 +6,7 @@
 # FrameGen, kernel sync and Uncharted remain frozen. No driver-name workaround.
 # Replace .github/workflows/android-build.yml with this workflow.
 
-name: VitaStation Android APK - Alpha 4 FIX17 GINTAMA DRAWTIME + LORD16
+name: VitaStation Android APK - Alpha 4 FIX17-R2 GINTAMA DRAWTIME + LORD RING REBIND
 
 "on":
   workflow_dispatch:
@@ -18,17 +18,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: vitastation-android-fix17-gintama-drawtime-lord16-${{ github.ref }}
+  group: vitastation-android-fix17r2-gintama-drawtime-lord-ringrebind-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   VCPKG_ROOT: /usr/local/share/vcpkg
   VITASTATION_SIGNING_CERT_SHA256: fc57542b62221ad0c0550d12b2791e4e40794e980c9f26a86d83250d67ed5d30
-  FIX17_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX17-Gintama-DrawTime-Lord16-Signed.apk
+  FIX17R2_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX17-R2-Gintama-DrawTime-Lord-RingRebind-Signed.apk
 
 jobs:
   android-build:
-    name: Build VitaStation v0.3.0 Alpha 4 FIX17 GINTAMA DRAWTIME + LORD16
+    name: Build VitaStation v0.3.0 Alpha 4 FIX17-R2 GINTAMA DRAWTIME + LORD RING REBIND
     runs-on: ubuntu-latest
 
     steps:
@@ -5304,11 +5304,11 @@ jobs:
           # Versioning: this step runs after the FIX14-R2 baseline.
           path = 'android/app/build.gradle'
           content = read(path)
-          content = replace_once(content, 'versionCode = 57', 'versionCode = 60', 'versionCode')
+          content = replace_once(content, 'versionCode = 57', 'versionCode = 61', 'versionCode')
           content = replace_once(
               content,
               'versionName = "0.3.0-alpha4-fix14-gintama-feedback-boundary"',
-              'versionName = "0.3.0-alpha4-fix17-gintama-drawtime-lord16"',
+              'versionName = "0.3.0-alpha4-fix17r2-gintama-drawtime-lord-ringrebind"',
               'versionName',
           )
           write(path, content)
@@ -5745,16 +5745,43 @@ jobs:
           content = replace_once(
               content,
               '                *context = Ptr<SceGxmContext>(emuenv.gxm.immediate_context);\n',
+              '                const uint32_t old_vert_ring17r2 = existing->state.vertex_ring_buffer.address();\n'
+              '                const uint32_t old_frag_ring17r2 = existing->state.fragment_ring_buffer.address();\n'
+              '                const uint32_t old_vert_size17r2 = existing->state.vertex_ring_buffer_size;\n'
+              '                const uint32_t old_frag_size17r2 = existing->state.fragment_ring_buffer_size;\n'
+              '\n'
+              '                // [VS-LORD-RINGREBIND17R2] REUSE7 previously returned the old immediate\n'
+              '                // context without applying the second sceGxmCreateContext ring buffers.\n'
+              '                // Default uniforms (including bone matrices) are reserved directly from\n'
+              '                // these rings, so stale bases can explode skinned meshes and UI quads.\n'
+              '                existing->state.vertex_ring_buffer = params->vertexRingBufferMem;\n'
+              '                existing->state.fragment_ring_buffer = params->fragmentRingBufferMem;\n'
+              '                existing->state.vertex_ring_buffer_size = params->vertexRingBufferMemSize;\n'
+              '                existing->state.fragment_ring_buffer_size = params->fragmentRingBufferMemSize;\n'
+              '                existing->state.vertex_ring_buffer_used = 0;\n'
+              '                existing->state.fragment_ring_buffer_used = 0;\n'
+              '                existing->was_vert_default_uniform_reserved = false;\n'
+              '                existing->was_frag_default_uniform_reserved = false;\n'
+              '                existing->state.vdm_buffer = params->vdmRingBufferMem;\n'
+              '                existing->state.vdm_buffer_size = params->vdmRingBufferMemSize;\n'
+              '\n'
               '                existing->force_host_immediate_commands = true; // [VS-LORD-HOSTCMD16]\n'
+              '                LOG_WARN(\n'
+              '                    "[VS-LORD-RINGREBIND17R2] vertex {}({}) -> {}({}), fragment {}({}) -> {}({}), vdm={}({})",\n'
+              '                    log_hex(old_vert_ring17r2), old_vert_size17r2,\n'
+              '                    log_hex(existing->state.vertex_ring_buffer.address()), existing->state.vertex_ring_buffer_size,\n'
+              '                    log_hex(old_frag_ring17r2), old_frag_size17r2,\n'
+              '                    log_hex(existing->state.fragment_ring_buffer.address()), existing->state.fragment_ring_buffer_size,\n'
+              '                    log_hex(existing->state.vdm_buffer.address()), existing->state.vdm_buffer_size);\n'
               '                *context = Ptr<SceGxmContext>(emuenv.gxm.immediate_context);\n',
-              'LORD duplicate context host command enable',
+              'LORD duplicate context ring rebind + host command enable',
           )
           write(path, content)
 
-          print('[VS-FIX17] Gintama OUTGOING16/BARRIER15 absent; out-of-pass same-image copies defer to actual draw use')
-          print('[VS-FIX17] FIX14 in-pass boundary retained unchanged')
-          print('[VS-FIX17] LORD16 host-command + cold SPIR-V path preserved unchanged')
-          print('[VS-FIX17] FrameGen, kernel sync and Uncharted untouched')
+          print('[VS-FIX17-R2] Gintama draw-time path unchanged from FIX17')
+          print('[VS-FIX17-R2] FIX14 in-pass boundary retained unchanged')
+          print('[VS-FIX17-R2] LORD16 preserved + duplicate-context uniform rings rebound')
+          print('[VS-FIX17-R2] FrameGen, kernel sync and Uncharted untouched')
           PY
 
       - name: FIX17 Gintama draw-time and LORD16 regression gates
@@ -5781,8 +5808,8 @@ jobs:
 
           require(
               'android/app/build.gradle',
-              'versionCode = 60',
-              'versionName = "0.3.0-alpha4-fix17-gintama-drawtime-lord16"',
+              'versionCode = 61',
+              'versionName = "0.3.0-alpha4-fix17r2-gintama-drawtime-lord-ringrebind"',
           )
 
           require(
@@ -5835,6 +5862,11 @@ jobs:
           require(
               'vita3k/modules/SceGxm/SceGxm.cpp',
               '[VS-LORD-HOSTCMD16]',
+              '[VS-LORD-RINGREBIND17R2]',
+              'existing->state.vertex_ring_buffer = params->vertexRingBufferMem',
+              'existing->state.fragment_ring_buffer = params->fragmentRingBufferMem',
+              'existing->state.vertex_ring_buffer_used = 0',
+              'existing->state.fragment_ring_buffer_used = 0',
               'ctx->force_host_immediate_commands = emuenv.io.app_path == "PCSG00008"',
               'renderer::Command::FLAG_FROM_HOST',
               '[VS-GXM-CONTEXT-REUSE7]',
@@ -5852,9 +5884,9 @@ jobs:
           if 'vitastation-' + 'bootstrap.yml' in active_workflow:
               raise SystemExit('::error::FIX17 forbidden Bootstrap reference')
 
-          print('[VS-FIX17] regression gates passed')
-          print('[VS-FIX17] Gintama: FIX14 + deduplicated draw-time out-of-pass snapshot')
-          print('[VS-FIX17] LORD: FIX16 preserved')
+          print('[VS-FIX17-R2] regression gates passed')
+          print('[VS-FIX17-R2] Gintama: FIX17 draw-time path retained')
+          print('[VS-FIX17-R2] LORD: FIX16 + duplicate-create vertex/fragment ring rebind')
           PY
 
       - name: Set up Java 17
@@ -5913,13 +5945,13 @@ jobs:
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build signed VitaStation FIX17 GINTAMA DRAWTIME + LORD16 APK
+      - name: Build signed VitaStation FIX17-R2 GINTAMA DRAWTIME + LORD RING REBIND APK
         shell: bash
         run: |
           set -euo pipefail
           bash ./.ci/build-android.sh artifacts/vitastation-android
 
-      - name: Verify frozen R2 shader is packaged in FIX17 APK
+      - name: Verify frozen R2 shader is packaged in FIX17-R2 APK
         shell: bash
         run: |
           set -euo pipefail
@@ -5964,23 +5996,23 @@ jobs:
           print('[VS-FIX10-R2] FrameGen remained byte-identical')
           PY
 
-      - name: Rename and hash FIX17 GINTAMA DRAWTIME + LORD16 APK
+      - name: Rename and hash FIX17-R2 GINTAMA DRAWTIME + LORD RING REBIND APK
         shell: bash
         run: |
           set -euo pipefail
           SRC='artifacts/vitastation-android/app.apk'
-          DST="artifacts/vitastation-android/$FIX17_APK_NAME"
+          DST="artifacts/vitastation-android/$FIX17R2_APK_NAME"
           test -s "$SRC"
           mv "$SRC" "$DST"
-          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX17_APK_NAME.sha256"
+          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX17R2_APK_NAME.sha256"
           ls -lh "$DST"
 
-      - name: Upload VitaStation FIX17 GINTAMA DRAWTIME + LORD16 APK
+      - name: Upload VitaStation FIX17-R2 GINTAMA DRAWTIME + LORD RING REBIND APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.3.0-Alpha4-FIX17-Gintama-DrawTime-Lord16-Android-Signed
+          name: VitaStation-v0.3.0-Alpha4-FIX17-R2-Gintama-DrawTime-Lord-RingRebind-Android-Signed
           path: |
-            artifacts/vitastation-android/${{ env.FIX17_APK_NAME }}
-            artifacts/vitastation-android/${{ env.FIX17_APK_NAME }}.sha256
+            artifacts/vitastation-android/${{ env.FIX17R2_APK_NAME }}
+            artifacts/vitastation-android/${{ env.FIX17R2_APK_NAME }}.sha256
           if-no-files-found: error
           retention-days: 30

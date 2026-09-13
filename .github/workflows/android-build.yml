@@ -6,7 +6,7 @@
 # FrameGen, kernel sync and Uncharted remain frozen. No driver-name workaround.
 # Replace .github/workflows/android-build.yml with this workflow.
 
-name: VitaStation Android APK - Alpha 4 FIX19 LORD HOSTMEM + GINTAMA SAFE STAGING
+name: VitaStation Android APK - Alpha 4 FIX19-R2 LORD HOSTMEM + GINTAMA SAFE STAGING
 
 "on":
   workflow_dispatch:
@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: vitastation-android-fix19-lord-hostmem-gintama-safe-staging-${{ github.ref }}
+  group: vitastation-android-fix19-r2-lord-hostmem-gintama-safe-staging-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -6181,7 +6181,7 @@ jobs:
           print('[VS-FIX18-A-R3] regression gates passed')
           PY
 
-      - name: Apply FIX18-B LORD host-copy memory fallback
+      - name: Apply FIX18-B-R2 LORD host-copy memory fallback
         shell: bash
         run: |
           set -euo pipefail
@@ -6197,9 +6197,10 @@ jobs:
           def replace_once(content, old, new, label):
               count = content.count(old)
               if count != 1:
-                  raise SystemExit(f'::error::FIX18-B {label}: expected one anchor, found {count}')
+                  raise SystemExit(f'::error::FIX18-B-R2 {label}: expected one anchor, found {count}')
               return content.replace(old, new, 1)
 
+          # Identity after FIX18-A-R3.
           path = 'android/app/build.gradle'
           content = read(path)
           content = replace_once(content, 'versionCode = 62', 'versionCode = 63', 'versionCode')
@@ -6211,40 +6212,47 @@ jobs:
           )
           write(path, content)
 
+          # Patch only inside VKState::late_init. The previous workflow matched a
+          # whitespace-sensitive multi-line block; R2 uses the single semantic line
+          # after the requested mapping method has already been selected.
           path = 'vita3k/renderer/src/vulkan/renderer.cpp'
           content = read(path)
 
-          old = '''    if ((1 << static_cast<int>(request_mapping)) & supported_mapping_methods_mask)
-              // we support the requested mapping method
-              mapping_method = request_mapping;
+          fn_start = content.find('void VKState::late_init(')
+          if fn_start < 0:
+              raise SystemExit('::error::FIX18-B-R2 VKState::late_init start not found')
+          fn_end = content.find('\nvoid VKState::cleanup()', fn_start)
+          if fn_end < 0:
+              raise SystemExit('::error::FIX18-B-R2 VKState::late_init end not found')
 
-              features.enable_memory_mapping = mapping_method != MappingMethod::Disabled;
-          '''
-          new = '''    if ((1 << static_cast<int>(request_mapping)) & supported_mapping_methods_mask)
-              // we support the requested mapping method
-              mapping_method = request_mapping;
+          fn = content[fn_start:fn_end]
+          anchor = '    features.enable_memory_mapping = mapping_method != MappingMethod::Disabled;\n'
+          if fn.count(anchor) != 1:
+              raise SystemExit(
+                  f'::error::FIX18-B-R2 enable_memory_mapping anchor count={fn.count(anchor)}')
 
-              // [VS-LORD-HOSTMEM18B]
-              // Diagnostic/fallback path: PCSG00008 showed skinned geometry
-              // exploding while mapped buffer device addresses were active.
-              // Force the existing non-mapped path so vertex/index/uniform data
-              // is copied through the renderer host ring buffers instead.
+          replacement = '''    // [VS-LORD-HOSTMEM18B]
+              // PCSG00008: force the existing non-mapped renderer path so
+              // vertex/index/uniform data is copied through host ring buffers
+              // instead of consuming mapped GPU addresses directly.
               if (game_id == "PCSG00008") {
                   mapping_method = MappingMethod::Disabled;
                   LOG_WARN_ONCE(
                       "[VS-LORD-HOSTMEM18B] PCSG00008 forcing host-copy vertex/index/uniform path");
               }
 
-              features.enable_memory_mapping = mapping_method != MappingMethod::Disabled;
+              features.enable_memory_mapping =
+                  mapping_method != MappingMethod::Disabled;
           '''
-          content = replace_once(content, old, new, 'LORD mapping fallback')
+          fn = fn.replace(anchor, replacement, 1)
+          content = content[:fn_start] + fn + content[fn_end:]
           write(path, content)
 
-          print('[VS-FIX18-B] PCSG00008 memory mapping disabled; host-copy renderer path forced')
-          print('[VS-FIX18-B] FIX18-A precomputed semantics remain active')
+          print('[VS-FIX18-B-R2] PCSG00008 host-copy path applied inside VKState::late_init')
+          print('[VS-FIX18-B-R2] FIX18-A-R3 precomputed/texture behavior retained')
           PY
 
-      - name: FIX18-B-R3 LORD host-memory regression gates
+      - name: FIX18-B-R2 LORD host-memory regression gates
         shell: bash
         run: |
           set -euo pipefail

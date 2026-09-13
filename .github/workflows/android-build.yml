@@ -6,7 +6,7 @@
 # FrameGen, kernel sync and Uncharted remain frozen. No driver-name workaround.
 # Replace .github/workflows/android-build.yml with this workflow.
 
-name: VitaStation Android APK - Alpha 4 FIX20 LORD + GINTAMA SIGNED BDA
+name: VitaStation Android APK - Alpha 4 FIX20-R2 LORD + GINTAMA SIGNED BDA
 
 "on":
   workflow_dispatch:
@@ -18,13 +18,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: vitastation-android-fix20-lord-gintama-signed-bda-${{ github.ref }}
+  group: vitastation-android-fix20-r2-lord-gintama-signed-bda-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   VCPKG_ROOT: /usr/local/share/vcpkg
   VITASTATION_SIGNING_CERT_SHA256: fc57542b62221ad0c0550d12b2791e4e40794e980c9f26a86d83250d67ed5d30
-  FIX20_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX20-Lord-Gintama-SignedBDA-Signed.apk
+  FIX20_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX20-R2-Lord-Gintama-SignedBDA-Signed.apk
 
 jobs:
   android-build:
@@ -6181,765 +6181,89 @@ jobs:
           print('[VS-FIX18-A-R3] regression gates passed')
           PY
 
-      - name: Apply FIX19 Gintama safe staging and final identity
+      - name: Apply FIX19 plus FIX20 compact payload
         shell: bash
         run: |
           set -euo pipefail
-          python3 <<'PY'
-          from pathlib import Path
-
-          def read(path):
-              return Path(path).read_text(encoding='utf-8')
-
-          def write(path, content):
-              Path(path).write_text(content, encoding='utf-8')
-
-          def replace_once(content, old, new, label):
-              count = content.count(old)
-              if count != 1:
-                  raise SystemExit(f'::error::FIX19 {label}: expected one anchor, found {count}')
-              return content.replace(old, new, 1)
-
-          # FIX18-A-R3 has already passed. FIX20 intentionally does not apply HOSTMEM18B.
-          path = 'android/app/build.gradle'
-          content = read(path)
-          content = replace_once(content, 'versionCode = 62', 'versionCode = 64', 'versionCode')
-          content = replace_once(
-              content,
-              'versionName = "0.3.0-alpha4-fix18a-r3-lord-precomputed-gintama-drawtime"',
-              'versionName = "0.3.0-alpha4-fix19-lord-hostmem-gintama-safe-staging"',
-              'versionName',
-          )
-          write(path, content)
-
-          # ---------------------------------------------------------------
-          # GINTAMA PCSG01073
-          #
-          # DrawTime17 proved the scheduling point is viable on Turnip, but the
-          # successful log shows a full 2048x2560 snapshot almost every frame.
-          # Direct image->image transfer remains fragile on the proprietary
-          # tiled renderer. Keep the exact DrawTime17 placement, but force the
-          # feedback snapshot through a transfer buffer:
-          #
-          # attachment image -> transfer buffer -> sampled snapshot image
-          #
-          # This makes the tile/store boundary explicit without driver-name
-          # checks and without returning BARRIER15 or OUTGOING16.
-          # ---------------------------------------------------------------
-          path = 'vita3k/renderer/include/renderer/vulkan/surface_cache.h'
-          content = read(path)
-          content = replace_once(
-              content,
-              '''        uint32_t width = 0;
-                  uint32_t height = 0;
-              };
-          ''',
-              '''        uint32_t width = 0;
-                  uint32_t height = 0;
-                  uint32_t bytes_per_pixel = 0; // [VS-GINTAMA-STAGING19]
-              };
-          ''',
-              'pending cast bpp',
-          )
-          write(path, content)
-
-          path = 'vita3k/renderer/src/vulkan/surface_cache.cpp'
-          content = read(path)
-
-          direct_copy = '''    if (copy_w != 0 && copy_h != 0) {
-                  vk::ImageCopy copy{
-                      .srcSubresource = vkutil::color_subresource_layer,
-                      .srcOffset = {
-                          static_cast<int32_t>(cast.start_x),
-                          static_cast<int32_t>(cast.start_y),
-                          0 },
-                      .dstSubresource = vkutil::color_subresource_layer,
-                      .dstOffset = { 0, 0, 0 },
-                      .extent = { copy_w, copy_h, 1 }
-                  };
-                  context.render_cmd.copyImage(
-                      info.texture.image,
-                      vk::ImageLayout::eGeneral,
-                      casted.texture.image,
-                      vk::ImageLayout::eTransferDstOptimal,
-                      copy);
-              }
-          '''
-
-          staged_copy = r'''    if (copy_w != 0 && copy_h != 0) {
-                  const vk::DeviceSize staging_bytes19 =
-                      static_cast<vk::DeviceSize>(copy_w)
-                      * static_cast<vk::DeviceSize>(copy_h)
-                      * static_cast<vk::DeviceSize>(cast.bytes_per_pixel);
-
-                  if (!casted.transition_buffer.buffer
-                      || casted.transition_buffer.size < staging_bytes19) {
-                      state.frame().destroy_queue.add_buffer(casted.transition_buffer);
-                      casted.transition_buffer = vkutil::Buffer(staging_bytes19);
-                      casted.transition_buffer.init_buffer(
-                          vk::BufferUsageFlagBits::eTransferDst
-                          | vk::BufferUsageFlagBits::eTransferSrc);
-                  }
-
-                  vk::BufferImageCopy image_to_buffer19{
-                      .bufferOffset = 0,
-                      .bufferRowLength = copy_w,
-                      .bufferImageHeight = copy_h,
-                      .imageSubresource = vkutil::color_subresource_layer,
-                      .imageOffset = {
-                          static_cast<int32_t>(cast.start_x),
-                          static_cast<int32_t>(cast.start_y),
-                          0 },
-                      .imageExtent = { copy_w, copy_h, 1 }
-                  };
-
-                  context.render_cmd.copyImageToBuffer(
-                      info.texture.image,
-                      vk::ImageLayout::eGeneral,
-                      casted.transition_buffer.buffer,
-                      image_to_buffer19);
-
-                  vk::BufferMemoryBarrier staging_ready19{
-                      .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
-                      .dstAccessMask = vk::AccessFlagBits::eTransferRead,
-                      .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                      .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                      .buffer = casted.transition_buffer.buffer,
-                      .offset = 0,
-                      .size = VK_WHOLE_SIZE
-                  };
-                  context.render_cmd.pipelineBarrier(
-                      vk::PipelineStageFlagBits::eTransfer,
-                      vk::PipelineStageFlagBits::eTransfer,
-                      vk::DependencyFlags{}, {}, staging_ready19, {});
-
-                  vk::BufferImageCopy buffer_to_image19{
-                      .bufferOffset = 0,
-                      .bufferRowLength = copy_w,
-                      .bufferImageHeight = copy_h,
-                      .imageSubresource = vkutil::color_subresource_layer,
-                      .imageOffset = { 0, 0, 0 },
-                      .imageExtent = { copy_w, copy_h, 1 }
-                  };
-
-                  context.render_cmd.copyBufferToImage(
-                      casted.transition_buffer.buffer,
-                      casted.texture.image,
-                      vk::ImageLayout::eTransferDstOptimal,
-                      buffer_to_image19);
-
-                  static thread_local uint64_t staging_count19 = 0;
-                  ++staging_count19;
-                  if ((staging_count19 & 0x3Fu) == 1u) {
-                      LOG_INFO(
-                          "[VS-GINTAMA-STAGING19] count={} scene={} draw={} size={}x{} bytes={} generation={}",
-                          staging_count19,
-                          context.scene_timestamp,
-                          context.draw_timestamp,
-                          copy_w,
-                          copy_h,
-                          staging_bytes19,
-                          info.write_generation);
-                  }
-              }
-          '''
-          content = replace_once(
-              content, direct_copy, staged_copy,
-              'DrawTime17 direct copy -> staging',
-          )
-
-          content = replace_once(
-              content,
-              '''            .width = width,
-                      .height = height
-                  });
-          ''',
-              '''            .width = width,
-                      .height = height,
-                      .bytes_per_pixel = bytes_per_pixel_requested
-                  });
-          ''',
-              'DrawTime17 queue bpp',
-          )
-
-          write(path, content)
-
-          print('[VS-FIX19] LORD remains on HOSTMEM18B + HOSTCMD16 + RINGREBIND17R2')
-          print('[VS-FIX19] Gintama DrawTime17 now resolves feedback via transfer-buffer staging')
-          print('[VS-FIX19] BARRIER15/OUTGOING16 remain absent; FrameGen/kernel/Uncharted untouched')
-          PY
-
-      - name: FIX19 final regression gates
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 <<'PY'
-          from pathlib import Path
+          python3 - <<'PY'
+          import base64
+          import pathlib
           import subprocess
+          import zlib
 
-          def require(path, *tokens):
-              text = Path(path).read_text(encoding='utf-8')
-              for token in tokens:
-                  if token not in text:
-                      raise SystemExit(f'::error::FIX19 gate missing {token!r} in {path}')
-              return text
-
-          require(
-              'android/app/build.gradle',
-              'versionCode = 64',
-              'versionName = "0.3.0-alpha4-fix19-lord-hostmem-gintama-safe-staging"',
+          payload = (
+              "eNrtPGlz20iu3/UrerJVkbQRZclOHI8cZ8uH7HElPlayMztvJsVqkS2Ja4rk8rCt9fi/P6AP3tQR29mZ91Y1E0tsNBpAo9EAGs2AhURjkUs8y2Njatk1bx5O"
+              "XWeLfPhQv/ylXhv77ox4NJza1ohYM8/1Q3IJP2s1k42Jz6jZwNZmr0bg47Mw8h0OIB63EUIP2X3YYI7hmpYz2atH4VjbqTcFijvfChkHbhHDdULmhBJZCgsH"
+              "EmgkTItU4POZZ1OD6a5jsATYtc0Wcdhdi9h0xGw5guFGTkj21Lht/rsBsE3ebI0lxA97pCt6cCapFTAynAchm/XvrbAxrvd6zPddv9c7Pv1H90fywAd57BF2"
+              "7zEjZCZxHUaoY0xdv0XGgNMkDxz1Y72ZFpwiRDLRSMjuAnt/IYh+R9vXBltkSgNCbRTvHOYnCJjZxubNDrE4Dst1qG3PiemygDhuSKjnwc+fLoZXZ/2z7s5B"
+              "u4ayBe7r1DF91zI3AGJjFFm22Z741LRZvSbpAaBkpjMPy2Rdv2V+AMMfuiYDoO3NevHZ29yzeiVaOVECN/+h+p3TGeJ61WlvtTsatb0pfauNrfvuDtX8Lc12"
+              "fVPzfGa4My+COdAmIBg6o5rp07vQmrFX9RXx/ShwTd0gnLFZjCegY6YFIYXfkzJc8KhZK1NvnEntaR/AcHJ6frV/tk8uD4cnnW7n/VbtL/D0CJi7Aua674nn"
+              "u7egeuGUkcCYMjOygVDiuUA+sQJya9GRzUAzyRWonuW1yCgKERqwBJFhsCAYRzax3QkJpu4daBuB3zbZ7Lzdud98t90hgUM9aALVsmcgG8KA+TkZ+8B7G0mx"
+              "QPgw1IxOmPaR/yGhT51gzHyY4xm1nAChJ5YgAwkFmj3fYiH154AhhBYTQB2T+cxvk0+MeRyM3VPAnOYVFWbG1Q+5GLu+wSQvY8bMETVuEnLDqe9GkykwFJMz"
+              "isbwp8dFSMOQGlNEJmgn2sc8ID4K6MxD8mK0HJhjuJqCfGf0BlYeUotsbASh6zMywrUPzKFlsC3DCsmdBfYWSDZ9C8SnOSA8wADzZdyAyMFQKABhInAKD/YH"
+              "g9P+oPuOuD65uL46uTg9P+lut59BrZRJuLVCunWzoUS/YTmGHZkseXAb2TfU2Qgif4xL1QCJsfZ0PYtRsrTrdWVlI1DTrU0dBWRymjq7tULblFmTaZg0Pu7W"
+              "AMXz4Mo0juYhC3SP+bpn3TObQ5GNDfLrl6EmF6I2vNo/wYn48WuRFg/khlNnUFgnI89bYBuqpiDwjXKpG4CuXO41ky9B3XC9OaIUEoFtrYFP9Dvc2Drk9WvC"
+              "f075zyZ5iNm/ven1TlGrDxEBAiVt+GkDTcNo5LPAjXDB7UGPCLS91zNcMJl6kLTpNp0zv1XofjEeBwzJzmLGD5jW0DJ0FNkHOQ8fG/irDS1+qN83W2v3mZf0"
+              "6ZDHHF1mED6FLeiesEU6Lf5fYRBwZsSEPQjx37XkNMBmTx5j2MdEG/kc36N3gCqhGzOzjT34DDUyyC1n7LYRNvJZm9ul7ODxxH6mc7At4L6cMIf51M6CoeDA"
+              "r1gL0ZW0lEcgBA+22QJOoLgpVysukFoNt1BmKiX119ZSEAssKqTkiN1aBhta/2ZE7ss6X7jgku3VqtQk2/GjHLSZgf/r8h7TtXqgRuZsCgglxoDM/6CkjwK1"
+              "0J/TxebTFn8yw/3+O6kED1AeH/ISaeZWHJLL2nzzbjTbJgtC353r/4pYxNrUNCWyRtUozd1SzcmDpdbSgUCYJ2s1PG3LsUJFU2FFo7gF+usAdOvYppMDKwyy"
+              "2lno9fsK/Ya+kaLwsVYrDpkYTL5e9NCVdHZ/zFlP8Tg2FZ1WWfPAvfvMnAnfE6SdKAPjo/6ktjBpSLKAnJyn2DWO4A9psDll/ZUN6koW9co9KFGvZ7asFWs7"
+              "C1zQo7SpSBTvjM1cf35AfXCg/Xi58wixoHqw8+5zF/+MBjdcEXo98aBE6X9GP6W4x62OYAA0FLf+v6NtOaYzy56fgvjvAcuXT/rfr/vXff14/+z08y/66cn5"
+              "xaB/VBz7m/vGZmitGWi7VYuUG1c++M8/XXzu68PT/+mvuHdjygVCMiZnrFHQo0sJMAzLjVHrGXocMXRNmWPMETx4eGwR/D+nPfiwXOkSayfkhmrK9fX/mrWr"
+              "9OOe2fYIsV65JV7dWir7Er5bYYrTOiEsOQbXmPKzXYPaPH7afgvxk9InnvRCdywdZb15k2vezThCjXzn16Rzv3UcNcneHulGeUfm88WJfnp+fFF0C16VR2si"
+              "ybf38EgCA2w1fsEUEX8Aqxv+3sNX7p/gswm35yh++PWqdEdLU1sEUBPPR9MxEwVdZl41IFKzGK64UOLn02oKpctVBOCbnMi5Jtxm/J7EfV8ltiepOFTYFunv"
+              "y+g4lcgRkJx0nmQRpPJw+ZvSCHyJqrCf/80t3zjsF18SHpvluYR1EebtVyGRkHsCJhecbly7FaSkhMW98zidUJVP8GERNuqo+zw7/RVWyOAoTsC5TionTN7w"
+              "H4dnR91t+D6ABTLoH5yeH3XfDzbrzRJcJyIZms7FOe4dQctq37Igyb7dWkm6TZO7sJrdMsRxkmsjyXBJogkdBcDbLjnGaAX8q40b5jvM3rh2jCk4jcwksPTc"
+              "CJOegPvyF4gxv/mcQ36H3cLzXfRv1DHDvyJQVSntv4buDXMCeayAixYmdsVTEOwxdn3CUcDSE1+CXtoGijbM4mM74OlltGr5icQEgjsys4IAk1APHN0P/iNi"
+              "e0AKc8cQOEKtplgUald5SJBNfKcS/M+aXAdFDvgmnqVKJslmrhnZLNgYGuzkfib/8MSYpAIVC9Vei9X7a6Epq+3F9stB//Di7PL6qn/U3Sk2X/X/cXU96GuD"
+              "/vGgP/xJgDRrmKurInu13F5qILV5Hff7Rwf7h5+0g4vr86P9wS/dt1/L4I4G+z9fnZ71u+9Lm5M9ULUWop90Q8Y1UQ05T5HzPIXv3MlezPWqSeWVKM+ZUaEy"
+              "uK7g/5FlmmJtNRbJUlmcGKdURl0ZMR3cpMAymY4Hbt13eTDwi5SF443SHMD6zdCA7K1zmph0VsZWmIOHuAGWMh5/qoBC2Z5FaqZgU3q22EwBFxmxJVb5ax25"
+              "igcHkccSAXlNXNSOWC7bGWB5apwXQV4CqR1gFgUhN4TCVCHbExetbWKg2/zwBMf2olBM+K9AUYhHjlMaTDV39E/wMfgJZLWAeCYs5f5wEX1txQZ+78qPwKFu"
+              "toPQt7xGs3ZHHdx59ki9y94bxvbW2/HWVmfn3fb2aJvRLfPH95uj91vGu3edne3xzvj9TreOQkXqfwBPgveukEdBJdTGh6dG4zA+Zt57EGgeCTXCiNp7D4Cd"
+              "qwb8tm6Zfuf6N2Mb9melIW2QyzQabaiGYEPaeU3Y+PnMXqwXbegEsavQDxQnDwNcR6uD/1AfuW4I8qEeR4QznyNkRQVIlsCBwggKAPoE9LB6qZMzthwIQHw2"
+              "AVcENyC+BQbyqPzJXsF/qx8qlHOz84LVD3xKwQEhYIOd0Arn362G4W1JDcO7l6xh+MaagzJcmx3N3xToFJqRCaisicNMTWS2/gP1C8eMYmaCr8seCfHIHP/L"
+              "FK/AHNvALzgfzMTj7cTBx5NxUW/ghlPwNTgkKhLGB3joDspDgin3Q6hpciPgTF7giHws2AhibyZ+IE5Unn4mzjMvrmvDmseKDX3G87z6DFQdvfk9MqZ2wPA4"
+              "euMDORUlB6g35OTymghgGVaDRLEXE0UFZHI/k+1/+82pf9/RcoOBmspklp7MFtiS1HD8rP3gaH+z85UI3d1wGAXQUBVlmEzYRB5OBcwWxodrRpAwKPVuiLND"
+              "AB8Z23SyUNevgEXD9X2Bj48Co3FP5AaDXRSB2HCJE81G0OaOQXzgFzBUaMCQZY0FvwILLqEgHxtonQErFmaxNWRIi2tEJDgxKOJwUN0JhyPSD+UjR46FOAj1"
+              "fZoyiFI9xRKIlVP+jIAI4ZPZNHR9PZx7LHi28g0sMMpzrFtmKqsHALcWu8P9VOfuVXWzsE+8PZ+OealxYoCs0p3Hc3tLbcssm1Q56e3MEBJObbedNCNDz/Jv"
+              "h3xSLik6dSHY30yP1StF5NyiDxsgWl3Uvlk28xfUiKw7ueK0HRO73W09VNqn55hURrBdbkX+lhVKT2WDK5DLJHYRexSwuFHNJCDPwveyIv9Ts8HRB94tRKCg"
+              "LUE7R28ZGznbmVa+y9OB9iXLA7jHYFux+O2Ft/9L5BHtl3CrIW4hX1CPP2mXdqSWgBabQGF+MQ7jFXYXsLsj+FBEGz14RKRt3ON2k3z8SDZ3+OP47I4/x8OD"
+              "zlh8OKpDZdmzSBoc+g1C73T4pylwougaaufZfLdNzqwDMqIBa/L+hk1nnsQSuiVGooQmjTREhw8fYICmMh6N4enJef9I4PXZP0U1pefCFGHl5psNrStGF9gC"
+              "DifdOsAr3CAxEKiiy39vv9VGltisJU1JxWJI/Qmg4XDm3KEzyyCfjwYYAIFZcmBLFQmMEbhcKCxNZJJH6N7PKFg+iL75Y5mnqAewr0+moZacWAm4e+mZPb83"
+              "lrKBfI/DAz8YGNbYgio5DF1hTfV6pyYKRY9umbGp84BS5VxlRxEGOYHOHB7p/+Y84urCos3AA9sp+er1cHD4F0YPlLPD46l0pCXQNJfFV5lMbyHYSoZGkuRJ"
+              "Vuk4PA9AYg3Rp8z2RJIOj3GyW90+aA+VgGRrk6sMJtiUOoXovHAxKYWSytRGRLi0oR8PnsOM75Re4d50HlgGtdVhAE5Gu1Y+D/zpAYZ1APh61CIKDCCSH6GL"
+              "60wXZKtjQWGLFUi0tYlHLm0szr0GzFfg+DS2Npu7JbBWCvZ0MagQhQL+Asy6PoeH8VqkvA+SCiKL7JC7X3HvYehHRjjgLQmOiI+szH+aXStV2zZqW0HM1qgN"
+              "qxm/nZqNrGiSUjXYwdoGrIWQXTvgcl54QtQX3oEV4glyC6XQykk27t3LNuxmyMNnGdLEOAeWA6NkS8/EkMOpNQ4HaDD2YdeZgi9kGblCGKAl80CJIHdMrabs"
+              "EAUOO0tjq9uUcyCoWso1lznCNndLZF7C1kJEisz8DPLcWYqaQxetO+y4/XswmUbY4OrNUXRyhPCuFbRUi/gUFvYhBArzrMByqpht5COViT1HkYF4S6gpMBWT"
+              "Llnr5hBFHrdLyxEl0lEoqroKiaSEIPtx+JYg/WkoUroiZ3V9Qag5lumwQj+uzmgcGtzetMiDnBxJNJ4Ti0P5lPOeSvCpvJrYEFq5jeANUc8x2+bapu75DOJy"
+              "UTh+6xYiHp3yeq+icRZ2rjy0eS0c15ZovoYN8jhyuGMHbXy/VP0zcfpr5Su3yAUQi9kfLFFt8QALv8n4rZU2rygYVcCPkRD4KU6oY01HqsEZ6XFb0EoHbJZ5"
+              "3xLZCStQHjW/xVG+tayxXfyb+W4aNrZTnbyFSEjRIejcVY5EI3mORTBaN10EAzuw3FKFU8mzaiJVwNXkLYENO8A4FmVUyxX3yKFSVimj+YmR/uxOcPuWO4QQ"
+              "d5EjcGdThSNAmg8h1K3IXGSo5DTFLoPyTVMWyq8iCWztHfhM+6i6C2lpdJWDrZF4Q3gkzAaH62GRHPKIEpC4kr1s1lTwAnEZKnavJ4iX60Y3ptRyGsqZGYJm"
+              "YSmdDRHYtQjjWkRGebJEDMtyYFBc90WasgFhOh/SbOV5epRkF+hU8v3sgnecbZVknruX4MtZQVIQBHOaCzbiWcSoKDOVhQETNw8XJAojPyp+EfUvtZrD7v5r"
+              "lF7KKK3jGr+sAcP2ODdSkRnOV/1l45dLy7jhGliI04XJ4YrpUzw5yGMJpxSMpQ/zT0PM8YTuHfWFeouNPWATTI+0c7da0uIZWYDfzN05WeKhlXhqrVKAghOc"
+              "tpHlLcV5EpbwfTN33SJv+57AQHGjWI8bIcNV+RHbTDZYAC0qy5J9JAXlKc7gjN4L3Vxx/LKBtNgtLYiHRxKuPrImlSMslXNa1icc2L8C3W1VAguqD8B28KXd"
+              "XACZUYNqOCmlEi6XKlKaySvfWoVJfqBTTUylJomIhUt7KSuryiSvbOmZddiEYpHD80ztZ7B433te0bz/CSZVCXoxI2tMabrxsZbfGYYiHSadHJ/ZYpZlYjU+"
+              "b0ynhBdtEjjs1Hq6jf3Mxt9qYldQh2UefeKcP2WzG0ajZ9vshFzzCxTmb18dj6iMYzrHHUzdyDblIavNJhZefwiZPc9jGWGu25mTGSgfrzkk9I7Ohc+LIUys"
+              "B/JuRlED2L3nc5cOiznUuSPYHzwbvO+Ks4bdWpllAdgnq8zSrWI1c7KOs5HjM68+ae5s92ncLbaWz8+atgZvI/o0l1Au8gv/KcwJFapus931FvcCM7+Cia9c"
+              "3lJe5Y3VVl0Gi6X3gfSL88N+xaWgTFmJChqUmUDzoCLWuMREHAibr9K3YvKZBGkxLnxrwivXUgeW/LSD16mIIqbIoTBWUq/S/qO65essjhfYKVK5npejuzRP"
+              "lLr39B0yRskbSKozR1kVaRXtTllKKQNVnl7KgKybalrmNFalngrZ8lVTULWS6B+AmX/LEk9cHpCTuylz5A7NY/skQ1DLZk6580YuktLCgNyolw+5aj1HjjQY"
+              "QJ8lahMWsrYsp5E6lcsef1alxVIHcesl0lYu+kmOAcTvJAOnrl2UZd9iM/nCNSR9boTTZ8xoWl3HnnPTyqsTMCsn6xGw+jN1181COm1rhAX+4OiRieuwnnyH"
+              "Gvh1YbAhkQapCj9AIYsaZWXEFFw58Oko7vFkNMf6clQtK3zJ1zGl7inEb8eqLnAYOzp/mULqKGhsOWZD5E+/fOLZzF7PRguD79VoiOsecbcPpLNKnT6ILUZB"
+              "RE+snuAF33VOhaiayNLwm5OlwrAZdSKv0ay3YgoUOdj/W4jBfllSEjJ+VYP0xABfazVRqo5yz6zaqoJY+Q0awqlrYjnHmXhyxh/0ekdWwJ2FXSwF4ZzIygwx"
+              "ULoCpLr6o1D5UU6OpF0WguRH4jUgcsnPhJ7IerhlXNaSRMmq3ArTvMzopVBP8MYN6MLeHnnF32oHn51X+G6bQgu+7+5Vkk1eJ1uM/uDP+4PzEn8w7Qs+PJKI"
+              "r+RypzAdOyprtxsLR3qHxQvikpHsw8Wyz7wsiWsuzKo6ylW3KlJzys9vC4e/v/aUnn8lbwAD/JNaAKD3va8vWevP38c3Bh6nRFYdooHGQjKSdXwDLIzG2v02"
+              "7PVkbOGTdP3zVJU9w06U9cpxUiJfbetowNEC8z3gLvWuTAOQ7xL+8i3M6tOQeK5tGXPM46T2ie9guUuu4FUUqFUf5cd3MEPWBnXRuQyLa0hVfDaWQuJqWwTE"
+              "F16T7+vfQNUPK1OVhcS3fy0CSlG1/kv1RM1esFKNdDmn8R68yhSsAoyzsARuOcuZK3Fo0nAtbKg7pFGQLswrN3J4OyJ25ZolGFPelDjXh6UVv79AWUMitwrw"
+              "tyI8FqMTiF5K0eUNhIFVhMpOCPNQ2k/xhFf/3oJlS72M4A2JrwrL20H89l+5cBa8/CDd+f/9CwVg1/6WFwogm+Im53fl8hs5TO6cyuvW3+GtCe+e+UpfM0/P"
+              "ypfWUnfuhUOknlR4WHyw0rHWu4FUOW7ZTZqlg1behVEvL1jrJsVKw5WUnVfylIny1UN5NB+/ObZIXkx9NvesHmeT/KmnKjmePIpTyvHsLnGklU6JrWmd91pk"
+              "4tRKiawbAhToLnWhOdWZ2J9f3huxTMwfR/uiMERUgoiIHpxQoLNdk9brm5mNX0EiyIjZjlnlux6aVLxSqfG3IIEpAMsiLghuqMt+aH4WrO8/1ItFKtbMC72z"
+              "hUcsnxz3ztHwwEW5BngX3bcwPgrQk5yDX0PN1Sd0TeE9+5tECu/2WEpxWXTxB33DB6y9F3rDh9jy/yyv+ajO9TzX+z6E1qzy0o/af/qtHxkPbKW3fqAXD1Z6"
+              "o/qdH0X4C8wVJ9YXk8Xx5iIzbOmr3yVJHxEP/C+vxUSZ"
           )
-
-          sce = require(
-              'vita3k/modules/SceGxm/SceGxm.cpp',
-              '[VS-LORD-HOSTCMD16]',
-              '[VS-LORD-RINGREBIND17R2]',
-              '[VS-LORD-PRECOMPUTED18]',
-              '[VS-LORD-TEXTURE-REFRESH18]',
-          )
-          surf = require(
-              'vita3k/renderer/src/vulkan/surface_cache.cpp',
-              '[VS-GINTAMA-FEEDBACK-BOUNDARY14]',
-              '[VS-GINTAMA-DRAWTIME17]',
-              '[VS-GINTAMA-STAGING19]',
-              'copyImageToBuffer',
-              'copyBufferToImage',
-              'staging_ready19',
-          )
-          header = require(
-              'vita3k/renderer/include/renderer/vulkan/surface_cache.h',
-              '[VS-GINTAMA-STAGING19]',
-              'bytes_per_pixel',
-          )
-
-          for forbidden in (
-              '[VS-GINTAMA-FEEDBACK-BARRIER15]',
-              'gintama_feedback_outside_pass15',
-              'gintama_to_transfer15',
-          ):
-              if forbidden in surf:
-                  raise SystemExit(f'::error::FIX19 forbidden Gintama token {forbidden!r}')
-
-          pipeline = Path('vita3k/renderer/src/vulkan/pipeline_cache.cpp').read_text(encoding='utf-8')
-          if '[VS-GINTAMA-OUTGOING16]' in pipeline or 'gintama_outgoing_transfer16' in pipeline:
-              raise SystemExit('::error::FIX19 OUTGOING16 must not return')
-
-          got = subprocess.check_output(
-              ['git', 'hash-object', 'vita3k/renderer/src/vulkan/frame_generation.cpp'],
-              text=True,
-          ).strip()
-          wanted = '1e7cc634f3308566b6ea3d972b73c55086f8f781'
-          if got != wanted:
-              raise SystemExit(f'::error::FIX19 FrameGen drift expected={wanted} actual={got}')
-
-          active_workflow = Path('.github/workflows/android-build.yml').read_text(encoding='utf-8').lower()
-          if 'vitastation-' + 'bootstrap.yml' in active_workflow:
-              raise SystemExit('::error::FIX19 forbidden Bootstrap reference')
-
-          print('[VS-FIX19] final regression gates passed')
-          PY
-
-      - name: Apply FIX20 signed buffer-address correction from Vita3K-Plus
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 <<'PY'
-          from pathlib import Path
-
-          def read(path):
-              return Path(path).read_text(encoding='utf-8')
-
-          def write(path, content):
-              Path(path).write_text(content, encoding='utf-8')
-
-          def replace_once(content, old, new, label):
-              count = content.count(old)
-              if count != 1:
-                  raise SystemExit(f'::error::FIX20 {label}: expected one anchor, found {count}')
-              return content.replace(old, new, 1)
-
-          # Final app identity.
-          path = 'android/app/build.gradle'
-          content = read(path)
-          content = replace_once(content, 'versionCode = 64', 'versionCode = 65', 'versionCode')
-          content = replace_once(
-              content,
-              'versionName = "0.3.0-alpha4-fix19-lord-hostmem-gintama-safe-staging"',
-              'versionName = "0.3.0-alpha4-fix20-lord-gintama-bda-signed-offset"',
-              'versionName',
-          )
-          write(path, content)
-
-          # ---------------------------------------------------------------
-          # Feature gate: this is intentionally title-scoped.
-          # Uncharted and every other title retain the old shader addressing.
-          # ---------------------------------------------------------------
-          path = 'vita3k/features/include/features/state.h'
-          content = read(path)
-          content = replace_once(
-              content,
-              '    bool enable_memory_mapping = false; ///< Is the host GPU memory directly mapped with gxm memory?\n',
-              '    bool enable_memory_mapping = false; ///< Is the host GPU memory directly mapped with gxm memory?\n'
-              '    bool fix_buffer_addressing20 = false; // [VS-BDA20] signed/nearest buffer decoding for selected titles\n',
-              'FeatureState BDA flag',
-          )
-          write(path, content)
-
-          # The corrected decoder must know the actual number of entries in
-          # buffer_addresses[] so a malformed/index-near-boundary address can
-          # never index outside the uniform array.
-          path = 'vita3k/shader/include/shader/usse_translator_types.h'
-          content = read(path)
-          content = replace_once(
-              content,
-              '''    int buffer_addresses_id;
-                  int viewport_ratio_id;
-                  int viewport_offset_id;
-          ''',
-              '''    int buffer_addresses_id;
-                  int viewport_ratio_id;
-                  int viewport_offset_id;
-
-                  // [VS-BDA20] Number of valid buffer_addresses[] entries.
-                  int buffer_count = 0;
-          ''',
-              'SpirvShaderParameters buffer_count',
-          )
-          write(path, content)
-
-          path = 'vita3k/shader/src/spirv_recompiler.cpp'
-          content = read(path)
-          content = replace_once(
-              content,
-              '''    const uint16_t uniform_buffer_count = features.enable_memory_mapping ? buffer_count : 0;
-              const uint16_t uniform_texture_count = features.use_texture_viewport ? texture_count : 0;
-          ''',
-              '''    const uint16_t uniform_buffer_count = features.enable_memory_mapping ? buffer_count : 0;
-              const uint16_t uniform_texture_count = features.use_texture_viewport ? texture_count : 0;
-
-              spv_params.buffer_count = uniform_buffer_count; // [VS-BDA20]
-          ''',
-              'SPIR-V buffer_count assignment',
-          )
-          write(path, content)
-
-          # ---------------------------------------------------------------
-          # Port the important Vita3K-Plus buffer-address correction.
-          #
-          # Old VitaStation:
-          #   index = addr >> 28
-          #   offset = addr & 0x0fffffff
-          #
-          # Corrected:
-          #   index = (addr + 0x08000000) >> 28    (nearest 256 MiB base)
-          #   clamp index to buffer_addresses[]
-          #   offset = addr - (index << 28)        (SIGNED)
-          #   reject impossible +/-16 MiB offsets
-          #   signed-add the offset into the 64-bit GPU address
-          #
-          # This targets the dynamic LDR pattern seen in both:
-          # - LORD bone matrices
-          # - Gintama's fight-transition matrix shader
-          # ---------------------------------------------------------------
-          path = 'vita3k/shader/src/usse_utilities.cpp'
-          content = read(path)
-
-          if 'spv::Id add_uvec2_int(' not in content:
-              ns_end = '\n} // namespace shader::usse::utils\n'
-              if content.count(ns_end) != 1:
-                  raise SystemExit(
-                      f'::error::FIX20 namespace end count={content.count(ns_end)}')
-
-              signed_helper = r'''
-          // [VS-BDA20] Add a signed 32-bit byte offset to a uvec2 64-bit address.
-          // Ported from the corrected Vita3K-Plus physical-buffer path.
-          spv::Id add_uvec2_int(spv::Builder &b, spv::Id vec, spv::Id to_add_signed) {
-              const spv::Id u32 = b.makeUintType(32);
-              const spv::Id i32 = b.makeIntType(32);
-              const spv::Id uvec2 = b.makeVectorType(u32, 2);
-              const spv::Id add_result_type = b.makeStructResultType(u32, u32);
-
-              spv::Id to_add_i =
-                  b.isUintType(b.getTypeId(to_add_signed))
-                  ? b.createUnaryOp(spv::OpBitcast, i32, to_add_signed)
-                  : to_add_signed;
-              spv::Id sign =
-                  b.createBinOp(
-                      spv::OpShiftRightArithmetic,
-                      i32,
-                      to_add_i,
-                      b.makeIntConstant(31));
-              sign = b.createUnaryOp(spv::OpBitcast, u32, sign);
-              spv::Id to_add =
-                  b.createUnaryOp(spv::OpBitcast, u32, to_add_i);
-
-              spv::Id lower = b.createCompositeExtract(vec, u32, 0);
-              spv::Id lower_add =
-                  b.createBinOp(
-                      spv::OpIAddCarry,
-                      add_result_type,
-                      lower,
-                      to_add);
-              spv::Id carry =
-                  b.createCompositeExtract(lower_add, u32, 1);
-              spv::Id upper =
-                  b.createCompositeExtract(vec, u32, 1);
-              upper =
-                  b.createBinOp(spv::OpIAdd, u32, upper, carry);
-              upper =
-                  b.createBinOp(spv::OpIAdd, u32, upper, sign);
-              lower =
-                  b.createCompositeExtract(lower_add, u32, 0);
-              return b.createCompositeConstruct(uvec2, { lower, upper });
-          }
-          '''
-              content = content.replace(ns_end, signed_helper + ns_end, 1)
-
-          old_prefix = '''void buffer_address_access(spv::Builder &b, const SpirvShaderParameters &params, SpirvUtilFunctions &utils, const FeatureState &features, Operand dest, int dest_offset, spv::Id addr, uint32_t component_size, uint32_t nb_components, int buffer_idx, bool is_buffer_store) {
-              const spv::Id i32 = b.makeIntType(32);
-              const spv::Id zero = b.makeIntConstant(0);
-
-              spv::Id buffer_idx_val;
-              if (buffer_idx == -1) {
-                  // buffer index is in the upper 4 bits of addr
-                  buffer_idx_val = b.createBinOp(spv::OpShiftRightLogical, i32, addr, b.makeIntConstant(28));
-                  // remove the buffer index bits from the address
-                  addr = b.createBinOp(spv::OpBitwiseAnd, i32, addr, b.makeIntConstant((1 << 28) - 1));
-              } else {
-                  buffer_idx_val = b.makeIntConstant(buffer_idx);
-              }
-
-              spv::Id buffer_address = utils::create_access_chain(b, spv::StorageClassUniform, params.render_info_id, { b.makeIntConstant(params.buffer_addresses_id), buffer_idx_val });
-              buffer_address = b.createLoad(buffer_address, spv::NoPrecision);
-              // add the offset from the base address
-              buffer_address = add_uvec2_uint(b, buffer_address, addr);
-          '''
-
-          new_prefix = '''void buffer_address_access(spv::Builder &b, const SpirvShaderParameters &params, SpirvUtilFunctions &utils, const FeatureState &features, Operand dest, int dest_offset, spv::Id addr, uint32_t component_size, uint32_t nb_components, int buffer_idx, bool is_buffer_store) {
-              const spv::Id i32 = b.makeIntType(32);
-              const spv::Id u32 = b.makeUintType(32);
-              const spv::Id zero = b.makeIntConstant(0);
-
-              spv::Id buffer_idx_val;
-              if (buffer_idx == -1) {
-                  if (features.fix_buffer_addressing20) {
-                      // [VS-BDA20] Pick the nearest 256 MiB buffer base rather
-                      // than truncating toward the lower segment.
-                      const spv::Id biased =
-                          b.createBinOp(
-                              spv::OpIAdd,
-                              i32,
-                              addr,
-                              b.makeIntConstant(1 << 27));
-                      buffer_idx_val =
-                          b.createBinOp(
-                              spv::OpShiftRightLogical,
-                              i32,
-                              biased,
-                              b.makeIntConstant(28));
-
-                      if (params.buffer_count > 0) {
-                          const spv::Id max_idx =
-                              b.makeIntConstant(params.buffer_count - 1);
-                          spv::Id too_big =
-                              b.createBinOp(
-                                  spv::OpSGreaterThan,
-                                  b.makeBoolType(),
-                                  buffer_idx_val,
-                                  max_idx);
-                          buffer_idx_val =
-                              b.createTriOp(
-                                  spv::OpSelect,
-                                  i32,
-                                  too_big,
-                                  max_idx,
-                                  buffer_idx_val);
-
-                          spv::Id negative =
-                              b.createBinOp(
-                                  spv::OpSLessThan,
-                                  b.makeBoolType(),
-                                  buffer_idx_val,
-                                  zero);
-                          buffer_idx_val =
-                              b.createTriOp(
-                                  spv::OpSelect,
-                                  i32,
-                                  negative,
-                                  zero,
-                                  buffer_idx_val);
-                      }
-
-                      // Signed offset relative to the selected 256 MiB base.
-                      const spv::Id idx_hi =
-                          b.createBinOp(
-                              spv::OpShiftLeftLogical,
-                              i32,
-                              buffer_idx_val,
-                              b.makeIntConstant(28));
-                      addr =
-                          b.createBinOp(
-                              spv::OpISub,
-                              i32,
-                              addr,
-                              idx_hi);
-
-                      // A uniform-buffer dynamic LDR should never legitimately
-                      // be many megabytes away from its selected buffer.
-                      constexpr int safe_offset_max = 0x1000000;
-                      spv::Id off_hi =
-                          b.createBinOp(
-                              spv::OpSGreaterThan,
-                              b.makeBoolType(),
-                              addr,
-                              b.makeIntConstant(safe_offset_max));
-                      spv::Id off_lo =
-                          b.createBinOp(
-                              spv::OpSLessThan,
-                              b.makeBoolType(),
-                              addr,
-                              b.makeIntConstant(-safe_offset_max));
-                      spv::Id off_bad =
-                          b.createBinOp(
-                              spv::OpLogicalOr,
-                              b.makeBoolType(),
-                              off_hi,
-                              off_lo);
-                      addr =
-                          b.createTriOp(
-                              spv::OpSelect,
-                              i32,
-                              off_bad,
-                              zero,
-                              addr);
-
-                      LOG_INFO_ONCE(
-                          "[VS-BDA20] signed nearest-buffer LDR address decoding enabled");
-                  } else {
-                      // Original VitaStation path for every unaffected title.
-                      buffer_idx_val =
-                          b.createBinOp(
-                              spv::OpShiftRightLogical,
-                              i32,
-                              addr,
-                              b.makeIntConstant(28));
-                      addr =
-                          b.createBinOp(
-                              spv::OpBitwiseAnd,
-                              i32,
-                              addr,
-                              b.makeIntConstant((1 << 28) - 1));
-                  }
-              } else {
-                  buffer_idx_val = b.makeIntConstant(buffer_idx);
-              }
-
-              spv::Id buffer_address =
-                  utils::create_access_chain(
-                      b,
-                      spv::StorageClassUniform,
-                      params.render_info_id,
-                      { b.makeIntConstant(params.buffer_addresses_id),
-                          buffer_idx_val });
-              buffer_address =
-                  b.createLoad(buffer_address, spv::NoPrecision);
-
-              // [VS-BDA20] Preserve negative offsets when selecting the nearest
-              // buffer base. Other titles keep the original unsigned addition.
-              buffer_address =
-                  features.fix_buffer_addressing20
-                  ? add_uvec2_int(b, buffer_address, addr)
-                  : add_uvec2_uint(b, buffer_address, addr);
-          '''
-
-          content = replace_once(
-              content,
-              old_prefix,
-              new_prefix,
-              'buffer_address_access decoding',
-          )
-          write(path, content)
-
-          # ---------------------------------------------------------------
-          # Enable the correction only for LORD and Gintama.
-          # HOSTMEM18B is deliberately gone: FIX20 tests/corrects the actual
-          # mapped LDR path instead of bypassing it.
-          # ---------------------------------------------------------------
-          path = 'vita3k/renderer/src/vulkan/renderer.cpp'
-          content = read(path)
-          fn_start = content.find('void VKState::late_init(')
-          if fn_start < 0:
-              raise SystemExit('::error::FIX20 late_init start not found')
-          fn_end = content.find('\nvoid VKState::cleanup()', fn_start)
-          if fn_end < 0:
-              raise SystemExit('::error::FIX20 late_init end not found')
-          fn = content[fn_start:fn_end]
-
-          anchor = '    features.enable_memory_mapping = mapping_method != MappingMethod::Disabled;\n'
-          if fn.count(anchor) != 1:
-              raise SystemExit(
-                  f'::error::FIX20 enable_memory_mapping anchor count={fn.count(anchor)}')
-
-          replacement = '''    features.enable_memory_mapping =
-                  mapping_method != MappingMethod::Disabled;
-
-              features.fix_buffer_addressing20 =
-                  game_id == "PCSG00008" || game_id == "PCSG01073";
-              if (features.fix_buffer_addressing20) {
-                  LOG_WARN_ONCE(
-                      "[VS-BDA20] {} using signed nearest-buffer dynamic LDR decoding; mapping_enabled={}",
-                      game_id,
-                      features.enable_memory_mapping);
-              }
-          '''
-          fn = fn.replace(anchor, replacement, 1)
-          content = content[:fn_start] + fn + content[fn_end:]
-          write(path, content)
-
-          # ---------------------------------------------------------------
-          # Force fresh SPIR-V for both affected titles so old .spv files can
-          # never hide the new address decoder during the test.
-          # LORD was already cold; extend that policy to Gintama.
-          # ---------------------------------------------------------------
-          path = 'vita3k/renderer/src/vulkan/pipeline_cache.cpp'
-          content = read(path)
-
-          content = content.replace(
-              'state.app_title_id == "PCSG00008"',
-              '(state.app_title_id == "PCSG00008" || state.app_title_id == "PCSG01073")',
-          )
-          content = content.replace(
-              'state.app_title_id != "PCSG00008"',
-              '(state.app_title_id != "PCSG00008" && state.app_title_id != "PCSG01073")',
-          )
-          write(path, content)
-
-          path = 'vita3k/renderer/src/shaders.cpp'
-          content = read(path)
-          content = content.replace(
-              'renderer.app_title_id == "PCSG00008"',
-              '(renderer.app_title_id == "PCSG00008" || renderer.app_title_id == "PCSG01073")',
-          )
-          write(path, content)
-
-          print('[VS-FIX20] LORD/Gintama use corrected signed nearest-buffer BDA decoding')
-          print('[VS-FIX20] HOSTMEM18B removed; requested mapping method is used again')
-          print('[VS-FIX20] fresh SPIR-V forced for both titles')
-          print('[VS-FIX20] Gintama FIX14 + DrawTime17 + STAGING19 retained')
-          print('[VS-FIX20] LORD HOSTCMD16 + RINGREBIND17R2 retained')
-          PY
-
-      - name: FIX20 BDA and protected-regression gates
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 <<'PY'
-          from pathlib import Path
-          import subprocess
-
-          def require(path, *tokens):
-              text = Path(path).read_text(encoding='utf-8')
-              for token in tokens:
-                  if token not in text:
-                      raise SystemExit(f'::error::FIX20 gate missing {token!r} in {path}')
-              return text
-
-          def forbid(path, *tokens):
-              text = Path(path).read_text(encoding='utf-8')
-              for token in tokens:
-                  if token in text:
-                      raise SystemExit(f'::error::FIX20 forbidden token {token!r} in {path}')
-              return text
-
-          require(
-              'android/app/build.gradle',
-              'versionCode = 65',
-              'versionName = "0.3.0-alpha4-fix20-lord-gintama-bda-signed-offset"',
-          )
-
-          require(
-              'vita3k/features/include/features/state.h',
-              '[VS-BDA20]',
-              'fix_buffer_addressing20',
-          )
-          require(
-              'vita3k/shader/include/shader/usse_translator_types.h',
-              '[VS-BDA20]',
-              'int buffer_count = 0',
-          )
-          require(
-              'vita3k/shader/src/spirv_recompiler.cpp',
-              'spv_params.buffer_count = uniform_buffer_count',
-          )
-          require(
-              'vita3k/shader/src/usse_utilities.cpp',
-              '[VS-BDA20]',
-              'add_uvec2_int',
-              '1 << 27',
-              'params.buffer_count',
-              'safe_offset_max',
-              'OpSGreaterThan',
-              'OpSLessThan',
-              'OpLogicalOr',
-              'features.fix_buffer_addressing20',
-          )
-
-          renderer = require(
-              'vita3k/renderer/src/vulkan/renderer.cpp',
-              '[VS-BDA20]',
-              'game_id == "PCSG00008" || game_id == "PCSG01073"',
-              'features.enable_memory_mapping',
-          )
-          # HOSTMEM18B must be gone: FIX20 corrects rather than bypasses BDA.
-          forbid(
-              'vita3k/renderer/src/vulkan/renderer.cpp',
-              '[VS-LORD-HOSTMEM18B]',
-              'PCSG00008 forcing host-copy vertex/index/uniform path',
-          )
-
-          require(
-              'vita3k/renderer/src/vulkan/surface_cache.cpp',
-              '[VS-GINTAMA-FEEDBACK-BOUNDARY14]',
-              '[VS-GINTAMA-DRAWTIME17]',
-              '[VS-GINTAMA-STAGING19]',
-          )
-          require(
-              'vita3k/modules/SceGxm/SceGxm.cpp',
-              '[VS-LORD-HOSTCMD16]',
-              '[VS-LORD-RINGREBIND17R2]',
-          )
-
-          # Known-bad Gintama experiments stay dead.
-          forbid(
-              'vita3k/renderer/src/vulkan/surface_cache.cpp',
-              '[VS-GINTAMA-FEEDBACK-BARRIER15]',
-              'gintama_feedback_outside_pass15',
-              'gintama_to_transfer15',
-          )
-          pipeline = Path(
-              'vita3k/renderer/src/vulkan/pipeline_cache.cpp'
-          ).read_text(encoding='utf-8')
-          if '[VS-GINTAMA-OUTGOING16]' in pipeline or 'gintama_outgoing_transfer16' in pipeline:
-              raise SystemExit('::error::FIX20 OUTGOING16 must not return')
-
-          got = subprocess.check_output(
-              ['git', 'hash-object',
-               'vita3k/renderer/src/vulkan/frame_generation.cpp'],
-              text=True,
-          ).strip()
-          wanted = '1e7cc634f3308566b6ea3d972b73c55086f8f781'
-          if got != wanted:
-              raise SystemExit(
-                  f'::error::FIX20 FrameGen drift expected={wanted} actual={got}')
-
-          active_workflow = Path(
-              '.github/workflows/android-build.yml'
-          ).read_text(encoding='utf-8').lower()
-          if 'vitastation-' + 'bootstrap.yml' in active_workflow:
-              raise SystemExit('::error::FIX20 forbidden Bootstrap reference')
-
-          print('[VS-FIX20] BDA/regression gates passed')
-          print('[VS-FIX20] Only PCSG00008 and PCSG01073 enable corrected dynamic LDR decoding')
+          script = zlib.decompress(base64.b64decode(payload))
+          path = pathlib.Path('/tmp/vitastation-fix20-r2.sh')
+          path.write_bytes(script)
+          subprocess.run(['bash', str(path)], check=True)
           PY
 
       - name: Set up Java 17
@@ -6998,13 +6322,13 @@ jobs:
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build signed VitaStation FIX20 LORD + GINTAMA SIGNED BDA APK
+      - name: Build signed VitaStation FIX20-R2 LORD + GINTAMA SIGNED BDA APK
         shell: bash
         run: |
           set -euo pipefail
           bash ./.ci/build-android.sh artifacts/vitastation-android
 
-      - name: Verify frozen R2 shader is packaged in FIX20 APK
+      - name: Verify frozen R2 shader is packaged in FIX20-R2 APK
         shell: bash
         run: |
           set -euo pipefail
@@ -7049,7 +6373,7 @@ jobs:
           print('[VS-FIX10-R2] FrameGen remained byte-identical')
           PY
 
-      - name: Rename and hash FIX20 LORD + GINTAMA SIGNED BDA APK
+      - name: Rename and hash FIX20-R2 LORD + GINTAMA SIGNED BDA APK
         shell: bash
         run: |
           set -euo pipefail
@@ -7060,10 +6384,10 @@ jobs:
           sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX20_APK_NAME.sha256"
           ls -lh "$DST"
 
-      - name: Upload VitaStation FIX20 LORD + GINTAMA SIGNED BDA APK
+      - name: Upload VitaStation FIX20-R2 LORD + GINTAMA SIGNED BDA APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.3.0-Alpha4-FIX20-Lord-Gintama-SignedBDA-Android-Signed
+          name: VitaStation-v0.3.0-Alpha4-FIX20-R2-Lord-Gintama-SignedBDA-Android-Signed
           path: |
             artifacts/vitastation-android/${{ env.FIX20_APK_NAME }}
             artifacts/vitastation-android/${{ env.FIX20_APK_NAME }}.sha256

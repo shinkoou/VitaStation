@@ -6,7 +6,7 @@
 # FrameGen, kernel sync and Uncharted remain frozen. No driver-name workaround.
 # Replace .github/workflows/android-build.yml with this workflow.
 
-name: VitaStation Android APK - Alpha 4 FIX18-A-R3 LORD PRECOMPUTED + GINTAMA DRAWTIME
+name: VitaStation Android APK - Alpha 4 FIX19 LORD HOSTMEM + GINTAMA SAFE STAGING
 
 "on":
   workflow_dispatch:
@@ -18,17 +18,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: vitastation-android-fix18a-r3-lord-precomputed-gintama-drawtime-${{ github.ref }}
+  group: vitastation-android-fix19-lord-hostmem-gintama-safe-staging-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   VCPKG_ROOT: /usr/local/share/vcpkg
   VITASTATION_SIGNING_CERT_SHA256: fc57542b62221ad0c0550d12b2791e4e40794e980c9f26a86d83250d67ed5d30
-  FIX18A_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX18-A-R3-Lord-Precomputed-Gintama-DrawTime-Signed.apk
+  FIX19_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX19-Lord-HostMem-Gintama-SafeStaging-Signed.apk
 
 jobs:
   android-build:
-    name: Build VitaStation v0.3.0 Alpha 4 FIX18-A LORD PRECOMPUTED + GINTAMA DRAWTIME
+    name: Build VitaStation v0.3.0 Alpha 4 FIX18-B LORD PRECOMPUTED HOSTMEM + GINTAMA DRAWTIME
     runs-on: ubuntu-latest
 
     steps:
@@ -6181,6 +6181,379 @@ jobs:
           print('[VS-FIX18-A-R3] regression gates passed')
           PY
 
+      - name: Apply FIX18-B LORD host-copy memory fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          def read(path):
+              return Path(path).read_text(encoding='utf-8')
+
+          def write(path, content):
+              Path(path).write_text(content, encoding='utf-8')
+
+          def replace_once(content, old, new, label):
+              count = content.count(old)
+              if count != 1:
+                  raise SystemExit(f'::error::FIX18-B {label}: expected one anchor, found {count}')
+              return content.replace(old, new, 1)
+
+          path = 'android/app/build.gradle'
+          content = read(path)
+          content = replace_once(content, 'versionCode = 62', 'versionCode = 63', 'versionCode')
+          content = replace_once(
+              content,
+              'versionName = "0.3.0-alpha4-fix18a-r3-lord-precomputed-gintama-drawtime"',
+              'versionName = "0.3.0-alpha4-fix18b-r3-lord-precomputed-hostmem-gintama-drawtime"',
+              'versionName',
+          )
+          write(path, content)
+
+          path = 'vita3k/renderer/src/vulkan/renderer.cpp'
+          content = read(path)
+
+          old = '''    if ((1 << static_cast<int>(request_mapping)) & supported_mapping_methods_mask)
+              // we support the requested mapping method
+              mapping_method = request_mapping;
+
+              features.enable_memory_mapping = mapping_method != MappingMethod::Disabled;
+          '''
+          new = '''    if ((1 << static_cast<int>(request_mapping)) & supported_mapping_methods_mask)
+              // we support the requested mapping method
+              mapping_method = request_mapping;
+
+              // [VS-LORD-HOSTMEM18B]
+              // Diagnostic/fallback path: PCSG00008 showed skinned geometry
+              // exploding while mapped buffer device addresses were active.
+              // Force the existing non-mapped path so vertex/index/uniform data
+              // is copied through the renderer host ring buffers instead.
+              if (game_id == "PCSG00008") {
+                  mapping_method = MappingMethod::Disabled;
+                  LOG_WARN_ONCE(
+                      "[VS-LORD-HOSTMEM18B] PCSG00008 forcing host-copy vertex/index/uniform path");
+              }
+
+              features.enable_memory_mapping = mapping_method != MappingMethod::Disabled;
+          '''
+          content = replace_once(content, old, new, 'LORD mapping fallback')
+          write(path, content)
+
+          print('[VS-FIX18-B] PCSG00008 memory mapping disabled; host-copy renderer path forced')
+          print('[VS-FIX18-B] FIX18-A precomputed semantics remain active')
+          PY
+
+      - name: FIX18-B-R3 LORD host-memory regression gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          def require(path, *tokens):
+              text = Path(path).read_text(encoding='utf-8')
+              for token in tokens:
+                  if token not in text:
+                      raise SystemExit(f'::error::FIX18-B gate missing {token!r} in {path}')
+              return text
+
+          require(
+              'android/app/build.gradle',
+              'versionCode = 63',
+              'versionName = "0.3.0-alpha4-fix18b-r3-lord-precomputed-hostmem-gintama-drawtime"',
+          )
+          require(
+              'vita3k/renderer/src/vulkan/renderer.cpp',
+              '[VS-LORD-HOSTMEM18B]',
+              'game_id == "PCSG00008"',
+              'mapping_method = MappingMethod::Disabled',
+          )
+          require(
+              'vita3k/modules/SceGxm/SceGxm.cpp',
+              '[VS-LORD-HOSTCMD16]',
+              '[VS-LORD-RINGREBIND17R2]',
+              '[VS-LORD-PRECOMPUTED18]',
+              '[VS-LORD-TEXTURE-REFRESH18]',
+          )
+
+          got = subprocess.check_output(
+              ['git', 'hash-object', 'vita3k/renderer/src/vulkan/frame_generation.cpp'],
+              text=True,
+          ).strip()
+          wanted = '1e7cc634f3308566b6ea3d972b73c55086f8f781'
+          if got != wanted:
+              raise SystemExit(f'::error::FIX18-B FrameGen drift expected={wanted} actual={got}')
+
+          print('[VS-FIX18-B] regression gates passed')
+          PY
+
+      - name: Apply FIX19 Gintama safe staging and final identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          def read(path):
+              return Path(path).read_text(encoding='utf-8')
+
+          def write(path, content):
+              Path(path).write_text(content, encoding='utf-8')
+
+          def replace_once(content, old, new, label):
+              count = content.count(old)
+              if count != 1:
+                  raise SystemExit(f'::error::FIX19 {label}: expected one anchor, found {count}')
+              return content.replace(old, new, 1)
+
+          # FIX18-B-R3 has already applied LORD host-copy and passed its gate.
+          path = 'android/app/build.gradle'
+          content = read(path)
+          content = replace_once(content, 'versionCode = 63', 'versionCode = 64', 'versionCode')
+          content = replace_once(
+              content,
+              'versionName = "0.3.0-alpha4-fix18b-r3-lord-precomputed-hostmem-gintama-drawtime"',
+              'versionName = "0.3.0-alpha4-fix19-lord-hostmem-gintama-safe-staging"',
+              'versionName',
+          )
+          write(path, content)
+
+          # ---------------------------------------------------------------
+          # GINTAMA PCSG01073
+          #
+          # DrawTime17 proved the scheduling point is viable on Turnip, but the
+          # successful log shows a full 2048x2560 snapshot almost every frame.
+          # Direct image->image transfer remains fragile on the proprietary
+          # tiled renderer. Keep the exact DrawTime17 placement, but force the
+          # feedback snapshot through a transfer buffer:
+          #
+          # attachment image -> transfer buffer -> sampled snapshot image
+          #
+          # This makes the tile/store boundary explicit without driver-name
+          # checks and without returning BARRIER15 or OUTGOING16.
+          # ---------------------------------------------------------------
+          path = 'vita3k/renderer/include/renderer/vulkan/surface_cache.h'
+          content = read(path)
+          content = replace_once(
+              content,
+              '''        uint32_t width = 0;
+                  uint32_t height = 0;
+              };
+          ''',
+              '''        uint32_t width = 0;
+                  uint32_t height = 0;
+                  uint32_t bytes_per_pixel = 0; // [VS-GINTAMA-STAGING19]
+              };
+          ''',
+              'pending cast bpp',
+          )
+          write(path, content)
+
+          path = 'vita3k/renderer/src/vulkan/surface_cache.cpp'
+          content = read(path)
+
+          direct_copy = '''    if (copy_w != 0 && copy_h != 0) {
+                  vk::ImageCopy copy{
+                      .srcSubresource = vkutil::color_subresource_layer,
+                      .srcOffset = {
+                          static_cast<int32_t>(cast.start_x),
+                          static_cast<int32_t>(cast.start_y),
+                          0 },
+                      .dstSubresource = vkutil::color_subresource_layer,
+                      .dstOffset = { 0, 0, 0 },
+                      .extent = { copy_w, copy_h, 1 }
+                  };
+                  context.render_cmd.copyImage(
+                      info.texture.image,
+                      vk::ImageLayout::eGeneral,
+                      casted.texture.image,
+                      vk::ImageLayout::eTransferDstOptimal,
+                      copy);
+              }
+          '''
+
+          staged_copy = r'''    if (copy_w != 0 && copy_h != 0) {
+                  const vk::DeviceSize staging_bytes19 =
+                      static_cast<vk::DeviceSize>(copy_w)
+                      * static_cast<vk::DeviceSize>(copy_h)
+                      * static_cast<vk::DeviceSize>(cast.bytes_per_pixel);
+
+                  if (!casted.transition_buffer.buffer
+                      || casted.transition_buffer.size < staging_bytes19) {
+                      state.frame().destroy_queue.add_buffer(casted.transition_buffer);
+                      casted.transition_buffer = vkutil::Buffer(staging_bytes19);
+                      casted.transition_buffer.init_buffer(
+                          vk::BufferUsageFlagBits::eTransferDst
+                          | vk::BufferUsageFlagBits::eTransferSrc);
+                  }
+
+                  vk::BufferImageCopy image_to_buffer19{
+                      .bufferOffset = 0,
+                      .bufferRowLength = copy_w,
+                      .bufferImageHeight = copy_h,
+                      .imageSubresource = vkutil::color_subresource_layer,
+                      .imageOffset = {
+                          static_cast<int32_t>(cast.start_x),
+                          static_cast<int32_t>(cast.start_y),
+                          0 },
+                      .imageExtent = { copy_w, copy_h, 1 }
+                  };
+
+                  context.render_cmd.copyImageToBuffer(
+                      info.texture.image,
+                      vk::ImageLayout::eGeneral,
+                      casted.transition_buffer.buffer,
+                      image_to_buffer19);
+
+                  vk::BufferMemoryBarrier staging_ready19{
+                      .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
+                      .dstAccessMask = vk::AccessFlagBits::eTransferRead,
+                      .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                      .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                      .buffer = casted.transition_buffer.buffer,
+                      .offset = 0,
+                      .size = VK_WHOLE_SIZE
+                  };
+                  context.render_cmd.pipelineBarrier(
+                      vk::PipelineStageFlagBits::eTransfer,
+                      vk::PipelineStageFlagBits::eTransfer,
+                      vk::DependencyFlags{}, {}, staging_ready19, {});
+
+                  vk::BufferImageCopy buffer_to_image19{
+                      .bufferOffset = 0,
+                      .bufferRowLength = copy_w,
+                      .bufferImageHeight = copy_h,
+                      .imageSubresource = vkutil::color_subresource_layer,
+                      .imageOffset = { 0, 0, 0 },
+                      .imageExtent = { copy_w, copy_h, 1 }
+                  };
+
+                  context.render_cmd.copyBufferToImage(
+                      casted.transition_buffer.buffer,
+                      casted.texture.image,
+                      vk::ImageLayout::eTransferDstOptimal,
+                      buffer_to_image19);
+
+                  static thread_local uint64_t staging_count19 = 0;
+                  ++staging_count19;
+                  if ((staging_count19 & 0x3Fu) == 1u) {
+                      LOG_INFO(
+                          "[VS-GINTAMA-STAGING19] count={} scene={} draw={} size={}x{} bytes={} generation={}",
+                          staging_count19,
+                          context.scene_timestamp,
+                          context.draw_timestamp,
+                          copy_w,
+                          copy_h,
+                          staging_bytes19,
+                          info.write_generation);
+                  }
+              }
+          '''
+          content = replace_once(
+              content, direct_copy, staged_copy,
+              'DrawTime17 direct copy -> staging',
+          )
+
+          content = replace_once(
+              content,
+              '''            .width = width,
+                      .height = height
+                  });
+          ''',
+              '''            .width = width,
+                      .height = height,
+                      .bytes_per_pixel = bytes_per_pixel_requested
+                  });
+          ''',
+              'DrawTime17 queue bpp',
+          )
+
+          write(path, content)
+
+          print('[VS-FIX19] LORD remains on HOSTMEM18B + HOSTCMD16 + RINGREBIND17R2')
+          print('[VS-FIX19] Gintama DrawTime17 now resolves feedback via transfer-buffer staging')
+          print('[VS-FIX19] BARRIER15/OUTGOING16 remain absent; FrameGen/kernel/Uncharted untouched')
+          PY
+
+      - name: FIX19 final regression gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          def require(path, *tokens):
+              text = Path(path).read_text(encoding='utf-8')
+              for token in tokens:
+                  if token not in text:
+                      raise SystemExit(f'::error::FIX19 gate missing {token!r} in {path}')
+              return text
+
+          require(
+              'android/app/build.gradle',
+              'versionCode = 64',
+              'versionName = "0.3.0-alpha4-fix19-lord-hostmem-gintama-safe-staging"',
+          )
+
+          sce = require(
+              'vita3k/modules/SceGxm/SceGxm.cpp',
+              '[VS-LORD-HOSTCMD16]',
+              '[VS-LORD-RINGREBIND17R2]',
+              '[VS-LORD-PRECOMPUTED18]',
+              '[VS-LORD-TEXTURE-REFRESH18]',
+          )
+          require(
+              'vita3k/renderer/src/vulkan/renderer.cpp',
+              '[VS-LORD-HOSTMEM18B]',
+              'game_id == "PCSG00008"',
+              'mapping_method = MappingMethod::Disabled',
+          )
+
+          surf = require(
+              'vita3k/renderer/src/vulkan/surface_cache.cpp',
+              '[VS-GINTAMA-FEEDBACK-BOUNDARY14]',
+              '[VS-GINTAMA-DRAWTIME17]',
+              '[VS-GINTAMA-STAGING19]',
+              'copyImageToBuffer',
+              'copyBufferToImage',
+              'staging_ready19',
+          )
+          header = require(
+              'vita3k/renderer/include/renderer/vulkan/surface_cache.h',
+              '[VS-GINTAMA-STAGING19]',
+              'bytes_per_pixel',
+          )
+
+          for forbidden in (
+              '[VS-GINTAMA-FEEDBACK-BARRIER15]',
+              'gintama_feedback_outside_pass15',
+              'gintama_to_transfer15',
+          ):
+              if forbidden in surf:
+                  raise SystemExit(f'::error::FIX19 forbidden Gintama token {forbidden!r}')
+
+          pipeline = Path('vita3k/renderer/src/vulkan/pipeline_cache.cpp').read_text(encoding='utf-8')
+          if '[VS-GINTAMA-OUTGOING16]' in pipeline or 'gintama_outgoing_transfer16' in pipeline:
+              raise SystemExit('::error::FIX19 OUTGOING16 must not return')
+
+          got = subprocess.check_output(
+              ['git', 'hash-object', 'vita3k/renderer/src/vulkan/frame_generation.cpp'],
+              text=True,
+          ).strip()
+          wanted = '1e7cc634f3308566b6ea3d972b73c55086f8f781'
+          if got != wanted:
+              raise SystemExit(f'::error::FIX19 FrameGen drift expected={wanted} actual={got}')
+
+          active_workflow = Path('.github/workflows/android-build.yml').read_text(encoding='utf-8').lower()
+          if 'vitastation-' + 'bootstrap.yml' in active_workflow:
+              raise SystemExit('::error::FIX19 forbidden Bootstrap reference')
+
+          print('[VS-FIX19] final regression gates passed')
+          PY
+
       - name: Set up Java 17
         uses: actions/setup-java@v5
         with:
@@ -6237,13 +6610,13 @@ jobs:
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build signed VitaStation FIX18-A LORD PRECOMPUTED + GINTAMA DRAWTIME APK
+      - name: Build signed VitaStation FIX19 LORD HOSTMEM + GINTAMA SAFE STAGING APK
         shell: bash
         run: |
           set -euo pipefail
           bash ./.ci/build-android.sh artifacts/vitastation-android
 
-      - name: Verify frozen R2 shader is packaged in FIX18-A APK
+      - name: Verify frozen R2 shader is packaged in FIX19 APK
         shell: bash
         run: |
           set -euo pipefail
@@ -6288,23 +6661,23 @@ jobs:
           print('[VS-FIX10-R2] FrameGen remained byte-identical')
           PY
 
-      - name: Rename and hash FIX18-A LORD PRECOMPUTED + GINTAMA DRAWTIME APK
+      - name: Rename and hash FIX19 LORD HOSTMEM + GINTAMA SAFE STAGING APK
         shell: bash
         run: |
           set -euo pipefail
           SRC='artifacts/vitastation-android/app.apk'
-          DST="artifacts/vitastation-android/$FIX18A_APK_NAME"
+          DST="artifacts/vitastation-android/$FIX19_APK_NAME"
           test -s "$SRC"
           mv "$SRC" "$DST"
-          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX18A_APK_NAME.sha256"
+          sha256sum "$DST" | tee "artifacts/vitastation-android/$FIX19_APK_NAME.sha256"
           ls -lh "$DST"
 
-      - name: Upload VitaStation FIX18-A LORD PRECOMPUTED + GINTAMA DRAWTIME APK
+      - name: Upload VitaStation FIX19 LORD HOSTMEM + GINTAMA SAFE STAGING APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.3.0-Alpha4-FIX18-A-R3-Lord-Precomputed-Gintama-DrawTime-Android-Signed
+          name: VitaStation-v0.3.0-Alpha4-FIX19-Lord-HostMem-Gintama-SafeStaging-Android-Signed
           path: |
-            artifacts/vitastation-android/${{ env.FIX18A_APK_NAME }}
-            artifacts/vitastation-android/${{ env.FIX18A_APK_NAME }}.sha256
+            artifacts/vitastation-android/${{ env.FIX19_APK_NAME }}
+            artifacts/vitastation-android/${{ env.FIX19_APK_NAME }}.sha256
           if-no-files-found: error
           retention-days: 30

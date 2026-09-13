@@ -6,7 +6,7 @@
 # FrameGen, kernel sync and Uncharted remain frozen. No driver-name workaround.
 # Replace .github/workflows/android-build.yml with this workflow.
 
-name: VitaStation Android APK - Alpha 4 FIX18-A-R2 LORD PRECOMPUTED + GINTAMA DRAWTIME
+name: VitaStation Android APK - Alpha 4 FIX18-A-R3 LORD PRECOMPUTED + GINTAMA DRAWTIME
 
 "on":
   workflow_dispatch:
@@ -18,13 +18,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: vitastation-android-fix18a-r2-lord-precomputed-gintama-drawtime-${{ github.ref }}
+  group: vitastation-android-fix18a-r3-lord-precomputed-gintama-drawtime-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   VCPKG_ROOT: /usr/local/share/vcpkg
   VITASTATION_SIGNING_CERT_SHA256: fc57542b62221ad0c0550d12b2791e4e40794e980c9f26a86d83250d67ed5d30
-  FIX18A_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX18-A-Lord-Precomputed-Gintama-DrawTime-Signed.apk
+  FIX18A_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX18-A-R3-Lord-Precomputed-Gintama-DrawTime-Signed.apk
 
 jobs:
   android-build:
@@ -5889,7 +5889,7 @@ jobs:
           print('[VS-FIX17-R2] LORD: FIX16 + duplicate-create vertex/fragment ring rebind')
           PY
 
-      - name: Apply FIX18-A LORD precomputed draw semantics from Vita3K-Plus
+      - name: Apply FIX18-A-R3 LORD precomputed draw semantics from Vita3K-Plus
         shell: bash
         run: |
           set -euo pipefail
@@ -5905,17 +5905,23 @@ jobs:
           def replace_once(content, old, new, label):
               count = content.count(old)
               if count != 1:
-                  raise SystemExit(f'::error::FIX18-A {label}: expected one anchor, found {count}')
+                  raise SystemExit(f'::error::FIX18-A-R3 {label}: expected one anchor, found {count}')
               return content.replace(old, new, 1)
 
-          # This runs after FIX17-R2's gate, so update identity only now.
+          def find_or_die(content, needle, start, label):
+              pos = content.find(needle, start)
+              if pos < 0:
+                  raise SystemExit(f'::error::FIX18-A-R3 {label}: marker not found: {needle!r}')
+              return pos
+
+          # FIX17-R2 has already completed and passed its gates.
           path = 'android/app/build.gradle'
           content = read(path)
           content = replace_once(content, 'versionCode = 61', 'versionCode = 62', 'versionCode')
           content = replace_once(
               content,
               'versionName = "0.3.0-alpha4-fix17r2-gintama-drawtime-lord-ringrebind"',
-              'versionName = "0.3.0-alpha4-fix18a-lord-precomputed-gintama-drawtime"',
+              'versionName = "0.3.0-alpha4-fix18a-r3-lord-precomputed-gintama-drawtime"',
               'versionName',
           )
           write(path, content)
@@ -5923,60 +5929,34 @@ jobs:
           path = 'vita3k/modules/SceGxm/SceGxm.cpp'
           content = read(path)
 
-          old = '''    if (!context->state.fragment_program || !context->state.vertex_program) {
-              return RET_ERROR(SCE_GXM_ERROR_NULL_PROGRAM);
-          }
+          fn_start = find_or_die(
+              content, 'static int gxmDrawElementGeneral(', 0,
+              'gxmDrawElementGeneral start')
+          fn_end = find_or_die(
+              content, '\nEXPORT(int, sceGxmDraw,', fn_start,
+              'gxmDrawElementGeneral end')
+          fn = content[fn_start:fn_end]
 
-              const SceGxmFragmentProgram &gxm_fragment_program = *context->state.fragment_program.get(emuenv.mem);
-              const SceGxmVertexProgram &gxm_vertex_program = *context->state.vertex_program.get(emuenv.mem);
+          # 1) Program selection. Replace only the two ordinary program reads.
+          p1 = find_or_die(
+              fn,
+              'const SceGxmFragmentProgram &gxm_fragment_program = *context->state.fragment_program.get(emuenv.mem);',
+              0, 'fragment program read')
+          p1 = fn.rfind('\n', 0, p1) + 1
+          p2 = find_or_die(
+              fn,
+              'const SceGxmVertexProgram &gxm_vertex_program = *context->state.vertex_program.get(emuenv.mem);',
+              p1, 'vertex program read')
+          p2 = fn.find('\n', p2)
+          if p2 < 0:
+              raise SystemExit('::error::FIX18-A-R3 vertex program line end not found')
+          p2 += 1
 
-              // Set uniforms
-              const SceGxmProgram &vertex_program_gxp = *gxm_vertex_program.program.get(emuenv.mem);
-              const SceGxmProgram &fragment_program_gxp = *gxm_fragment_program.program.get(emuenv.mem);
-
-              const void *indices_ptr = indexData.get(emuenv.mem);
-
-              gxmSetUniformBuffers(*emuenv.renderer, emuenv.gxm, context, vertex_program_gxp, context->state.vertex_uniform_buffers, gxm_vertex_program.renderer_data->uniform_buffer_sizes,
-                  emuenv.mem);
-              gxmSetUniformBuffers(*emuenv.renderer, emuenv.gxm, context, fragment_program_gxp, context->state.fragment_uniform_buffers, gxm_fragment_program.renderer_data->uniform_buffer_sizes,
-                  emuenv.mem);
-
-              if (context->last_precomputed) {
-                  // Need to re-set the data
-
-                  renderer::set_program(*emuenv.renderer, context->renderer.get(), context->state.vertex_program, false);
-                  renderer::set_program(*emuenv.renderer, context->renderer.get(), context->state.fragment_program, true);
-
-                  context->last_precomputed = false;
-              }
-
-              // set textures that are dirty
-              const gxp::TextureInfo vert_textures_sync = gxm_vertex_program.renderer_data->textures_used & context->is_vert_texture_dirty;
-              context->is_vert_texture_dirty &= ~vert_textures_sync;
-              const gxp::TextureInfo frag_textures_sync = gxm_fragment_program.renderer_data->textures_used & context->is_frag_texture_dirty;
-              context->is_frag_texture_dirty &= ~frag_textures_sync;
-              const auto &textures = context->state.textures;
-              for (uint16_t texture_index = 0; texture_index < SCE_GXM_MAX_TEXTURE_UNITS; texture_index++) {
-                  if (vert_textures_sync[texture_index]) {
-                      const uint16_t index_position = SCE_GXM_MAX_TEXTURE_UNITS + texture_index;
-                      renderer::set_texture(*emuenv.renderer, context->renderer.get(), index_position, textures[index_position]);
-                  }
-
-                  if (frag_textures_sync[texture_index])
-                      renderer::set_texture(*emuenv.renderer, context->renderer.get(), texture_index, textures[texture_index]);
-              }
-          '''
-
-          new = '''    if (!context->state.fragment_program || !context->state.vertex_program) {
-              return RET_ERROR(SCE_GXM_ERROR_NULL_PROGRAM);
-          }
-
-              const bool lord_precomputed18 = emuenv.io.app_path == "PCSG00008";
+          program_block = '''    const bool lord_precomputed18 = emuenv.io.app_path == "PCSG00008";
 
               // [VS-LORD-PRECOMPUTED18]
-              // Vita3K-Plus semantics: once a precomputed state is bound, its
-              // program/textures/uniforms apply to normal draws until cleared.
-              // Keep this title-scoped so every other game retains FIX17-R2.
+              // Vita3K-Plus semantics: an active precomputed state supplies the
+              // program/uniform/texture state to normal draws until cleared.
               SceGxmPrecomputedVertexState *pre_vert18 = lord_precomputed18
                   ? context->state.precomputed_vertex_state.cast<SceGxmPrecomputedVertexState>().get(emuenv.mem)
                   : nullptr;
@@ -5997,15 +5977,27 @@ jobs:
                   *frag_program_ptr18.get(emuenv.mem);
               const SceGxmVertexProgram &gxm_vertex_program =
                   *vert_program_ptr18.get(emuenv.mem);
+          '''
+          fn = fn[:p1] + program_block + fn[p2:]
 
-              // Set uniforms. For LORD the precomputed uniform list has priority;
-              // this is the path that can contain boneMat/nodeIdx for skinned draws.
-              const SceGxmProgram &vertex_program_gxp = *gxm_vertex_program.program.get(emuenv.mem);
-              const SceGxmProgram &fragment_program_gxp = *gxm_fragment_program.program.get(emuenv.mem);
+          # 2) Uniform buffers. Find the existing vertex call and consume through
+          # the following fragment call, independent of formatting.
+          u1 = find_or_die(
+              fn,
+              'gxmSetUniformBuffers(*emuenv.renderer, emuenv.gxm, context, vertex_program_gxp,',
+              0, 'vertex uniform upload')
+          u1 = fn.rfind('\n', 0, u1) + 1
+          ufrag = find_or_die(
+              fn,
+              'gxmSetUniformBuffers(*emuenv.renderer, emuenv.gxm, context, fragment_program_gxp,',
+              u1, 'fragment uniform upload')
+          u2 = find_or_die(fn, 'emuenv.mem);', ufrag, 'fragment uniform upload end')
+          u2 = fn.find('\n', u2)
+          if u2 < 0:
+              raise SystemExit('::error::FIX18-A-R3 uniform block line end not found')
+          u2 += 1
 
-              const void *indices_ptr = indexData.get(emuenv.mem);
-
-              std::span<UniformBuffer> vert_buffers18 =
+          uniform_block = '''    std::span<UniformBuffer> vert_buffers18 =
                   (pre_vert18 && pre_vert18->uniform_buffers)
                   ? std::span(pre_vert18->uniform_buffers.get(emuenv.mem), pre_vert18->buffer_count)
                   : std::span(context->state.vertex_uniform_buffers);
@@ -6029,30 +6021,43 @@ jobs:
                   LOG_INFO_ONCE(
                       "[VS-LORD-PRECOMPUTED18] PCSG00008 normal draw uses precomputed program/uniform state");
               }
+          '''
+          fn = fn[:u1] + uniform_block + fn[u2:]
 
-              if (context->last_precomputed
+          # 3) Replace the old "last_precomputed" restore section up to the texture
+          # state block. This avoids depending on its comments/whitespace.
+          r1 = find_or_die(fn, 'if (context->last_precomputed)', 0, 'old precomputed restore')
+          r1 = fn.rfind('\n', 0, r1) + 1
+          r2 = find_or_die(fn, '// set textures that are dirty', r1, 'texture-state boundary')
+          r2 = fn.rfind('\n', 0, r2) + 1
+
+          rebind_block = '''    if (context->last_precomputed
                   || (lord_precomputed18 && (pre_vert18 || pre_frag18))) {
-                  // Re-bind the exact program selected above. The old VitaStation
-                  // path always restored context->state.* and discarded the active
-                  // precomputed program on a normal draw.
                   renderer::set_program(
                       *emuenv.renderer, context->renderer.get(),
                       vert_program_ptr18, false);
                   renderer::set_program(
                       *emuenv.renderer, context->renderer.get(),
                       frag_program_ptr18, true);
-
                   context->last_precomputed = false;
               }
 
-              const gxp::TextureInfo vert_textures_used18 =
+          '''
+          fn = fn[:r1] + rebind_block + fn[r2:]
+
+          # 4) Replace texture-selection bookkeeping up to the existing for-loop.
+          t1 = find_or_die(fn, '// set textures that are dirty', 0, 'texture-state start')
+          t1 = fn.rfind('\n', 0, t1) + 1
+          t2 = find_or_die(fn, 'for (uint16_t texture_index = 0;', t1, 'texture loop')
+          t2 = fn.rfind('\n', 0, t2) + 1
+
+          texture_state = '''    const gxp::TextureInfo vert_textures_used18 =
                   gxm_vertex_program.renderer_data->textures_used;
               const gxp::TextureInfo frag_textures_used18 =
                   gxm_fragment_program.renderer_data->textures_used;
 
               // [VS-LORD-TEXTURE-REFRESH18]
-              // Plus refreshes every sampled texture every draw: dirty bits only
-              // describe rebinding, not mutations of the texture content itself.
+              // Dirty bits track rebinding, not changes to sampled contents.
               const gxp::TextureInfo vert_textures_sync =
                   lord_precomputed18
                   ? vert_textures_used18
@@ -6074,43 +6079,42 @@ jobs:
                   (lord_precomputed18 && pre_vert18 && pre_vert18->textures)
                   ? pre_vert18->textures.get(emuenv.mem)
                   : (textures.data() + SCE_GXM_MAX_TEXTURE_UNITS);
+          '''
+          fn = fn[:t1] + texture_state + fn[t2:]
 
-              for (uint16_t texture_index = 0;
-                   texture_index < SCE_GXM_MAX_TEXTURE_UNITS;
-                   texture_index++) {
-                  if (vert_textures_sync[texture_index]) {
-                      const uint16_t index_position =
-                          SCE_GXM_MAX_TEXTURE_UNITS + texture_index;
-                      renderer::set_texture(
-                          *emuenv.renderer, context->renderer.get(),
-                          index_position, vert_textures18[texture_index]);
-                  }
+          fn = replace_once(
+              fn,
+              'renderer::set_texture(*emuenv.renderer, context->renderer.get(), index_position, textures[index_position]);',
+              'renderer::set_texture(*emuenv.renderer, context->renderer.get(), index_position, vert_textures18[texture_index]);',
+              'vertex texture source',
+          )
+          fn = replace_once(
+              fn,
+              'renderer::set_texture(*emuenv.renderer, context->renderer.get(), texture_index, textures[texture_index]);',
+              'renderer::set_texture(*emuenv.renderer, context->renderer.get(), texture_index, frag_textures18[texture_index]);',
+              'fragment texture source',
+          )
 
-                  if (frag_textures_sync[texture_index]) {
-                      renderer::set_texture(
-                          *emuenv.renderer, context->renderer.get(),
-                          texture_index, frag_textures18[texture_index]);
-                  }
-              }
-
-              if (lord_precomputed18) {
+          # 5) Insert the one-shot marker just before vertex uploads.
+          marker_pos = find_or_die(fn, '// Update vertex data.', 0, 'vertex-data boundary')
+          marker_pos = fn.rfind('\n', 0, marker_pos) + 1
+          marker_block = '''    if (lord_precomputed18) {
                   LOG_INFO_ONCE(
                       "[VS-LORD-TEXTURE-REFRESH18] PCSG00008 refreshes every sampled texture and honors precomputed texture arrays");
               }
-          '''
 
-          content = replace_once(
-              content, old, new,
-              'LORD normal draw precomputed program/uniform/texture semantics',
-          )
+          '''
+          fn = fn[:marker_pos] + marker_block + fn[marker_pos:]
+
+          content = content[:fn_start] + fn + content[fn_end:]
           write(path, content)
 
-          print('[VS-FIX18-A] PCSG00008 normal draws now honor active precomputed programs, uniforms and textures')
-          print('[VS-FIX18-A] PCSG00008 sampled textures refresh every draw')
-          print('[VS-FIX18-A] FIX17-R2 Gintama and LORD HOSTCMD/RINGREBIND retained')
+          print('[VS-FIX18-A-R3] positional structural patch applied')
+          print('[VS-FIX18-A-R3] PCSG00008 honors active precomputed programs/uniforms/textures')
+          print('[VS-FIX18-A-R3] FIX17-R2 Gintama and LORD HOSTCMD/RINGREBIND retained')
           PY
 
-      - name: FIX18-A LORD graphics regression gates
+      - name: FIX18-A-R3 LORD graphics regression gates
         shell: bash
         run: |
           set -euo pipefail
@@ -6122,13 +6126,13 @@ jobs:
               text = Path(path).read_text(encoding='utf-8')
               for token in tokens:
                   if token not in text:
-                      raise SystemExit(f'::error::FIX18-A gate missing {token!r} in {path}')
+                      raise SystemExit(f'::error::FIX18-A-R3 gate missing {token!r} in {path}')
               return text
 
           require(
               'android/app/build.gradle',
               'versionCode = 62',
-              'versionName = "0.3.0-alpha4-fix18a-lord-precomputed-gintama-drawtime"',
+              'versionName = "0.3.0-alpha4-fix18a-r3-lord-precomputed-gintama-drawtime"',
           )
 
           sce = require(
@@ -6174,7 +6178,7 @@ jobs:
           if got != wanted:
               raise SystemExit(f'::error::FIX18-A FrameGen drift expected={wanted} actual={got}')
 
-          print('[VS-FIX18-A] regression gates passed')
+          print('[VS-FIX18-A-R3] regression gates passed')
           PY
 
       - name: Set up Java 17
@@ -6298,7 +6302,7 @@ jobs:
       - name: Upload VitaStation FIX18-A LORD PRECOMPUTED + GINTAMA DRAWTIME APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-v0.3.0-Alpha4-FIX18-A-Lord-Precomputed-Gintama-DrawTime-Android-Signed
+          name: VitaStation-v0.3.0-Alpha4-FIX18-A-R3-Lord-Precomputed-Gintama-DrawTime-Android-Signed
           path: |
             artifacts/vitastation-android/${{ env.FIX18A_APK_NAME }}
             artifacts/vitastation-android/${{ env.FIX18A_APK_NAME }}.sha256

@@ -6,7 +6,7 @@
 # FrameGen, kernel sync and Uncharted remain frozen. No driver-name workaround.
 # Replace .github/workflows/android-build.yml with this workflow.
 
-name: VitaStation Android APK - Alpha 4 FIX18-A LORD PRECOMPUTED + GINTAMA DRAWTIME
+name: VitaStation Android APK - Alpha 4 FIX18-A-R2 LORD PRECOMPUTED + GINTAMA DRAWTIME
 
 "on":
   workflow_dispatch:
@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: vitastation-android-fix18a-lord-precomputed-gintama-drawtime-${{ github.ref }}
+  group: vitastation-android-fix18a-r2-lord-precomputed-gintama-drawtime-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -5819,7 +5819,7 @@ jobs:
               'gintama_drawtime17',
               'record_gintama_pending_cast17',
               'perform_gintama_pending_casts17',
-              'vk::ImageLayout::SampledImage',
+              'vkutil::ImageLayout::SampledImage',
           )
           require(
               'vita3k/renderer/include/renderer/vulkan/surface_cache.h',

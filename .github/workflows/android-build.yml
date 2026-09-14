@@ -150,8 +150,12 @@ jobs:
               )
 
               env = refresh_env(env)
+              # FIX: Write script to temp file to avoid "Argument list too long" (Errno 7)
+              with open("tmp_step.sh", "w", encoding="utf-8") as f:
+                  f.write(script)
+
               subprocess.run(
-                  ["bash", "-c", script],
+                  ["bash", "tmp_step.sh"],
                   cwd=".",
                   env=env,
                   check=True,
@@ -466,7 +470,7 @@ jobs:
           actual = match.group(1).replace(":", "").lower()
           expected = os.environ[
               "VITASTATION_SIGNING_CERT_SHA256"
-          ].lower()
+              ].lower()
 
           if actual != expected:
               raise SystemExit(

@@ -38,14 +38,8 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      # IMPORTANT:
-      # The previous Probe22 tried to read the FIX21 patch stack from the
-      # current android-build.yml. That file had already been replaced by
-      # Probe22 itself, so the boundary search necessarily failed.
-      #
-      # FIX: read the verified FIX21 workflow from its immutable parent commit.
-      # This preserves the exact FIX21 reconstruction without duplicating or
-      # reimplementing its 6k+ lines of patch logic here.
+      # CORREÇÃO CRÍTICA: Reconstroi o estado do FIX21 a partir de um commit imutável
+      # para evitar falhas de busca de marcadores em arquivos substituídos.
       - name: Reconstruct exact FIX21 runtime source from verified parent
         shell: bash
         run: |
@@ -425,7 +419,7 @@ jobs:
           APK="artifacts/vitastation-android/app.apk"
           test -s "$APK"
           SHA="$(sha256sum "$APK" | awk '{print $1}')"
-          SIZE="$(stat -c '%s' "$APK")"
+          SIZE="$(stat -c '%s' "$APK" | awk '{print $1}')"
 
           echo "APK_SHA256=$SHA" >> "$GITHUB_ENV"
           echo "[PROBE22] APK=$APK"
@@ -497,9 +491,7 @@ jobs:
 
           print(
               f"[PROBE22] signing certificate verified: {actual}"
-          )
-          print(
-              f"[PROBE22] FrameGen frozen hash verified: {got}"
+              f"\n[PROBE22] FrameGen frozen hash verified: {got}"
           )
           PY
 
@@ -515,7 +507,7 @@ jobs:
           test -s "$OUT"
 
           SHA="$(sha256sum "$OUT" | awk '{print $1}')"
-          SIZE="$(stat -c '%s' "$OUT")"
+          SIZE="$(stat -c '%s' "$OUT" | awk '{print $1}')"
 
           echo "[PROBE22] packaged=$OUT"
           echo "[PROBE22] packaged_size=$SIZE"

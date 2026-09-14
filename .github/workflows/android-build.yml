@@ -45,8 +45,8 @@ jobs:
               text=True,
           )
 
-          start_marker = "      - name: Apply exact verified FIX7-R2 baseline from green Run 52\n"
-          end_marker = "      - name: Set up Java 17\n"
+          start_marker = "      - name: Apply exact verified FIX7-R2 baseline from green Run 52"
+          end_marker = "      - name: Set up Java 17"
 
           start = workflow.find(start_marker)
           end = workflow.find(end_marker, start)

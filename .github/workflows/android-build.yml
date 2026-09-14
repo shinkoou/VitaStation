@@ -167,7 +167,7 @@ jobs:
                   "vita3k/renderer/src/vulkan/frame_generation.cpp",
               ],
               text=True,
-).strip()
+          ).strip()
 
           wanted = "1e7cc634f3308566b6ea3d972b73c55086f8f781"
           if got != wanted:

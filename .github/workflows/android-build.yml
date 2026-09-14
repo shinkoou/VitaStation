@@ -1,16 +1,16 @@
-name: VitaStation Android Build (FIX21 Base + New Fixes)
+name: VitaStation Gintama Surface Lifetime Probe23 SYSMEM
 
 "on":
   workflow_dispatch:
   push:
     paths:
-      - .github/workflows/android-build.yml
+      - .github/workflows/gintama-driver-compare.yml
 
 permissions:
   contents: read
 
 concurrency:
-  group: vitastation-build-fixed
+  group: vitastation-gintama-surface-probe23-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -18,9 +18,12 @@ env:
   VITASTATION_SIGNING_CERT_SHA256: fc57542b62221ad0c0550d12b2791e4e40794e980c9f26a86d83250d67ed5d30
 
 jobs:
-  build:
-    name: Build Signed APK
+  build-probe:
+    name: Gintama Surface Lifetime Probe23 SYSMEM
     runs-on: ubuntu-latest
+    env:
+      TURNIP_MODE: sysmem
+      PROBE_APK_NAME: VitaStation-v0.3.0-Alpha4-PROBE23-SYSMEM-Signed.apk
 
     steps:
       - name: Checkout VitaStation
@@ -29,7 +32,7 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Reconstruct exact FIX21 runtime source from verified parent
+      - name: Reconstruct exact FIX21 runtime source
         shell: bash
         run: |
           set -euo pipefail
@@ -39,157 +42,308 @@ jobs:
           import re
           import subprocess
 
-          FIX21_WORKFLOW_COMMIT = "b9e7cfd66daf3791d51f8c5c3d2ea8ca4009044c"
-          workflow = subprocess.check_output(
-              ["git", "show", f"{FIX21_WORKFLOW_COMMIT}:.github/workflows/android-build.yml"],
-              text=True,
-          )
+          workflow_path = Path('.github/workflows/android-build.yml')
+          workflow = workflow_path.read_text(encoding='utf-8')
 
-          start_marker = "      - name: Apply exact verified FIX7-R2 baseline from green Run 52"
-          end_marker = "      - name: Set up Java 17"
-
+          start_marker = '      - name: Apply exact verified FIX7-R2 baseline from green Run 52\n'
+          end_marker = '      - name: Set up Java 17\n'
           start = workflow.find(start_marker)
           end = workflow.find(end_marker, start)
           if start < 0 or end < 0 or end <= start:
-              raise SystemExit("::error::FIX21 parent reconstruction boundary failed")
+              raise SystemExit('::error::PROBE23 could not locate FIX21 patch-stack boundaries')
 
           section = workflow[start:end]
-          step_matches = list(re.finditer(r"(?m)^      - name: (.+)$", section))
+          step_matches = list(re.finditer(r'(?m)^      - name: (.+)$', section))
+          if not step_matches:
+              raise SystemExit('::error::PROBE23 found no inherited FIX21 steps')
 
-          github_env_path = Path(os.environ["GITHUB_ENV"])
+          github_env_path = Path(os.environ['GITHUB_ENV'])
 
           def refresh_env(base_env):
-              if not github_env_path.exists(): return base_env
-              lines = github_env_path.read_text(encoding="utf-8", errors="replace").splitlines()
+              if not github_env_path.exists():
+                  return base_env
+              lines = github_env_path.read_text(encoding='utf-8', errors='replace').splitlines()
               parsed = {}
               i = 0
               while i < len(lines):
                   line = lines[i]
-                  if "<<" in line and "=" not in line.split("<<", 1)[0]:
-                      key, delimiter = line.split("<<", 1)
-                      key, delimiter = key.strip(), delimiter.strip()
+                  if '<<' in line and '=' not in line.split('<<', 1)[0]:
+                      key, delimiter = line.split('<<', 1)
+                      key = key.strip()
+                      delimiter = delimiter.strip()
                       i += 1
                       values = []
                       while i < len(lines) and lines[i] != delimiter:
-                          values.append(lines[i]); i += 1
-                      parsed[key] = "\n".join(values)
-                  elif "=" in line:
-                      key, value = line.split("=", 1)
-                      if key: parsed[key] = value
+                          values.append(lines[i])
+                          i += 1
+                      parsed[key] = '\n'.join(values)
+                  elif '=' in line:
+                      key, value = line.split('=', 1)
+                      if key:
+                          parsed[key] = value
                   i += 1
               base_env.update(parsed)
               return base_env
 
           env = dict(os.environ)
+          ran = 0
           for idx, match in enumerate(step_matches):
               block_start = match.start()
               block_end = step_matches[idx + 1].start() if idx + 1 < len(step_matches) else len(section)
               block = section[block_start:block_end]
+              name = match.group(1).strip()
 
-              literal = re.search(r"(?m)^        run:\s*\|\s*$", block)
+              literal = re.search(r'(?m)^        run:\s*\|\s*$', block)
               if literal:
                   raw = block[literal.end():]
                   script_lines = []
                   for line in raw.splitlines():
-                      if line.startswith("          "): script_lines.append(line[10:])
-                      elif not line.strip(): script_lines.append("")
-                      else: break
-                  script = "\n".join(script_lines).rstrip() + "\n"
+                      if line.startswith('          '):
+                          script_lines.append(line[10:])
+                      elif not line.strip():
+                          script_lines.append('')
+                      else:
+                          break
+                  script = '\n'.join(script_lines).rstrip() + '\n'
               else:
-                  single = re.search(r"(?m)^        run:\s+(.+)$", block)
-                  if not single: continue
-                  script = single.group(1).strip() + "\n"
+                  single = re.search(r'(?m)^        run:\s+(.+)$', block)
+                  if not single:
+                      continue
+                  script = single.group(1).strip() + '\n'
 
+              print(f'\n[PROBE23] >>> inherited FIX21 step: {name}', flush=True)
               env = refresh_env(env)
-              subprocess.run(["bash", "-c", script], cwd=".", env=env, check=True)
+              subprocess.run(
+                  ['bash', '-c', script],
+                  cwd='.',
+                  env=env,
+                  check=True,
+              )
               env = refresh_env(env)
+              ran += 1
 
-          print("[VS-FIX21] Base reconstructed successfully.")
+          if ran < 10:
+              raise SystemExit(f'::error::PROBE23 inherited suspiciously few FIX21 steps: {ran}')
+
+          gradle = Path('android/app/build.gradle').read_text(encoding='utf-8')
+          if 'versionCode = 66' not in gradle or '0.3.0-alpha4-fix21-lord-skin-diag-gintama-feedback-cap' not in gradle:
+              raise SystemExit('::error::PROBE23 FIX21 reconstruction did not reach expected version')
+
+          print(f'[PROBE23] exact FIX21 runtime patch stack reconstructed; inherited run steps={ran}')
           PY
 
-      - name: Apply New Fixes (LORD and GINTAMA)
+      - name: Apply Turnip render-mode probe
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          import os
 
-          # --- LORD Fix: Normalize U8 attributes ---
-          path_lord = Path("vita3k/shader/src/spirv_recompiler.cpp")
-          text_lord = path_lord.read_text(encoding="utf-8")
-          if "convert_to_float(b, utils, var, dest.type, false)" in text_lord:
-              text_lord = text_lord.replace("convert_to_float(b, utils, var, dest.type, false)",
-                                            "convert_to_float(b, utils, var, dest.type, true)")
-              path_lord.write_text(text_lord, encoding="utf-8")
-              print("[FIX] LORD skinning normalization applied.")
+          mode = os.environ['TURNIP_MODE'].strip().lower()
+          if mode != 'sysmem':
+              raise SystemExit(f'::error::PROBE23 expected SYSMEM, got TURNIP_MODE={mode!r}')
 
-          # --- GINTAMA Fix: Attachment Feedback Loop ---
-          # 1. FeatureState
-          path_state = Path("vita3k/features/include/features/state.h")
-          text_state = path_state.read_text(encoding="utf-8")
-          if "support_attachment_feedback" not in text_state:
-              text_state = text_state.replace("bool use_texture_viewport = false; ///< Are we using texture viewports in the shader",
-                                              "bool use_texture_viewport = false; ///< Are we using texture viewports in the shader\n    bool support_attachment_feedback = false; ///< Is the attachment feedback loop layout extension supported?")
-              path_state.write_text(text_state, encoding="utf-8")
-              print("[FIX] Gintama: FeatureState updated.")
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'::error::PROBE23 {label}: expected one anchor, found {count}')
+              return text.replace(old, new, 1)
 
-          # 2. Renderer (Extensions and Device Creation)
-          path_rend = Path("vita3k/renderer/src/vulkan/renderer.cpp")
-          text_rend = path_rend.read_text(encoding="utf-8")
+          # Distinguish this probe from FIX21 without touching package identity/signing.
+          path = Path('android/app/build.gradle')
+          text = path.read_text(encoding='utf-8')
+          text = replace_once(text, 'versionCode = 66', 'versionCode = 68', 'versionCode')
+          text = replace_once(
+              text,
+              'versionName = "0.3.0-alpha4-fix21-lord-skin-diag-gintama-feedback-cap"',
+              f'versionName = "0.3.0-alpha4-probe23-sysmem"',
+              'versionName',
+          )
+          path.write_text(text, encoding='utf-8')
 
-          # Add extension to map
-          if '"VK_EXT_attachment_feedback_loop_layout"' not in text_rend:
-              text_rend = text_rend.replace('{ "VK_EXT_FragmentShaderInterlockExtensionName", &support_shader_interlock },',
-                                              '{ "VK_EXT_FragmentShaderInterlockExtensionName", &support_shader_interlock },\n            { "VK_EXT_attachment_feedback_loop_layout", &support_attachment_feedback },')
+          # TU_DEBUG is consumed by Mesa Turnip. Qualcomm's proprietary Vulkan
+          # implementation ignores this variable, so the proprietary-driver path
+          # remains behaviorally equivalent to FIX21. Set it before Vita3K/native
+          # libraries initialize so the custom Turnip driver sees it on load.
+          path = Path('android/app/src/main/java/org/vita3k/emulator/Vita3KApplication.kt')
+          text = path.read_text(encoding='utf-8')
+          if 'import android.system.Os\n' not in text:
+              text = replace_once(
+                  text,
+                  'import android.app.Application\n',
+                  'import android.app.Application\nimport android.system.Os\n',
+                  'android.system.Os import',
+              )
+          text = replace_once(
+              text,
+              '        System.loadLibrary("Vita3K")',
+              f'        Os.setenv("TU_DEBUG", "{mode}", true) // [VS-GINTAMA-TU-MODE22]\n'
+              '        System.loadLibrary("Vita3K")',
+              'TU_DEBUG injection',
+          )
+          path.write_text(text, encoding='utf-8')
 
-          # Add feature check
-          if "support_attachment_feedback" not in text_rend:
-              # Insert after shader_interlock check
-              marker = "features.support_shader_interlock = support_shader_interlock;"
-              if marker in text_rend:
-                  insertion = "\n        if (support_attachment_feedback) {\n            auto props = physical_device.getFeatures2KHR<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT>();\n            support_attachment_feedback = static_cast<bool>(props.get<vk::PhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT>().attachmentFeedbackLoopLayout);\n            features.support_attachment_feedback = support_attachment_feedback;\n        }"
-                  text_rend = text_rend.replace(marker, marker + insertion)
+          print(f'[VS-GINTAMA-TU-MODE22] build forces Turnip TU_DEBUG={mode}')
+          print('[VS-GINTAMA-TU-MODE22] proprietary Qualcomm path is not driver-name patched')
+          PY
 
-          # Update StructureChain
-          if "vk::PhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT" not in text_rend:
-              text_rend = text_rend.replace("vk::PhysicalDeviceFragmentShaderInterlockFeaturesEXT,",
-                                              "vk::PhysicalDeviceFragmentShaderInterlockFeaturesEXT,\n            vk::PhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT,")
-              text_rend = text_rend.replace(".fragmentShaderSampleInterlock = VK_TRUE },",
-                                              ".fragmentShaderSampleInterlock = VK_TRUE },\n                vk::PhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT{\n                    .attachmentFeedbackLoopLayout = VK_TRUE },")
-              text_rend = text_rend.replace("if (!support_shader_interlock)",
-                                              "if (!support_shader_interlock)\n        if (!support_attachment_feedback)\n            device_info.unlink<vk::PhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT>();")
-              # Fix the unlink logic properly
-              text_rend = text_rend.replace("if (!support_shader_interlock)\n            device_info.unlink<vk::PhysicalDeviceFragmentShaderInterlockFeaturesEXT>();",
-                                              "if (!support_shader_interlock)\n            device_info.unlink<vk::PhysicalDeviceFragmentShaderInterlockFeaturesEXT>();\n        if (!support_attachment_feedback)\n            device_info.unlink<vk::PhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT>();")
+      - name: Apply Probe23 diagnostic-only surface/lifetime instrumentation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("vita3k/renderer/src/vulkan/surface_cache.cpp")
+          t = p.read_text(encoding="utf-8")
 
-          path_rend.write_text(text_rend, encoding="utf-8")
-          print("[FIX] Gintama: Renderer updated.")
+          def once(a, b, label):
+              global t
+              n = t.count(a)
+              if n != 1:
+                  raise SystemExit(f"::error::PROBE23 {label}: anchor count={n}")
+              t = t.replace(a, b, 1)
 
-          # 3. Surface Cache (Barriers and Layouts)
-          path_surf = Path("vita3k/renderer/src/vulkan/surface_cache.cpp")
-          text_surf = path_surf.read_text(encoding="utf-8")
+          once("#include <array>\n", "#include <array>\n#include <atomic>\n", "atomic include")
+          once(
+              "namespace renderer::vulkan {\n",
+              "namespace renderer::vulkan {\n\nstatic std::atomic<uint64_t> vs_probe23_seq{0};\nstatic uint64_t probe23_next_seq() { return ++vs_probe23_seq; }\n",
+              "diag helpers",
+          )
+          once(
+              """    pending.push_back(clipped);
+          
+              constexpr size_t kMaxPendingRegions = 48;
+              if (pending.size() > kMaxPendingRegions) {
+                  pending.clear();
+                  pending.push_back(vk::Rect2D{
+                      .offset = { 0, 0 },
+                      .extent = { surface_width, surface_height }
+                  });
+              }
+          """,
+              """    const uint64_t probe_seq = probe23_next_seq();
+              LOG_DEBUG("[VS-REGION23] seq={} pending_before={} region={},{} {}x{}", probe_seq, pending.size(), clipped.offset.x, clipped.offset.y, clipped.extent.width, clipped.extent.height);
+              pending.push_back(clipped);
+          
+              constexpr size_t kMaxPendingRegions = 48;
+              if (pending.size() > kMaxPendingRegions) {
+                  LOG_DEBUG("[VS-REGION23] seq={} COLLAPSE_TO_FULL_SURFACE pending={} surface={}x{}", probe_seq, pending.size(), surface_width, surface_height);
+                  pending.clear();
+                  pending.push_back(vk::Rect2D{
+                      .offset = { 0, 0 },
+                      .extent = { surface_width, surface_height }
+                  });
+              }
+              LOG_DEBUG("[VS-REGION23] seq={} pending_after={}", probe_seq, pending.size());
+          """,
+              "append_region",
+          )
+          once(
+              """    if (region_empty(resolved))
+                  return;
+          
+              std::vector<vk::Rect2D> remaining;""",
+              """    if (region_empty(resolved))
+                  return;
+              const uint64_t probe_seq = probe23_next_seq();
+              LOG_DEBUG("[VS-RESOLVE23] seq={} pending_before={} resolved={},{} {}x{}", probe_seq, pending.size(), resolved.offset.x, resolved.offset.y, resolved.extent.width, resolved.extent.height);
+          
+              std::vector<vk::Rect2D> remaining;""",
+              "subtract_region",
+          )
+          once(
+              """    pending.swap(remaining);
+          }
+          
+          
+          static void protect_surface""",
+              """    pending.swap(remaining);
+              LOG_DEBUG("[VS-RESOLVE23] seq={} pending_after={}", probe_seq, pending.size());
+          }
+          
+          
+          static void protect_surface""",
+              "resolve after",
+          )
+          once(
+              """void VKSurfaceCache::destroy_surface(ColorSurfaceCacheInfo &info) {
+              vkutil::DestroyQueue &destroy_queue = state.frame().destroy_queue;""",
+              """void VKSurfaceCache::destroy_surface(ColorSurfaceCacheInfo &info) {
+              vkutil::DestroyQueue &destroy_queue = state.frame().destroy_queue;
+              LOG_DEBUG("[VS-LIFETIME23] seq={} surface={} destroy_requested", probe23_next_seq(), static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(&info)));""",
+              "destroy lifetime",
+          )
+          if "[VS-GINTAMA-STAGING19]" not in t:
+              raise SystemExit("::error::PROBE23 STAGING19 marker missing")
+          t = t.replace("[VS-GINTAMA-STAGING19]", "[VS-GINTAMA-STAGING19] [VS-STAGING23]", 1)
+          p.write_text(t, encoding="utf-8")
+          print("[PROBE23] diagnostic-only instrumentation applied")
+          PY
 
-          # Update Barrier Layouts
-          text_surf = text_surf.replace(".oldLayout = vk::ImageLayout::eGeneral,\n                .newLayout = vk::ImageLayout::eGeneral,",
-                                         ".oldLayout = state.features.support_attachment_feedback ? vk::ImageLayout::eAttachmentFeedbackLoopOptimalEXT : vk::ImageLayout::eGeneral,\n                .newLayout = state.features.support_attachment_feedback ? vk::ImageLayout::eAttachmentFeedbackLoopOptimalEXT : vk::ImageLayout::eGeneral,")
+      - name: Probe23 regression gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import subprocess
 
-          # Update copyImage
-          text_surf = text_surf.replace("cmd_buffer.copyImage(info.texture.image, vk::ImageLayout::eGeneral, casted->texture.image, vk::ImageLayout::eTransferDstOptimal, image_copy);",
-                                         "cmd_buffer.copyImage(info.texture.image, state.features.support_attachment_feedback ? vk::ImageLayout::eAttachmentFeedbackLoopOptimalEXT : vk::ImageLayout::eGeneral, casted->texture.image, vk::ImageLayout::eTransferDstOptimal, image_copy);")
+          mode = os.environ['TURNIP_MODE'].strip().lower()
 
-          # Update copyImageToBuffer
-          text_surf = text_surf.replace("cmd_buffer.copyImageToBuffer(\n                    info.texture.image,\n                    vk::ImageLayout::eGeneral,\n                    info.reinterpret_staging_buffer->buffer,",
-                                         "cmd_buffer.copyImageToBuffer(\n                    info.texture.image,\n                    state.features.support_attachment_feedback ? vk::ImageLayout::eAttachmentFeedbackLoopOptimalEXT : vk::ImageLayout::eGeneral,\n                    info.reinterpret_staging_buffer->buffer,")
+          gradle = Path('android/app/build.gradle').read_text(encoding='utf-8')
+          if 'versionCode = 68' not in gradle:
+              raise SystemExit('::error::PROBE23 versionCode gate failed')
+          if f'versionName = "0.3.0-alpha4-probe23-sysmem"' not in gradle:
+              raise SystemExit('::error::PROBE23 versionName gate failed')
 
-          path_surf.write_text(text_surf, encoding="utf-8")
-          print("[FIX] Gintama: SurfaceCache updated.")
+          app = Path('android/app/src/main/java/org/vita3k/emulator/Vita3KApplication.kt').read_text(encoding='utf-8')
+          expected = f'Os.setenv("TU_DEBUG", "{mode}", true) // [VS-GINTAMA-TU-MODE22]'
+          if expected not in app:
+              raise SystemExit('::error::PROBE23 TU_DEBUG injection missing')
+          if app.find(expected) > app.find('System.loadLibrary("Vita3K")'):
+              raise SystemExit('::error::PROBE23 TU_DEBUG must be set before native library load')
+
+          surface = Path('vita3k/renderer/src/vulkan/surface_cache.cpp').read_text(encoding='utf-8')
+          for required in (
+              '[VS-GINTAMA-FEEDBACK-BOUNDARY14]',
+              '[VS-GINTAMA-DRAWTIME17]',
+              '[VS-GINTAMA-STAGING19]',
+              '[VS-TYPELESS-HD-STAGING]',
+              '[VS-UNCHARTED-TYPELESS-CACHE9]',
+          ):
+              if required not in surface:
+                  raise SystemExit(f'::error::PROBE23 missing protected marker {required}')
+          for forbidden in (
+              '[VS-GINTAMA-FEEDBACK-BARRIER15]',
+              'gintama_feedback_outside_pass15',
+              'gintama_to_transfer15',
+          ):
+              if forbidden in surface:
+                  raise SystemExit(f'::error::PROBE23 forbidden Gintama regression {forbidden}')
+
+          pipeline = Path('vita3k/renderer/src/vulkan/pipeline_cache.cpp').read_text(encoding='utf-8')
+          if '[VS-GINTAMA-OUTGOING16]' in pipeline or 'gintama_outgoing_transfer16' in pipeline:
+              raise SystemExit('::error::PROBE23 OUTGOING16 must remain removed')
+
+          got = subprocess.check_output(
+              ['git', 'hash-object', 'vita3k/renderer/src/vulkan/frame_generation.cpp'],
+              text=True,
+          ).strip()
+          wanted = '1e7cc634f3308566b6ea3d972b73c55086f8f781'
+          if got != wanted:
+              raise SystemExit(f'::error::PROBE23 FrameGen drift expected={wanted} actual={got}')
+
+          print(f'[PROBE23] gates passed for TU_DEBUG={mode}')
+          print('[PROBE23] FrameGen, Uncharted R2 Typeless, FIX19 staging and signing base preserved')
           PY
 
       - name: Set up Java 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
@@ -232,135 +386,90 @@ jobs:
               exit 1
             fi
           done
-
           SIGNING_FILE="$RUNNER_TEMP/vitastation-permanent-release.jks"
           umask 077
           printf '%s' "$KEYSTORE_B64" | base64 --decode > "$SIGNING_FILE"
-
-          keytool -list -v \
-            -keystore "$SIGNING_FILE" \
-            -storepass "$STORE_PASSWORD" \
-            -alias "$KEY_ALIAS" \
-            > "$RUNNER_TEMP/vitastation-keytool.txt"
-
+          keytool -list -v -keystore "$SIGNING_FILE" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" > "$RUNNER_TEMP/vitastation-keytool.txt"
           echo "SIGNING_STORE_PATH=$SIGNING_FILE" >> "$GITHUB_ENV"
           echo "SIGNING_STORE_PASSWORD=$STORE_PASSWORD" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build signed APK
+      - name: Build signed Probe23 SYSMEM APK
         shell: bash
         run: |
           set -euo pipefail
           bash ./.ci/build-android.sh artifacts/vitastation-android
 
-      - name: Verify APK exists and hash it
+      - name: Verify frozen R2 shader is packaged
         shell: bash
         run: |
           set -euo pipefail
-          APK="artifacts/vitastation-android/app.apk"
+          APK='artifacts/vitastation-android/app.apk'
+          TMP_SPV="$RUNNER_TEMP/probe23-packaged-reinterpret.spv"
           test -s "$APK"
-          SHA="$(sha256sum "$APK" | awk '{print $1}')"
-          SIZE="$(stat -c '%s' "$APK")"
-
-          echo "APK_SHA256=$SHA" >> "$GITHUB_ENV"
-          echo "APK=$APK"
-          echo "APK_SIZE=$SIZE"
-          echo "APK_SHA256=$SHA"
+          test -n "${FIX10R2_SPV_SHA256:-}"
+          unzip -p "$APK" 'assets/shaders-builtin/vulkan/surface_cast_reinterpret.comp.spv' > "$TMP_SPV"
+          test -s "$TMP_SPV"
+          APK_SHA="$(sha256sum "$TMP_SPV" | awk '{print $1}')"
+          if [[ "$APK_SHA" != "$FIX10R2_SPV_SHA256" ]]; then
+            echo "::error::APK contains wrong Typeless SPIR-V expected=$FIX10R2_SPV_SHA256 actual=$APK_SHA"
+            exit 1
+          fi
+          echo "[PROBE23] APK contains verified Typeless SPIR-V $APK_SHA"
 
       - name: Verify permanent APK signature and frozen FrameGen
         shell: bash
         run: |
           set -euo pipefail
-          APK="artifacts/vitastation-android/app.apk"
-
-          APKSIGNER="$(
-            find "$ANDROID_HOME/build-tools" \
-              -type f -name apksigner | sort -V | tail -n 1
-          )"
+          APK='artifacts/vitastation-android/app.apk'
+          test -s "$APK"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           test -x "$APKSIGNER"
-
-          "$APKSIGNER" verify \
-            --verbose \
-            --print-certs \
-            "$APK" | tee "$RUNNER_TEMP/vitastation-apksigner.txt"
-
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/vitastation-apksigner.txt"
           python3 - <<'PY'
           from pathlib import Path
-          import os
-          import re
-          import subprocess
+          import os, re, subprocess
 
-          report = Path(os.environ["RUNNER_TEMP"]) / "vitastation-apksigner.txt"
-          content = report.read_text(
-              encoding="utf-8", errors="replace"
-          )
-
-          match = re.search(
-              r"certificate SHA-256 digest:\s*([0-9A-Fa-f:]+)",
-              content,
-          )
+          report = Path(os.environ['RUNNER_TEMP']) / 'vitastation-apksigner.txt'
+          content = report.read_text(encoding='utf-8', errors='replace')
+          match = re.search(r'certificate SHA-256 digest:\s*([0-9A-Fa-f:]+)', content)
           if not match:
-              raise SystemExit(
-                  "::error::apksigner certificate SHA-256 digest not found"
-              )
-
-          actual = match.group(1).replace(":", "").lower()
-          expected = os.environ[
-              "VITASTATION_SIGNING_CERT_SHA256"
-          ].lower()
-
+              raise SystemExit('::error::apksigner certificate SHA-256 digest not found')
+          actual = match.group(1).replace(':', '').lower()
+          expected = os.environ['VITASTATION_SIGNING_CERT_SHA256'].lower()
           if actual != expected:
-              raise SystemExit(
-                  f"::error::Signing certificate mismatch "
-                  f"expected={expected} actual={actual}"
-              )
+              raise SystemExit(f'::error::Signing certificate mismatch expected={expected} actual={actual}')
 
           got = subprocess.check_output(
-              [
-                  "git",
-                  "hash-object",
-                  "vita3k/renderer/src/vulkan/frame_generation.cpp",
-              ],
+              ['git', 'hash-object', 'vita3k/renderer/src/vulkan/frame_generation.cpp'],
               text=True,
           ).strip()
-
-          wanted = "1e7cc634f3308566b6ea3d972b73c55086f8f781"
+          wanted = '1e7cc634f3308566b6ea3d972b73c55086f8f781'
           if got != wanted:
-              raise SystemExit(
-                  f"::error::FrameGen drift expected={wanted} actual={got}"
-              )
+              raise SystemExit(f'::error::FrameGen drift expected={wanted} actual={got}')
 
-          print(
-              f"signing certificate verified: {actual}"
-          )
-          print(
-              f"FrameGen frozen hash verified: {got}"
-          )
+          print(f'[PROBE23] permanent signing certificate verified: {actual}')
+          print('[PROBE23] FrameGen remained byte-identical')
           PY
 
-      - name: Package APK
+      - name: Rename and hash Probe23 APK
         shell: bash
         run: |
           set -euo pipefail
+          SRC='artifacts/vitastation-android/app.apk'
+          DST="artifacts/vitastation-android/$PROBE_APK_NAME"
+          test -s "$SRC"
+          mv "$SRC" "$DST"
+          sha256sum "$DST" | tee "artifacts/vitastation-android/$PROBE_APK_NAME.sha256"
+          ls -lh "$DST"
 
-          APK="artifacts/vitastation-android/app.apk"
-          OUT="artifacts/VitaStation-Fixed-Signed.apk"
-
-          cp "$APK" "$OUT"
-          test -s "$OUT"
-
-          SHA="$(sha256sum "$OUT" | awk '{print $1}')"
-          SIZE="$(stat -c '%s' "$OUT")"
-
-          echo "packaged=$OUT"
-          echo "packaged_size=$SIZE"
-          echo "packaged_sha256=$SHA"
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - name: Upload Probe23 APK
+        uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-Fixed-Signed
-          path: artifacts/VitaStation-Fixed-Signed.apk
+          name: VitaStation-PROBE23-Turnip-${{ matrix.turnip_mode }}-Android-Signed
+          path: |
+            artifacts/vitastation-android/${{ env.PROBE_APK_NAME }}
+            artifacts/vitastation-android/${{ env.PROBE_APK_NAME }}.sha256
           if-no-files-found: error
           retention-days: 14

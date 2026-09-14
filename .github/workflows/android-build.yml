@@ -1,16 +1,16 @@
-name: VitaStation Gintama Turnip GMEM vs SYSMEM Probe22 FIXED
+name: VitaStation Android Build (Fixes Applied)
 
 "on":
   workflow_dispatch:
   push:
     paths:
-      - .github/workflows/android-build.yml
+      - .github/workflows/workflow.yml
 
 permissions:
   contents: read
 
 concurrency:
-  group: vitastation-gintama-driver-compare-${{ github.ref }}
+  group: vitastation-build-fixed
   cancel-in-progress: true
 
 env:
@@ -18,18 +18,9 @@ env:
   VITASTATION_SIGNING_CERT_SHA256: fc57542b62221ad0c0550d12b2791e4e40794e980c9f26a86d83250d67ed5d30
 
 jobs:
-  build-probe:
-    name: Turnip TU_DEBUG=${{ matrix.turnip_mode }}
+  build:
+    name: Build Signed APK
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        turnip_mode:
-          - sysmem
-          - gmem
-    env:
-      TURNIP_MODE: ${{ matrix.turnip_mode }}
-      PROBE_APK_NAME: VitaStation-v0.3.0-Alpha4-PROBE22-Turnip-${{ matrix.turnip_mode }}-Signed.apk
 
     steps:
       - name: Checkout VitaStation
@@ -37,315 +28,6 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
-
-      # CORREÇÃO CRÍTICA: Reconstroi o estado do FIX21 a partir de um commit imutável
-      # para evitar falhas de busca de marcadores em arquivos substituídos.
-      - name: Reconstruct exact FIX21 runtime source from verified parent
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          import os
-          import re
-          import subprocess
-
-          FIX21_WORKFLOW_COMMIT = "b9e7cfd66daf3791d51f8c5c3d2ea8ca4009044c"
-          workflow = subprocess.check_output(
-              [
-                  "git",
-                  "show",
-                  f"{FIX21_WORKFLOW_COMMIT}:.github/workflows/android-build.yml",
-              ],
-              text=True,
-          )
-
-          start_marker = "      - name: Apply exact verified FIX7-R2 baseline from green Run 52\n"
-          end_marker = "      - name: Set up Java 17\n"
-
-          start = workflow.find(start_marker)
-          end = workflow.find(end_marker, start)
-          if start < 0:
-              raise SystemExit(
-                  "::error::PROBE22 FIX21 parent does not contain the expected "
-                  "FIX7-R2 patch-stack start marker"
-              )
-          if end < 0 or end <= start:
-              raise SystemExit(
-                  "::error::PROBE22 FIX21 parent does not contain the expected "
-                  "pre-build boundary"
-              )
-
-          section = workflow[start:end]
-          step_matches = list(re.finditer(r"(?m)^      - name: (.+)$", section))
-          if not step_matches:
-              raise SystemExit(
-                  "::error::PROBE22 found no inherited FIX21 steps in verified parent"
-              )
-
-          github_env_path = Path(os.environ["GITHUB_ENV"])
-
-          def refresh_env(base_env):
-              if not github_env_path.exists():
-                  return base_env
-              lines = github_env_path.read_text(
-                  encoding="utf-8", errors="replace"
-              ).splitlines()
-              parsed = {}
-              i = 0
-              while i < len(lines):
-                  line = lines[i]
-                  if "<<" in line and "=" not in line.split("<<", 1)[0]:
-                      key, delimiter = line.split("<<", 1)
-                      key = key.strip()
-                      delimiter = delimiter.strip()
-                      i += 1
-                      values = []
-                      while i < len(lines) and lines[i] != delimiter:
-                          values.append(lines[i])
-                          i += 1
-                      parsed[key] = "\n".join(values)
-                  elif "=" in line:
-                      key, value = line.split("=", 1)
-                      if key:
-                          parsed[key] = value
-                  i += 1
-              base_env.update(parsed)
-              return base_env
-
-          env = dict(os.environ)
-          ran = 0
-
-          for idx, match in enumerate(step_matches):
-              block_start = match.start()
-              block_end = (
-                  step_matches[idx + 1].start()
-                  if idx + 1 < len(step_matches)
-                  else len(section)
-              )
-              block = section[block_start:block_end]
-              name = match.group(1).strip()
-
-              literal = re.search(r"(?m)^        run:\s*\|\s*$", block)
-              if literal:
-                  raw = block[literal.end():]
-                  script_lines = []
-                  for line in raw.splitlines():
-                      if line.startswith("          "):
-                          script_lines.append(line[10:])
-                      elif not line.strip():
-                          script_lines.append("")
-                      else:
-                          break
-                  script = "\n".join(script_lines).rstrip() + "\n"
-              else:
-                  single = re.search(r"(?m)^        run:\s+(.+)$", block)
-                  if not single:
-                      continue
-                  script = single.group(1).strip() + "\n"
-
-              print(
-                  f"\n[PROBE22] >>> inherited verified FIX21 step: {name}",
-                  flush=True,
-              )
-
-              env = refresh_env(env)
-              # FIX: Write script to temp file to avoid "Argument list too long" (Errno 7)
-              with open("tmp_step.sh", "w", encoding="utf-8") as f:
-                  f.write(script)
-
-              subprocess.run(
-                  ["bash", "tmp_step.sh"],
-                  cwd=".",
-                  env=env,
-                  check=True,
-              )
-              env = refresh_env(env)
-              ran += 1
-
-          if ran < 10:
-              raise SystemExit(
-                  f"::error::PROBE22 inherited suspiciously few FIX21 steps: {ran}"
-              )
-
-          gradle = Path("android/app/build.gradle").read_text(encoding="utf-8")
-          if "versionCode = 66" not in gradle:
-              raise SystemExit(
-                  "::error::PROBE22 FIX21 reconstruction did not reach versionCode 66"
-              )
-          if (
-              "0.3.0-alpha4-fix21-lord-skin-diag-gintama-feedback-cap"
-              not in gradle
-          ):
-              raise SystemExit(
-                  "::error::PROBE22 FIX21 reconstruction did not reach expected FIX21 version"
-              )
-
-          print(
-              f"[PROBE22] exact FIX21 runtime patch stack reconstructed; "
-              f"verified parent={FIX21_WORKFLOW_COMMIT}; steps={ran}"
-          )
-          PY
-
-      - name: Apply Turnip render-mode probe
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          import os
-
-          mode = os.environ["TURNIP_MODE"].strip().lower()
-          if mode not in {"sysmem", "gmem"}:
-              raise SystemExit(
-                  f"::error::PROBE22 invalid TURNIP_MODE={mode!r}"
-              )
-
-          def replace_once(text, old, new, label):
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(
-                      f"::error::PROBE22 {label}: expected one anchor, found {count}"
-                  )
-              return text.replace(old, new, 1)
-
-          path = Path("android/app/build.gradle")
-          text = path.read_text(encoding="utf-8")
-          text = replace_once(
-              text, "versionCode = 66", "versionCode = 67", "versionCode"
-          )
-          text = replace_once(
-              text,
-              'versionName = "0.3.0-alpha4-fix21-lord-skin-diag-gintama-feedback-cap"',
-              f'versionName = "0.3.0-alpha4-probe22-turnip-{mode}"',
-              "versionName",
-          )
-          path.write_text(text, encoding="utf-8")
-
-          path = Path(
-              "android/app/src/main/java/org/vita3k/emulator/Vita3KApplication.kt"
-          )
-          text = path.read_text(encoding="utf-8")
-          if "import android.system.Os\n" not in text:
-              text = replace_once(
-                  text,
-                  "import android.app.Application\n",
-                  "import android.app.Application\nimport android.system.Os\n",
-                  "android.system.Os import",
-              )
-
-          text = replace_once(
-              text,
-              '        System.loadLibrary("Vita3K")',
-              f'        Os.setenv("TU_DEBUG", "{mode}", true) // [VS-GINTAMA-TU-MODE22]\n'
-              '        System.loadLibrary("Vita3K")',
-              "TU_DEBUG injection",
-          )
-          path.write_text(text, encoding="utf-8")
-
-          print(
-              f"[VS-GINTAMA-TU-MODE22] build forces Turnip TU_DEBUG={mode}"
-          )
-          print(
-              "[VS-GINTAMA-TU-MODE22] no VitaStation renderer behavior changed"
-          )
-          PY
-
-      - name: Probe22 regression gates
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          import os
-          import subprocess
-
-          mode = os.environ["TURNIP_MODE"].strip().lower()
-
-          gradle = Path("android/app/build.gradle").read_text(encoding="utf-8")
-          if "versionCode = 67" not in gradle:
-              raise SystemExit("::error::PROBE22 versionCode gate failed")
-          if (
-              f'versionName = "0.3.0-alpha4-probe22-turnip-{mode}"'
-              not in gradle
-          ):
-              raise SystemExit("::error::PROBE22 versionName gate failed")
-
-          app = Path(
-              "android/app/src/main/java/org/vita3k/emulator/Vita3KApplication.kt"
-          ).read_text(encoding="utf-8")
-          expected = (
-              f'Os.setenv("TU_DEBUG", "{mode}", true) '
-              "// [VS-GINTAMA-TU-MODE22]"
-          )
-          if expected not in app:
-              raise SystemExit(
-                  "::error::PROBE22 TU_DEBUG injection missing"
-              )
-          if app.find(expected) > app.find(
-              'System.loadLibrary("Vita3K")'
-          ):
-              raise SystemExit(
-                  "::error::PROBE22 TU_DEBUG must be set before native library load"
-              )
-
-          surface = Path(
-              "vita3k/renderer/src/vulkan/surface_cache.cpp"
-          ).read_text(encoding="utf-8")
-
-          required = (
-              "[VS-GINTAMA-FEEDBACK-BOUNDARY14]",
-              "[VS-GINTAMA-DRAWTIME17]",
-              "[VS-GINTAMA-STAGING19]",
-              "[VS-TYPELESS-HD-STAGING]",
-              "[VS-UNCHARTED-TYPELESS-CACHE9]",
-          )
-          for marker in required:
-              if marker not in surface:
-                  raise SystemExit(
-                      f"::error::PROBE22 missing protected marker {marker}"
-                  )
-
-          forbidden = (
-              "[VS-GINTAMA-FEEDBACK-BARRIER15]",
-              "gintama_feedback_outside_pass15",
-              "gintama_to_transfer15",
-          )
-          for marker in forbidden:
-              if marker in surface:
-                  raise SystemExit(
-                      f"::error::PROBE22 forbidden Gintama regression {marker}"
-                  )
-
-          pipeline = Path(
-              "vita3k/renderer/src/vulkan/pipeline_cache.cpp"
-          ).read_text(encoding="utf-8")
-          if (
-              "[VS-GINTAMA-OUTGOING16]" in pipeline
-              or "gintama_outgoing_transfer16" in pipeline
-          ):
-              raise SystemExit(
-                  "::error::PROBE22 OUTGOING16 must remain removed"
-              )
-
-          got = subprocess.check_output(
-              [
-                  "git",
-                  "hash-object",
-                  "vita3k/renderer/src/vulkan/frame_generation.cpp",
-              ],
-              text=True,
-          ).strip()
-          wanted = "1e7cc634f3308566b6ea3d972b73c55086f8f781"
-          if got != wanted:
-              raise SystemExit(
-                  f"::error::PROBE22 FrameGen drift expected={wanted} actual={got}"
-              )
-
-          print(
-              f"[PROBE22] all protected regression gates passed for TU_DEBUG={mode}"
-          )
-          PY
 
       - name: Set up Java 17
         uses: actions/setup-java@v5
@@ -410,7 +92,7 @@ jobs:
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build signed Probe22 APK
+      - name: Build signed APK
         shell: bash
         run: |
           set -euo pipefail
@@ -423,12 +105,12 @@ jobs:
           APK="artifacts/vitastation-android/app.apk"
           test -s "$APK"
           SHA="$(sha256sum "$APK" | awk '{print $1}')"
-          SIZE="$(stat -c '%s' "$APK" | awk '{print $1}')"
+          SIZE="$(stat -c '%s' "$APK")"
 
           echo "APK_SHA256=$SHA" >> "$GITHUB_ENV"
-          echo "[PROBE22] APK=$APK"
-          echo "[PROBE22] APK_SIZE=$SIZE"
-          echo "[PROBE22] APK_SHA256=$SHA"
+          echo "APK=$APK"
+          echo "APK_SIZE=$SIZE"
+          echo "APK_SHA256=$SHA"
 
       - name: Verify permanent APK signature and frozen FrameGen
         shell: bash
@@ -470,7 +152,7 @@ jobs:
           actual = match.group(1).replace(":", "").lower()
           expected = os.environ[
               "VITASTATION_SIGNING_CERT_SHA256"
-              ].lower()
+          ].lower()
 
           if actual != expected:
               raise SystemExit(
@@ -485,7 +167,7 @@ jobs:
                   "vita3k/renderer/src/vulkan/frame_generation.cpp",
               ],
               text=True,
-          ).strip()
+).strip()
 
           wanted = "1e7cc634f3308566b6ea3d972b73c55086f8f781"
           if got != wanted:
@@ -494,33 +176,35 @@ jobs:
               )
 
           print(
-              f"[PROBE22] signing certificate verified: {actual}"
-              f"\n[PROBE22] FrameGen frozen hash verified: {got}"
+              f"signing certificate verified: {actual}"
+          )
+          print(
+              f"FrameGen frozen hash verified: {got}"
           )
           PY
 
-      - name: Package Probe22 APK
+      - name: Package APK
         shell: bash
         run: |
           set -euo pipefail
 
           APK="artifacts/vitastation-android/app.apk"
-          OUT="artifacts/${PROBE_APK_NAME}"
+          OUT="artifacts/VitaStation-Fixed-Signed.apk"
 
           cp "$APK" "$OUT"
           test -s "$OUT"
 
           SHA="$(sha256sum "$OUT" | awk '{print $1}')"
-          SIZE="$(stat -c '%s' "$OUT" | awk '{print $1}')"
+          SIZE="$(stat -c '%s' "$OUT")"
 
-          echo "[PROBE22] packaged=$OUT"
-          echo "[PROBE22] packaged_size=$SIZE"
-          echo "[PROBE22] packaged_sha256=$SHA"
+          echo "packaged=$OUT"
+          echo "packaged_size=$SIZE"
+          echo "packaged_sha256=$SHA"
 
-      - name: Upload Probe22 APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: VitaStation-v0.3.0-Alpha4-PROBE22-Turnip-${{ matrix.turnip_mode }}-Signed
-          path: artifacts/${{ env.PROBE_APK_NAME }}
+          name: VitaStation-Fixed-Signed
+          path: artifacts/VitaStation-Fixed-Signed.apk
           if-no-files-found: error
           retention-days: 14

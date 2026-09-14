@@ -1,10 +1,10 @@
-name: VitaStation Android Build (Fixes Applied)
+name: VitaStation Android Build (FIX21 Base + New Fixes)
 
 "on":
   workflow_dispatch:
   push:
     paths:
-      - .github/workflows/workflow.yml
+      - .github/workflows/android-build.yml
 
 permissions:
   contents: read
@@ -28,6 +28,162 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
+
+      - name: Reconstruct exact FIX21 runtime source from verified parent
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+          import subprocess
+
+          FIX21_WORKFLOW_COMMIT = "b9e7cfd66daf3791d51f8c5c3d2ea8ca4009044c"
+          workflow = subprocess.check_output(
+              ["git", "show", f"{FIX21_WORKFLOW_COMMIT}:.github/workflows/android-build.yml"],
+              text=True,
+          )
+
+          start_marker = "      - name: Apply exact verified FIX7-R2 baseline from green Run 52\n"
+          end_marker = "      - name: Set up Java 17\n"
+
+          start = workflow.find(start_marker)
+          end = workflow.find(end_marker, start)
+          if start < 0 or end < 0 or end <= start:
+              raise SystemExit("::error::FIX21 parent reconstruction boundary failed")
+
+          section = workflow[start:end]
+          step_matches = list(re.finditer(r"(?m)^      - name: (.+)$", section))
+
+          github_env_path = Path(os.environ["GITHUB_ENV"])
+
+          def refresh_env(base_env):
+              if not github_env_path.exists(): return base_env
+              lines = github_env_path.read_text(encoding="utf-8", errors="replace").splitlines()
+              parsed = {}
+              i = 0
+              while i < len(lines):
+                  line = lines[i]
+                  if "<<" in line and "=" not in line.split("<<", 1)[0]:
+                      key, delimiter = line.split("<<", 1)
+                      key, delimiter = key.strip(), delimiter.strip()
+                      i += 1
+                      values = []
+                      while i < len(lines) and lines[i] != delimiter:
+                          values.append(lines[i]); i += 1
+                      parsed[key] = "\n".join(values)
+                  elif "=" in line:
+                      key, value = line.split("=", 1)
+                      if key: parsed[key] = value
+                  i += 1
+              base_env.update(parsed)
+              return base_env
+
+          env = dict(os.environ)
+          for idx, match in enumerate(step_matches):
+              block_start = match.start()
+              block_end = step_matches[idx + 1].start() if idx + 1 < len(step_matches) else len(section)
+              block = section[block_start:block_end]
+
+              literal = re.search(r"(?m)^        run:\s*\|\s*$", block)
+              if literal:
+                  raw = block[literal.end():]
+                  script_lines = []
+                  for line in raw.splitlines():
+                      if line.startswith("          "): script_lines.append(line[10:])
+                      elif not line.strip(): script_lines.append("")
+                      else: break
+                  script = "\n".join(script_lines).rstrip() + "\n"
+              else:
+                  single = re.search(r"(?m)^        run:\s+(.+)$", block)
+                  if not single: continue
+                  script = single.group(1).strip() + "\n"
+
+              env = refresh_env(env)
+              subprocess.run(["bash", "-c", script], cwd=".", env=env, check=True)
+              env = refresh_env(env)
+
+          print("[VS-FIX21] Base reconstructed successfully.")
+          PY
+
+      - name: Apply New Fixes (LORD and GINTAMA)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          # --- LORD Fix: Normalize U8 attributes ---
+          path_lord = Path("vita3k/shader/src/spirv_recompiler.cpp")
+          text_lord = path_lord.read_text(encoding="utf-8")
+          if "convert_to_float(b, utils, var, dest.type, false)" in text_lord:
+              text_lord = text_lord.replace("convert_to_float(b, utils, var, dest.type, false)",
+                                            "convert_to_float(b, utils, var, dest.type, true)")
+              path_lord.write_text(text_lord, encoding="utf-8")
+              print("[FIX] LORD skinning normalization applied.")
+
+          # --- GINTAMA Fix: Attachment Feedback Loop ---
+          # 1. FeatureState
+          path_state = Path("vita3k/features/include/features/state.h")
+          text_state = path_state.read_text(encoding="utf-8")
+          if "support_attachment_feedback" not in text_state:
+              text_state = text_state.replace("bool use_texture_viewport = false; ///< Are we using texture viewports in the shader",
+                                              "bool use_texture_viewport = false; ///< Are we using texture viewports in the shader\n    bool support_attachment_feedback = false; ///< Is the attachment feedback loop layout extension supported?")
+              path_state.write_text(text_state, encoding="utf-8")
+              print("[FIX] Gintama: FeatureState updated.")
+
+          # 2. Renderer (Extensions and Device Creation)
+          path_rend = Path("vita3k/renderer/src/vulkan/renderer.cpp")
+          text_rend = path_rend.read_text(encoding="utf-8")
+
+          # Add extension to map
+          if '"VK_EXT_attachment_feedback_loop_layout"' not in text_rend:
+              text_rend = text_rend.replace('{ "VK_EXT_FragmentShaderInterlockExtensionName", &support_shader_interlock },',
+                                              '{ "VK_EXT_FragmentShaderInterlockExtensionName", &support_shader_interlock },\n            { "VK_EXT_attachment_feedback_loop_layout", &support_attachment_feedback },')
+
+          # Add feature check
+          if "support_attachment_feedback" not in text_rend:
+              # Insert after shader_interlock check
+              marker = "features.support_shader_interlock = support_shader_interlock;"
+              if marker in text_rend:
+                  insertion = "\n        if (support_attachment_feedback) {\n            auto props = physical_device.getFeatures2KHR<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT>();\n            support_attachment_feedback = static_cast<bool>(props.get<vk::PhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT>().attachmentFeedbackLoopLayout);\n            features.support_attachment_feedback = support_attachment_feedback;\n        }"
+                  text_rend = text_rend.replace(marker, marker + insertion)
+
+          # Update StructureChain
+          if "vk::PhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT" not in text_rend:
+              text_rend = text_rend.replace("vk::PhysicalDeviceFragmentShaderInterlockFeaturesEXT,",
+                                              "vk::PhysicalDeviceFragmentShaderInterlockFeaturesEXT,\n            vk::PhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT,")
+              text_rend = text_rend.replace(".fragmentShaderSampleInterlock = VK_TRUE },",
+                                              ".fragmentShaderSampleInterlock = VK_TRUE },\n                vk::PhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT{\n                    .attachmentFeedbackLoopLayout = VK_TRUE },")
+              text_rend = text_rend.replace("if (!support_shader_interlock)",
+                                              "if (!support_shader_interlock)\n        if (!support_attachment_feedback)\n            device_info.unlink<vk::PhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT>();")
+              # Fix the unlink logic properly
+              text_rend = text_rend.replace("if (!support_shader_interlock)\n            device_info.unlink<vk::PhysicalDeviceFragmentShaderInterlockFeaturesEXT>();",
+                                              "if (!support_shader_interlock)\n            device_info.unlink<vk::PhysicalDeviceFragmentShaderInterlockFeaturesEXT>();\n        if (!support_attachment_feedback)\n            device_info.unlink<vk::PhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT>();")
+
+          path_rend.write_text(text_rend, encoding="utf-8")
+          print("[FIX] Gintama: Renderer updated.")
+
+          # 3. Surface Cache (Barriers and Layouts)
+          path_surf = Path("vita3k/renderer/src/vulkan/surface_cache.cpp")
+          text_surf = path_surf.read_text(encoding="utf-8")
+
+          # Update Barrier Layouts
+          text_surf = text_surf.replace(".oldLayout = vk::ImageLayout::eGeneral,\n                .newLayout = vk::ImageLayout::eGeneral,",
+                                         ".oldLayout = state.features.support_attachment_feedback ? vk::ImageLayout::eAttachmentFeedbackLoopOptimalEXT : vk::ImageLayout::eGeneral,\n                .newLayout = state.features.support_attachment_feedback ? vk::ImageLayout::eAttachmentFeedbackLoopOptimalEXT : vk::ImageLayout::eGeneral,")
+
+          # Update copyImage
+          text_surf = text_surf.replace("cmd_buffer.copyImage(info.texture.image, vk::ImageLayout::eGeneral, casted->texture.image, vk::ImageLayout::eTransferDstOptimal, image_copy);",
+                                         "cmd_buffer.copyImage(info.texture.image, state.features.support_attachment_feedback ? vk::ImageLayout::eAttachmentFeedbackLoopOptimalEXT : vk::ImageLayout::eGeneral, casted->texture.image, vk::ImageLayout::eTransferDstOptimal, image_copy);")
+
+          # Update copyImageToBuffer
+          text_surf = text_surf.replace("cmd_buffer.copyImageToBuffer(\n                    info.texture.image,\n                    vk::ImageLayout::eGeneral,\n                    info.reinterpret_staging_buffer->buffer,",
+                                         "cmd_buffer.copyImageToBuffer(\n                    info.texture.image,\n                    state.features.support_attachment_feedback ? vk::ImageLayout::eAttachmentFeedbackLoopOptimalEXT : vk::ImageLayout::eGeneral,\n                    info.reinterpret_staging_buffer->buffer,")
+
+          path_surf.write_text(text_surf, encoding="utf-8")
+          print("[FIX] Gintama: SurfaceCache updated.")
+          PY
 
       - name: Set up Java 17
         uses: actions/setup-java@v5

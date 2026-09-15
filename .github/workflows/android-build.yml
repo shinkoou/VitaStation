@@ -145,7 +145,7 @@ jobs:
           print(f'[FIX24] exact FIX21 runtime patch stack reconstructed; inherited run steps={ran}')
           PY
 
-      - name: Inject FIX24 Memory Barriers & Lord Deadlock Breaker
+      - name: Inject FIX25 Memory Barriers & Lord Alignment
         shell: bash
         run: |
           set -euo pipefail
@@ -154,10 +154,10 @@ jobs:
 
           path = Path('android/app/build.gradle')
           text = path.read_text(encoding='utf-8')
-          text = text.replace('versionCode = 66', 'versionCode = 69', 1)
+          text = text.replace('versionCode = 69', 'versionCode = 70', 1)
           text = text.replace(
-              'versionName = "0.3.0-alpha4-fix21-lord-skin-diag-gintama-feedback-cap"',
               'versionName = "0.3.0-alpha4-fix24-feedback-sync"',
+              'versionName = "0.3.0-alpha4-fix25-feedback-sync-lord-align"',
               1
           )
           path.write_text(text, encoding='utf-8')
@@ -167,7 +167,7 @@ jobs:
               t = p.read_text(encoding="utf-8")
               n = t.count(a)
               if n != 1:
-                  raise SystemExit(f"::error::FIX24 {label}: anchor count={n}")
+                  raise SystemExit(f"::error::FIX25 {label}: anchor count={n}")
               t = t.replace(a, b, 1)
               p.write_text(t, encoding="utf-8")
 
@@ -176,7 +176,7 @@ jobs:
               "namespace renderer::vulkan {\n",
               """namespace renderer::vulkan {
 
-          // [VS-GINTAMA-FEEDBACK-SYNC24]
+          // [VS-GINTAMA-FEEDBACK-SYNC25]
           static void barrier_render_to_transfer_read(vk::CommandBuffer cmd_buffer, vk::Image image) {
               const vk::ImageMemoryBarrier barrier{
                   .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eShaderWrite,
@@ -199,26 +199,22 @@ jobs:
 
           once(
               "vita3k/renderer/src/vulkan/surface_cache.cpp",
-              "const bool late_resolve_in_renderpass = needs_late_resolve && context->in_renderpass;",
-              """const bool late_resolve_in_renderpass = needs_late_resolve && context->in_renderpass;
-          
-          // [VS-GINTAMA-FEEDBACK-SYNC24] - Flush GMEM explicitly before resolve in late_resolve path
-          if (needs_late_resolve) {
-              vk::CommandBuffer local_cmd_buffer = context->in_renderpass ? context->render_cmd : context->prerender_cmd;
-              barrier_render_to_transfer_read(local_cmd_buffer, info.texture.image);
-          }
+              "context->stop_render_pass();",
+              """context->stop_render_pass();
+            
+            // [VS-GINTAMA-FEEDBACK-SYNC25] - Safely explicit flush now that render pass is stopped
+            barrier_render_to_transfer_read(cmd_buffer, info.texture.image);
           """, 
-              "resolve barrier injection"
+              "resolve barrier safe injection"
           )
 
           once(
               "vita3k/renderer/src/vulkan/surface_cache.cpp",
-              "[VS-GINTAMA-STAGING19]",
               "[VS-GINTAMA-STAGING19] [VS-GINTAMA-FEEDBACK-SYNC24]",
+              "[VS-GINTAMA-STAGING19] [VS-GINTAMA-FEEDBACK-SYNC25]",
               "marker injection"
           )
 
-          # Injeção para o Lord of Apocalypse (Deadlock breaker no Kernel)
           once(
               "vita3k/kernel/src/sync_primitives.cpp",
               "            if (((++ownership_rewaits & 0xFFu) == 1u)) {",
@@ -233,10 +229,10 @@ jobs:
               "kernel deadlock breaker injection"
           )
 
-          print("[FIX24] Memory barriers and Lord Deadlock Breaker injected correctly")
+          print("[FIX25] Memory barriers and Lord Alignment injected correctly")
           PY
 
-      - name: FIX24 regression gates
+      - name: FIX25 regression gates
         shell: bash
         run: |
           set -euo pipefail
@@ -245,10 +241,10 @@ jobs:
           import subprocess
 
           gradle = Path('android/app/build.gradle').read_text(encoding='utf-8')
-          if 'versionCode = 69' not in gradle:
-              raise SystemExit('::error::FIX24 versionCode gate failed')
-          if 'versionName = "0.3.0-alpha4-fix24-feedback-sync"' not in gradle:
-              raise SystemExit('::error::FIX24 versionName gate failed')
+          if 'versionCode = 70' not in gradle:
+              raise SystemExit('::error::FIX25 versionCode gate failed')
+          if 'versionName = "0.3.0-alpha4-fix25-feedback-sync-lord-align"' not in gradle:
+              raise SystemExit('::error::FIX25 versionName gate failed')
 
           surface = Path('vita3k/renderer/src/vulkan/surface_cache.cpp').read_text(encoding='utf-8')
           for required in (
@@ -257,14 +253,14 @@ jobs:
               '[VS-GINTAMA-STAGING19]',
               '[VS-TYPELESS-HD-STAGING]',
               '[VS-UNCHARTED-TYPELESS-CACHE9]',
-              '[VS-GINTAMA-FEEDBACK-SYNC24]',
+              '[VS-GINTAMA-FEEDBACK-SYNC25]',
           ):
               if required not in surface:
-                  raise SystemExit(f'::error::FIX24 missing protected marker {required}')
+                  raise SystemExit(f'::error::FIX25 missing protected marker {required}')
 
           sync = Path('vita3k/kernel/src/sync_primitives.cpp').read_text(encoding='utf-8')
           if '[VS-LORD-DEADLOCK-BREAKER]' not in sync:
-              raise SystemExit('::error::FIX24 missing Deadlock Breaker marker in kernel')
+              raise SystemExit('::error::FIX25 missing Deadlock Breaker marker in kernel')
 
           for forbidden in (
               '[VS-GINTAMA-FEEDBACK-BARRIER15]',

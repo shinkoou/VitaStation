@@ -210,7 +210,7 @@ jobs:
 
           once(
               "vita3k/renderer/src/vulkan/surface_cache.cpp",
-              "[VS-GINTAMA-STAGING19] [VS-GINTAMA-FEEDBACK-SYNC24]",
+              "[VS-GINTAMA-STAGING19]",
               "[VS-GINTAMA-STAGING19] [VS-GINTAMA-FEEDBACK-SYNC25]",
               "marker injection"
           )

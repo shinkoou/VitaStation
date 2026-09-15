@@ -1,6 +1,6 @@
 name: VitaStation Gintama Surface Feedback Sync FIX24
 
-"on":
+on:
   workflow_dispatch:
   push:
     paths:
@@ -34,14 +34,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git fetch origin b9e7cfd66daf3791d51f8c5c3d2ea8ca4009044c || true
           python3 - <<'PY'
           from pathlib import Path
           import os
           import re
           import subprocess
+          import urllib.request
 
-          workflow_path = Path('.github/workflows/android-build.yml')
-          workflow = workflow_path.read_text(encoding='utf-8')
+          fix21_commit = 'b9e7cfd66daf3791d51f8c5c3d2ea8ca4009044c'
+          try:
+              workflow = subprocess.check_output(
+                  ['git', 'show', f'{fix21_commit}:.github/workflows/android-build.yml'],
+                  text=True,
+              )
+          except subprocess.CalledProcessError:
+              print("[FIX24] git show failed, downloading raw file via HTTP...")
+              url = f'https://raw.githubusercontent.com/shinkoou/VitaStation/{fix21_commit}/.github/workflows/android-build.yml'
+              req = urllib.request.Request(url)
+              with urllib.request.urlopen(req) as response:
+                  workflow = response.read().decode('utf-8')
 
           start_marker = '      - name: Apply exact verified FIX7-R2 baseline from green Run 52\n'
           end_marker = '      - name: Set up Java 17\n'
@@ -138,8 +150,7 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          
-          # 1. Update Gradle config
+
           path = Path('android/app/build.gradle')
           text = path.read_text(encoding='utf-8')
           text = text.replace('versionCode = 66', 'versionCode = 69', 1)
@@ -150,7 +161,6 @@ jobs:
           )
           path.write_text(text, encoding='utf-8')
 
-          # 2. Inject structural FIX24 into surface_cache.cpp
           p = Path("vita3k/renderer/src/vulkan/surface_cache.cpp")
           t = p.read_text(encoding="utf-8")
 
@@ -190,7 +200,7 @@ jobs:
               "static void protect_surface",
               """// [VS-GINTAMA-FEEDBACK-SYNC24] - Flush GMEM before resolve
           barrier_render_to_transfer_read(cmd_buffer, src_image);
-          
+
           static void protect_surface""", 
               "resolve barrier injection"
           )
@@ -209,7 +219,6 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          import os
           import subprocess
 
           gradle = Path('android/app/build.gradle').read_text(encoding='utf-8')
@@ -229,7 +238,7 @@ jobs:
           ):
               if required not in surface:
                   raise SystemExit(f'::error::FIX24 missing protected marker {required}')
-          
+
           for forbidden in (
               '[VS-GINTAMA-FEEDBACK-BARRIER15]',
               'gintama_feedback_outside_pass15',

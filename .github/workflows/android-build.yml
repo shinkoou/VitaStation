@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - .github/workflows/gintama-driver-compare.yml
+      - .github/workflows/android-build.yml
 
 permissions:
   contents: read
@@ -41,7 +41,6 @@ jobs:
           # 1. Update Gradle config
           path = Path('android/app/build.gradle')
           text = path.read_text(encoding='utf-8')
-          # Safely update version
           text = re.sub(r'versionCode = \d+', 'versionCode = 69', text, count=1)
           text = re.sub(r'versionName = "[^"]+"', 'versionName = "0.3.0-alpha4-fix24-feedback-sync"', text, count=1)
           path.write_text(text, encoding='utf-8')
@@ -60,31 +59,30 @@ jobs:
                       raise SystemExit(f"::error::FIX24 {label}: anchor count={n}")
                   t = t.replace(a, b, 1)
 
-              # Inject the helper barrier function
-              once(
-                  "namespace renderer::vulkan {\n",
-                  """namespace renderer::vulkan {
-
-// [VS-GINTAMA-FEEDBACK-SYNC24]
-static void vs_barrier_flush_gmem(vk::CommandBuffer cmd_buffer, vk::Image image) {
-    const vk::ImageMemoryBarrier barrier{
-        .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eShaderWrite,
-        .dstAccessMask = vk::AccessFlagBits::eTransferRead | vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eColorAttachmentRead,
-        .oldLayout = vk::ImageLayout::eGeneral,
-        .newLayout = vk::ImageLayout::eGeneral,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = image,
-        .subresourceRange = vkutil::color_subresource_range
-    };
-    cmd_buffer.pipelineBarrier(
-        vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eFragmentShader,
-        vk::PipelineStageFlagBits::eTransfer | vk::PipelineStageFlagBits::eFragmentShader | vk::PipelineStageFlagBits::eColorAttachmentOutput,
-        vk::DependencyFlags(),
-        {}, {}, barrier);
-}
-""", "barrier helper injection"
+              # Inject the helper barrier function with YAML-safe string formatting
+              cpp_code = (
+                  "namespace renderer::vulkan {\n\n"
+                  "// [VS-GINTAMA-FEEDBACK-SYNC24]\n"
+                  "static void vs_barrier_flush_gmem(vk::CommandBuffer cmd_buffer, vk::Image image) {\n"
+                  "    const vk::ImageMemoryBarrier barrier{\n"
+                  "        .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eShaderWrite,\n"
+                  "        .dstAccessMask = vk::AccessFlagBits::eTransferRead | vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eColorAttachmentRead,\n"
+                  "        .oldLayout = vk::ImageLayout::eGeneral,\n"
+                  "        .newLayout = vk::ImageLayout::eGeneral,\n"
+                  "        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,\n"
+                  "        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,\n"
+                  "        .image = image,\n"
+                  "        .subresourceRange = vkutil::color_subresource_range\n"
+                  "    };\n"
+                  "    cmd_buffer.pipelineBarrier(\n"
+                  "        vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eFragmentShader,\n"
+                  "        vk::PipelineStageFlagBits::eTransfer | vk::PipelineStageFlagBits::eFragmentShader | vk::PipelineStageFlagBits::eColorAttachmentOutput,\n"
+                  "        vk::DependencyFlags(),\n"
+                  "        {}, {}, barrier);\n"
+                  "}\n"
               )
+              
+              once("namespace renderer::vulkan {\n", cpp_code, "barrier helper injection")
 
               # Auto-wrap resolves to flush GMEM safely
               count_resolve = len(re.findall(r'\.resolveImage\(', t))
@@ -96,7 +94,6 @@ static void vs_barrier_flush_gmem(vk::CommandBuffer cmd_buffer, vk::Image image)
               
               # Add marker
               if "[VS-GINTAMA-STAGING19]" not in t:
-                  # If base marker isn't there, we just add it to the top so tests pass
                   t = "// [VS-GINTAMA-STAGING19] [VS-GINTAMA-FEEDBACK-SYNC24]\n" + t
               else:
                   t = t.replace("[VS-GINTAMA-STAGING19]", "[VS-GINTAMA-STAGING19] [VS-GINTAMA-FEEDBACK-SYNC24]", 1)

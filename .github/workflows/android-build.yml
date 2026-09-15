@@ -221,29 +221,15 @@ jobs:
           # Injeção para o Lord of Apocalypse (Deadlock breaker no Kernel)
           once(
               "vita3k/kernel/src/sync_primitives.cpp",
-              """            if (((++ownership_rewaits & 0xFFu) == 1u)) {
-                LOG_DEBUG(
-                    "[VS-KERNEL-OWNERSHIP-WAIT] mutex={} tid={} owner={} rewaits={}",
-                    mutex->uid,
-                    thread_id,
-                    mutex->owner ? mutex->owner->id : 0,
-                    ownership_rewaits);
-            }""",
-              """            if (((++ownership_rewaits & 0xFFu) == 1u)) {
-                LOG_DEBUG(
-                    "[VS-KERNEL-OWNERSHIP-WAIT] mutex={} tid={} owner={} rewaits={}",
-                    mutex->uid,
-                    thread_id,
-                    mutex->owner ? mutex->owner->id : 0,
-                    ownership_rewaits);
-            }
-            // [VS-LORD-DEADLOCK-BREAKER]
+              "            if (((++ownership_rewaits & 0xFFu) == 1u)) {",
+              """            // [VS-LORD-DEADLOCK-BREAKER]
             if (ownership_rewaits > 1000) {
                 LOG_ERROR("[VS-LORD-DEADLOCK-BREAKER] Forcing ownership transfer of mutex {} from {} to {}", mutex->uid, mutex->owner ? mutex->owner->id : 0, thread_id);
                 mutex->owner = thread;
                 res = SCE_KERNEL_OK;
                 break;
-            }""",
+            }
+            if (((++ownership_rewaits & 0xFFu) == 1u)) {""",
               "kernel deadlock breaker injection"
           )
 

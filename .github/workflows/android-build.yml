@@ -1,6 +1,6 @@
-name: VitaStation Gintama Surface Lifetime Probe23 SYSMEM
+name: VitaStation Gintama Surface Feedback Sync FIX24
 
-"on":
+on:
   workflow_dispatch:
   push:
     paths:
@@ -10,20 +10,18 @@ permissions:
   contents: read
 
 concurrency:
-  group: vitastation-gintama-surface-probe23-${{ github.ref }}
+  group: vitastation-gintama-fix24-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   VCPKG_ROOT: /usr/local/share/vcpkg
   VITASTATION_SIGNING_CERT_SHA256: fc57542b62221ad0c0550d12b2791e4e40794e980c9f26a86d83250d67ed5d30
+  PROBE_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX24-FeedbackSync-Signed.apk
 
 jobs:
-  build-probe:
-    name: Gintama Surface Lifetime Probe23 SYSMEM
+  build-fix:
+    name: Build FIX24 Feedback Sync
     runs-on: ubuntu-latest
-    env:
-      TURNIP_MODE: sysmem
-      PROBE_APK_NAME: VitaStation-v0.3.0-Alpha4-PROBE23-SYSMEM-Signed.apk
 
     steps:
       - name: Checkout VitaStation
@@ -50,12 +48,12 @@ jobs:
           start = workflow.find(start_marker)
           end = workflow.find(end_marker, start)
           if start < 0 or end < 0 or end <= start:
-              raise SystemExit('::error::PROBE23 could not locate FIX21 patch-stack boundaries')
+              raise SystemExit('::error::FIX24 could not locate FIX21 patch-stack boundaries')
 
           section = workflow[start:end]
           step_matches = list(re.finditer(r'(?m)^      - name: (.+)$', section))
           if not step_matches:
-              raise SystemExit('::error::PROBE23 found no inherited FIX21 steps')
+              raise SystemExit('::error::FIX24 found no inherited FIX21 steps')
 
           github_env_path = Path(os.environ['GITHUB_ENV'])
 
@@ -111,7 +109,7 @@ jobs:
                       continue
                   script = single.group(1).strip() + '\n'
 
-              print(f'\n[PROBE23] >>> inherited FIX21 step: {name}', flush=True)
+              print(f'\n[FIX24] >>> inherited FIX21 step: {name}', flush=True)
               env = refresh_env(env)
               subprocess.run(
                   ['bash', '-c', script],
@@ -123,77 +121,34 @@ jobs:
               ran += 1
 
           if ran < 10:
-              raise SystemExit(f'::error::PROBE23 inherited suspiciously few FIX21 steps: {ran}')
+              raise SystemExit(f'::error::FIX24 inherited suspiciously few FIX21 steps: {ran}')
 
           gradle = Path('android/app/build.gradle').read_text(encoding='utf-8')
           if 'versionCode = 66' not in gradle or '0.3.0-alpha4-fix21-lord-skin-diag-gintama-feedback-cap' not in gradle:
-              raise SystemExit('::error::PROBE23 FIX21 reconstruction did not reach expected version')
+              raise SystemExit('::error::FIX24 runtime reconstruction did not reach expected version')
 
-          print(f'[PROBE23] exact FIX21 runtime patch stack reconstructed; inherited run steps={ran}')
+          print(f'[FIX24] exact FIX21 runtime patch stack reconstructed; inherited run steps={ran}')
           PY
 
-      - name: Apply Turnip render-mode probe
+      - name: Inject FIX24 Memory Barriers
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          import os
-
-          mode = os.environ['TURNIP_MODE'].strip().lower()
-          if mode != 'sysmem':
-              raise SystemExit(f'::error::PROBE23 expected SYSMEM, got TURNIP_MODE={mode!r}')
-
-          def replace_once(text, old, new, label):
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'::error::PROBE23 {label}: expected one anchor, found {count}')
-              return text.replace(old, new, 1)
-
-          # Distinguish this probe from FIX21 without touching package identity/signing.
+          
+          # 1. Update Gradle config
           path = Path('android/app/build.gradle')
           text = path.read_text(encoding='utf-8')
-          text = replace_once(text, 'versionCode = 66', 'versionCode = 68', 'versionCode')
-          text = replace_once(
-              text,
+          text = text.replace('versionCode = 66', 'versionCode = 69', 1)
+          text = text.replace(
               'versionName = "0.3.0-alpha4-fix21-lord-skin-diag-gintama-feedback-cap"',
-              f'versionName = "0.3.0-alpha4-probe23-sysmem"',
-              'versionName',
+              'versionName = "0.3.0-alpha4-fix24-feedback-sync"',
+              1
           )
           path.write_text(text, encoding='utf-8')
 
-          # TU_DEBUG is consumed by Mesa Turnip. Qualcomm's proprietary Vulkan
-          # implementation ignores this variable, so the proprietary-driver path
-          # remains behaviorally equivalent to FIX21. Set it before Vita3K/native
-          # libraries initialize so the custom Turnip driver sees it on load.
-          path = Path('android/app/src/main/java/org/vita3k/emulator/Vita3KApplication.kt')
-          text = path.read_text(encoding='utf-8')
-          if 'import android.system.Os\n' not in text:
-              text = replace_once(
-                  text,
-                  'import android.app.Application\n',
-                  'import android.app.Application\nimport android.system.Os\n',
-                  'android.system.Os import',
-              )
-          text = replace_once(
-              text,
-              '        System.loadLibrary("Vita3K")',
-              f'        Os.setenv("TU_DEBUG", "{mode}", true) // [VS-GINTAMA-TU-MODE22]\n'
-              '        System.loadLibrary("Vita3K")',
-              'TU_DEBUG injection',
-          )
-          path.write_text(text, encoding='utf-8')
-
-          print(f'[VS-GINTAMA-TU-MODE22] build forces Turnip TU_DEBUG={mode}')
-          print('[VS-GINTAMA-TU-MODE22] proprietary Qualcomm path is not driver-name patched')
-          PY
-
-      - name: Apply Probe23 diagnostic-only surface/lifetime instrumentation
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
+          # 2. Inject structural FIX24 into surface_cache.cpp
           p = Path("vita3k/renderer/src/vulkan/surface_cache.cpp")
           t = p.read_text(encoding="utf-8")
 
@@ -201,87 +156,55 @@ jobs:
               global t
               n = t.count(a)
               if n != 1:
-                  raise SystemExit(f"::error::PROBE23 {label}: anchor count={n}")
+                  raise SystemExit(f"::error::FIX24 {label}: anchor count={n}")
               t = t.replace(a, b, 1)
 
-          once("#include <array>\n", "#include <array>\n#include <atomic>\n", "atomic include")
+          # Inject the helper barrier function
           once(
               "namespace renderer::vulkan {\n",
-              "namespace renderer::vulkan {\n\nstatic std::atomic<uint64_t> vs_probe23_seq{0};\nstatic uint64_t probe23_next_seq() { return ++vs_probe23_seq; }\n",
-              "diag helpers",
-          )
-          once(
-              """    pending.push_back(clipped);
-          
-              constexpr size_t kMaxPendingRegions = 48;
-              if (pending.size() > kMaxPendingRegions) {
-                  pending.clear();
-                  pending.push_back(vk::Rect2D{
-                      .offset = { 0, 0 },
-                      .extent = { surface_width, surface_height }
-                  });
-              }
-          """,
-              """    const uint64_t probe_seq = probe23_next_seq();
-              LOG_DEBUG("[VS-REGION23] seq={} pending_before={} region={},{} {}x{}", probe_seq, pending.size(), clipped.offset.x, clipped.offset.y, clipped.extent.width, clipped.extent.height);
-              pending.push_back(clipped);
-          
-              constexpr size_t kMaxPendingRegions = 48;
-              if (pending.size() > kMaxPendingRegions) {
-                  LOG_DEBUG("[VS-REGION23] seq={} COLLAPSE_TO_FULL_SURFACE pending={} surface={}x{}", probe_seq, pending.size(), surface_width, surface_height);
-                  pending.clear();
-                  pending.push_back(vk::Rect2D{
-                      .offset = { 0, 0 },
-                      .extent = { surface_width, surface_height }
-                  });
-              }
-              LOG_DEBUG("[VS-REGION23] seq={} pending_after={}", probe_seq, pending.size());
-          """,
-              "append_region",
-          )
-          once(
-              """    if (region_empty(resolved))
-                  return;
-          
-              std::vector<vk::Rect2D> remaining;""",
-              """    if (region_empty(resolved))
-                  return;
-              const uint64_t probe_seq = probe23_next_seq();
-              LOG_DEBUG("[VS-RESOLVE23] seq={} pending_before={} resolved={},{} {}x{}", probe_seq, pending.size(), resolved.offset.x, resolved.offset.y, resolved.extent.width, resolved.extent.height);
-          
-              std::vector<vk::Rect2D> remaining;""",
-              "subtract_region",
-          )
-          once(
-              """    pending.swap(remaining);
+              """namespace renderer::vulkan {
+
+          // [VS-GINTAMA-FEEDBACK-SYNC24]
+          static void barrier_render_to_transfer_read(vk::CommandBuffer cmd_buffer, vk::Image image) {
+              const vk::ImageMemoryBarrier barrier{
+                  .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eShaderWrite,
+                  .dstAccessMask = vk::AccessFlagBits::eTransferRead | vk::AccessFlagBits::eShaderRead,
+                  .oldLayout = vk::ImageLayout::eGeneral,
+                  .newLayout = vk::ImageLayout::eGeneral,
+                  .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                  .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                  .image = image,
+                  .subresourceRange = vkutil::color_subresource_range
+              };
+              cmd_buffer.pipelineBarrier(
+                  vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eFragmentShader,
+                  vk::PipelineStageFlagBits::eTransfer | vk::PipelineStageFlagBits::eFragmentShader,
+                  vk::DependencyFlags(),
+                  {}, {}, barrier);
           }
-          
-          
-          static void protect_surface""",
-              """    pending.swap(remaining);
-              LOG_DEBUG("[VS-RESOLVE23] seq={} pending_after={}", probe_seq, pending.size());
-          }
-          
-          
-          static void protect_surface""",
-              "resolve after",
+          """, "barrier helper injection"
           )
+
+          # Inject protection before resolving the surface
           once(
-              """void VKSurfaceCache::destroy_surface(ColorSurfaceCacheInfo &info) {
-              vkutil::DestroyQueue &destroy_queue = state.frame().destroy_queue;""",
-              """void VKSurfaceCache::destroy_surface(ColorSurfaceCacheInfo &info) {
-              vkutil::DestroyQueue &destroy_queue = state.frame().destroy_queue;
-              LOG_DEBUG("[VS-LIFETIME23] seq={} surface={} destroy_requested", probe23_next_seq(), static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(&info)));""",
-              "destroy lifetime",
+              "static void protect_surface",
+              """// [VS-GINTAMA-FEEDBACK-SYNC24] - Flush GMEM before resolve
+          barrier_render_to_transfer_read(cmd_buffer, src_image);
+          
+          static void protect_surface""", 
+              "resolve barrier injection"
           )
+
+          # Add marker for regression checks
           if "[VS-GINTAMA-STAGING19]" not in t:
-              raise SystemExit("::error::PROBE23 STAGING19 marker missing")
-          t = t.replace("[VS-GINTAMA-STAGING19]", "[VS-GINTAMA-STAGING19] [VS-STAGING23]", 1)
+              raise SystemExit("::error::FIX24 STAGING19 marker missing")
+          t = t.replace("[VS-GINTAMA-STAGING19]", "[VS-GINTAMA-STAGING19] [VS-GINTAMA-FEEDBACK-SYNC24]", 1)
+
           p.write_text(t, encoding="utf-8")
-          print("[PROBE23] diagnostic-only instrumentation applied")
+          print("[FIX24] Memory barriers injected into surface_cache.cpp")
           PY
 
-      - name: Probe23 regression gates
+      - name: FIX24 regression gates
         shell: bash
         run: |
           set -euo pipefail
@@ -290,20 +213,11 @@ jobs:
           import os
           import subprocess
 
-          mode = os.environ['TURNIP_MODE'].strip().lower()
-
           gradle = Path('android/app/build.gradle').read_text(encoding='utf-8')
-          if 'versionCode = 68' not in gradle:
-              raise SystemExit('::error::PROBE23 versionCode gate failed')
-          if f'versionName = "0.3.0-alpha4-probe23-sysmem"' not in gradle:
-              raise SystemExit('::error::PROBE23 versionName gate failed')
-
-          app = Path('android/app/src/main/java/org/vita3k/emulator/Vita3KApplication.kt').read_text(encoding='utf-8')
-          expected = f'Os.setenv("TU_DEBUG", "{mode}", true) // [VS-GINTAMA-TU-MODE22]'
-          if expected not in app:
-              raise SystemExit('::error::PROBE23 TU_DEBUG injection missing')
-          if app.find(expected) > app.find('System.loadLibrary("Vita3K")'):
-              raise SystemExit('::error::PROBE23 TU_DEBUG must be set before native library load')
+          if 'versionCode = 69' not in gradle:
+              raise SystemExit('::error::FIX24 versionCode gate failed')
+          if 'versionName = "0.3.0-alpha4-fix24-feedback-sync"' not in gradle:
+              raise SystemExit('::error::FIX24 versionName gate failed')
 
           surface = Path('vita3k/renderer/src/vulkan/surface_cache.cpp').read_text(encoding='utf-8')
           for required in (
@@ -312,20 +226,22 @@ jobs:
               '[VS-GINTAMA-STAGING19]',
               '[VS-TYPELESS-HD-STAGING]',
               '[VS-UNCHARTED-TYPELESS-CACHE9]',
+              '[VS-GINTAMA-FEEDBACK-SYNC24]',
           ):
               if required not in surface:
-                  raise SystemExit(f'::error::PROBE23 missing protected marker {required}')
+                  raise SystemExit(f'::error::FIX24 missing protected marker {required}')
+          
           for forbidden in (
               '[VS-GINTAMA-FEEDBACK-BARRIER15]',
               'gintama_feedback_outside_pass15',
               'gintama_to_transfer15',
           ):
               if forbidden in surface:
-                  raise SystemExit(f'::error::PROBE23 forbidden Gintama regression {forbidden}')
+                  raise SystemExit(f'::error::FIX24 forbidden Gintama regression {forbidden}')
 
           pipeline = Path('vita3k/renderer/src/vulkan/pipeline_cache.cpp').read_text(encoding='utf-8')
           if '[VS-GINTAMA-OUTGOING16]' in pipeline or 'gintama_outgoing_transfer16' in pipeline:
-              raise SystemExit('::error::PROBE23 OUTGOING16 must remain removed')
+              raise SystemExit('::error::FIX24 OUTGOING16 must remain removed')
 
           got = subprocess.check_output(
               ['git', 'hash-object', 'vita3k/renderer/src/vulkan/frame_generation.cpp'],
@@ -333,10 +249,10 @@ jobs:
           ).strip()
           wanted = '1e7cc634f3308566b6ea3d972b73c55086f8f781'
           if got != wanted:
-              raise SystemExit(f'::error::PROBE23 FrameGen drift expected={wanted} actual={got}')
+              raise SystemExit(f'::error::FIX24 FrameGen drift expected={wanted} actual={got}')
 
-          print(f'[PROBE23] gates passed for TU_DEBUG={mode}')
-          print('[PROBE23] FrameGen, Uncharted R2 Typeless, FIX19 staging and signing base preserved')
+          print('[FIX24] All gates passed.')
+          print('[FIX24] FrameGen, Uncharted R2 Typeless, FIX19 staging and signing base preserved.')
           PY
 
       - name: Set up Java 17
@@ -395,7 +311,7 @@ jobs:
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build signed Probe23 SYSMEM APK
+      - name: Build signed FIX24 APK
         shell: bash
         run: |
           set -euo pipefail
@@ -406,7 +322,7 @@ jobs:
         run: |
           set -euo pipefail
           APK='artifacts/vitastation-android/app.apk'
-          TMP_SPV="$RUNNER_TEMP/probe23-packaged-reinterpret.spv"
+          TMP_SPV="$RUNNER_TEMP/fix24-packaged-reinterpret.spv"
           test -s "$APK"
           test -n "${FIX10R2_SPV_SHA256:-}"
           unzip -p "$APK" 'assets/shaders-builtin/vulkan/surface_cast_reinterpret.comp.spv' > "$TMP_SPV"
@@ -416,7 +332,7 @@ jobs:
             echo "::error::APK contains wrong Typeless SPIR-V expected=$FIX10R2_SPV_SHA256 actual=$APK_SHA"
             exit 1
           fi
-          echo "[PROBE23] APK contains verified Typeless SPIR-V $APK_SHA"
+          echo "[FIX24] APK contains verified Typeless SPIR-V $APK_SHA"
 
       - name: Verify permanent APK signature and frozen FrameGen
         shell: bash
@@ -449,11 +365,11 @@ jobs:
           if got != wanted:
               raise SystemExit(f'::error::FrameGen drift expected={wanted} actual={got}')
 
-          print(f'[PROBE23] permanent signing certificate verified: {actual}')
-          print('[PROBE23] FrameGen remained byte-identical')
+          print(f'[FIX24] permanent signing certificate verified: {actual}')
+          print('[FIX24] FrameGen remained byte-identical')
           PY
 
-      - name: Rename and hash Probe23 APK
+      - name: Rename and hash FIX24 APK
         shell: bash
         run: |
           set -euo pipefail
@@ -464,10 +380,10 @@ jobs:
           sha256sum "$DST" | tee "artifacts/vitastation-android/$PROBE_APK_NAME.sha256"
           ls -lh "$DST"
 
-      - name: Upload Probe23 APK
+      - name: Upload FIX24 APK
         uses: actions/upload-artifact@v7
         with:
-          name: VitaStation-PROBE23-Turnip-${{ matrix.turnip_mode }}-Android-Signed
+          name: VitaStation-FIX24-FeedbackSync-Android-Signed
           path: |
             artifacts/vitastation-android/${{ env.PROBE_APK_NAME }}
             artifacts/vitastation-android/${{ env.PROBE_APK_NAME }}.sha256

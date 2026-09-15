@@ -301,9 +301,6 @@ jobs:
         with:
           validate-wrappers: false
 
-      - name: Set up Android SDK tools
-        uses: android-actions/setup-android@v3
-
       - name: Set up Android build environment
         shell: bash
         run: bash ./.ci/setup-android.sh

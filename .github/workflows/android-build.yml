@@ -234,11 +234,11 @@ jobs:
               "vita3k/modules/SceGxm/SceGxm.cpp",
               "    const size_t size = (size_t)program->default_uniform_buffer_count * 4;",
               """    size_t size = (size_t)program->default_uniform_buffer_count * 4;
-    // [VS-LORD-UBO-NULL-FIX] Prevent returning 0x0 for stripped shaders that need skinning UBOs
-    if (size == 0) {
-        LOG_ERROR("[VS-LORD-UBO-NULL-FIX] Shader default_uniform_buffer_count is 0! Forcing 1024 bytes allocation to prevent Null Pointer memory write!");
-        size = 1024;
-    }""",
+            // [VS-LORD-UBO-NULL-FIX] Prevent returning 0x0 for stripped shaders that need skinning UBOs
+            if (size == 0) {
+                LOG_ERROR("[VS-LORD-UBO-NULL-FIX] Shader default_uniform_buffer_count is 0! Forcing 1024 bytes allocation to prevent Null Pointer memory write!");
+                size = 1024;
+            }""",
               "ubo null pointer fix"
           )
 

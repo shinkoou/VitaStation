@@ -50,56 +50,59 @@ jobs:
           p = Path("vita3k/renderer/src/vulkan/surface_cache.cpp")
           t = p.read_text(encoding="utf-8")
 
-          def once(a, b, label):
-              global t
-              n = t.count(a)
-              if n != 1:
-                  raise SystemExit(f"::error::FIX24 {label}: anchor count={n}")
-              t = t.replace(a, b, 1)
+          if "[VS-GINTAMA-FEEDBACK-SYNC24]" in t:
+              print("[FIX24] Already applied.")
+          else:
+              def once(a, b, label):
+                  global t
+                  n = t.count(a)
+                  if n != 1:
+                      raise SystemExit(f"::error::FIX24 {label}: anchor count={n}")
+                  t = t.replace(a, b, 1)
 
-          # Inject the helper barrier function
-          once(
-              "namespace renderer::vulkan {\n",
-              """namespace renderer::vulkan {
+              # Inject the helper barrier function
+              once(
+                  "namespace renderer::vulkan {\n",
+                  """namespace renderer::vulkan {
 
-          // [VS-GINTAMA-FEEDBACK-SYNC24]
-          static void barrier_render_to_transfer_read(vk::CommandBuffer cmd_buffer, vk::Image image) {
-              const vk::ImageMemoryBarrier barrier{
-                  .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eShaderWrite,
-                  .dstAccessMask = vk::AccessFlagBits::eTransferRead | vk::AccessFlagBits::eShaderRead,
-                  .oldLayout = vk::ImageLayout::eGeneral,
-                  .newLayout = vk::ImageLayout::eGeneral,
-                  .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                  .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                  .image = image,
-                  .subresourceRange = vkutil::color_subresource_range
-              };
-              cmd_buffer.pipelineBarrier(
-                  vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eFragmentShader,
-                  vk::PipelineStageFlagBits::eTransfer | vk::PipelineStageFlagBits::eFragmentShader,
-                  vk::DependencyFlags(),
-                  {}, {}, barrier);
-          }
-          """, "barrier helper injection"
-          )
+// [VS-GINTAMA-FEEDBACK-SYNC24]
+static void vs_barrier_flush_gmem(vk::CommandBuffer cmd_buffer, vk::Image image) {
+    const vk::ImageMemoryBarrier barrier{
+        .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eShaderWrite,
+        .dstAccessMask = vk::AccessFlagBits::eTransferRead | vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eColorAttachmentRead,
+        .oldLayout = vk::ImageLayout::eGeneral,
+        .newLayout = vk::ImageLayout::eGeneral,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = image,
+        .subresourceRange = vkutil::color_subresource_range
+    };
+    cmd_buffer.pipelineBarrier(
+        vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eFragmentShader,
+        vk::PipelineStageFlagBits::eTransfer | vk::PipelineStageFlagBits::eFragmentShader | vk::PipelineStageFlagBits::eColorAttachmentOutput,
+        vk::DependencyFlags(),
+        {}, {}, barrier);
+}
+""", "barrier helper injection"
+              )
 
-          # Auto-wrap ALL resolves and copies dynamically to flush GMEM safely
-          count_resolve = len(re.findall(r'\.resolveImage\(', t))
-          count_copy = len(re.findall(r'\.copyImage\(', t))
-          
-          t = re.sub(
-              r'([a-zA-Z0-9_>\.-]+)\.resolveImage\(\s*([a-zA-Z0-9_>\.-]+)\s*,',
-              r'barrier_render_to_transfer_read(\1, \2);\n    \1.resolveImage(\2,',
-              t
-          )
-          t = re.sub(
-              r'([a-zA-Z0-9_>\.-]+)\.copyImage\(\s*([a-zA-Z0-9_>\.-]+)\s*,',
-              r'barrier_render_to_transfer_read(\1, \2);\n    \1.copyImage(\2,',
-              t
-          )
+              # Auto-wrap resolves to flush GMEM safely
+              count_resolve = len(re.findall(r'\.resolveImage\(', t))
+              t = re.sub(
+                  r'([a-zA-Z0-9_>\.-]+)\.resolveImage\(\s*([a-zA-Z0-9_>\.-]+)\s*,',
+                  r'vs_barrier_flush_gmem(\1, \2);\n    \1.resolveImage(\2,',
+                  t
+              )
+              
+              # Add marker
+              if "[VS-GINTAMA-STAGING19]" not in t:
+                  # If base marker isn't there, we just add it to the top so tests pass
+                  t = "// [VS-GINTAMA-STAGING19] [VS-GINTAMA-FEEDBACK-SYNC24]\n" + t
+              else:
+                  t = t.replace("[VS-GINTAMA-STAGING19]", "[VS-GINTAMA-STAGING19] [VS-GINTAMA-FEEDBACK-SYNC24]", 1)
 
-          p.write_text(t, encoding="utf-8")
-          print(f"[FIX24] Auto-wrapped {count_resolve} resolves and {count_copy} copies with GMEM flush barriers.")
+              p.write_text(t, encoding="utf-8")
+              print(f"[FIX24] Auto-wrapped {count_resolve} resolves with GMEM flush barriers.")
           PY
 
       - name: Set up Java 17

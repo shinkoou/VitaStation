@@ -145,7 +145,7 @@ jobs:
           print(f'[FIX24] exact FIX21 runtime patch stack reconstructed; inherited run steps={ran}')
           PY
 
-      - name: Inject FIX26 Memory Barriers & Lord UBO Fix
+      - name: Inject FIX28 Ultimate Protections
         shell: bash
         run: |
           set -euo pipefail
@@ -154,10 +154,10 @@ jobs:
 
           path = Path('android/app/build.gradle')
           text = path.read_text(encoding='utf-8')
-          text = text.replace('versionCode = 66', 'versionCode = 71', 1)
+          text = text.replace('versionCode = 66', 'versionCode = 73', 1)
           text = text.replace(
               'versionName = "0.3.0-alpha4-fix21-lord-skin-diag-gintama-feedback-cap"',
-              'versionName = "0.3.0-alpha4-fix26-feedback-sync-lord-ubo"',
+              'versionName = "0.3.0-alpha4-fix28-lord-skinning-infinity"',
               1
           )
           path.write_text(text, encoding='utf-8')
@@ -167,53 +167,9 @@ jobs:
               t = p.read_text(encoding="utf-8")
               n = t.count(a)
               if n != 1:
-                  raise SystemExit(f"::error::FIX26 {label}: anchor count={n}")
+                  raise SystemExit(f"::error::FIX28 {label}: anchor count={n}")
               t = t.replace(a, b, 1)
               p.write_text(t, encoding="utf-8")
-
-          once(
-              "vita3k/renderer/src/vulkan/surface_cache.cpp",
-              "namespace renderer::vulkan {\n",
-              """namespace renderer::vulkan {
-
-          // [VS-GINTAMA-FEEDBACK-SYNC26]
-          static void barrier_render_to_transfer_read(vk::CommandBuffer cmd_buffer, vk::Image image) {
-              const vk::ImageMemoryBarrier barrier{
-                  .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eShaderWrite,
-                  .dstAccessMask = vk::AccessFlagBits::eTransferRead | vk::AccessFlagBits::eShaderRead,
-                  .oldLayout = vk::ImageLayout::eGeneral,
-                  .newLayout = vk::ImageLayout::eGeneral,
-                  .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                  .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                  .image = image,
-                  .subresourceRange = vkutil::color_subresource_range
-              };
-              cmd_buffer.pipelineBarrier(
-                  vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eFragmentShader,
-                  vk::PipelineStageFlagBits::eTransfer | vk::PipelineStageFlagBits::eFragmentShader,
-                  vk::DependencyFlags(),
-                  {}, {}, barrier);
-          }
-          """, "barrier helper injection"
-          )
-
-          once(
-              "vita3k/renderer/src/vulkan/surface_cache.cpp",
-              "context->stop_render_pass();",
-              """context->stop_render_pass();
-            
-            // [VS-GINTAMA-FEEDBACK-SYNC26] - Safely explicit flush now that render pass is stopped
-            barrier_render_to_transfer_read(cmd_buffer, info.texture.image);
-          """, 
-              "resolve barrier safe injection"
-          )
-
-          once(
-              "vita3k/renderer/src/vulkan/surface_cache.cpp",
-              "[VS-GINTAMA-STAGING19]",
-              "[VS-GINTAMA-STAGING19] [VS-GINTAMA-FEEDBACK-SYNC26]",
-              "marker injection"
-          )
 
           once(
               "vita3k/kernel/src/sync_primitives.cpp",
@@ -229,25 +185,57 @@ jobs:
               "kernel deadlock breaker injection"
           )
 
-          # Injeção para o Lord of Apocalypse (Null Pointer UBO Fix)
+          # Injeção para o Lord of Apocalypse (Vertex Null Pointer UBO Fix)
           once(
               "vita3k/modules/SceGxm/SceGxm.cpp",
               "    const size_t size = (size_t)program->default_uniform_buffer_count * 4;\n    // data for the ring buffer must be 4 bytes aligned\n    context->state.vertex_ring_buffer_used = align(context->state.vertex_ring_buffer_used, 4);",
               """    size_t size = (size_t)program->default_uniform_buffer_count * 4;
-              // [VS-LORD-UBO-NULL-FIX] Prevent returning 0x0 for stripped shaders that need skinning UBOs
+              // [VS-LORD-UBO-NULL-FIX-VERT] Prevent returning 0x0 for stripped shaders that need skinning UBOs
               if (size == 0) {
-                  LOG_ERROR("[VS-LORD-UBO-NULL-FIX] Shader default_uniform_buffer_count is 0! Forcing 1024 bytes allocation to prevent Null Pointer memory write!");
+                  LOG_ERROR("[VS-LORD-UBO-NULL-FIX-VERT] Vertex Shader default_uniform_buffer_count is 0! Forcing 1024 bytes allocation to prevent Null Pointer memory write!");
                   size = 1024;
               }
               // data for the ring buffer must be 4 bytes aligned
               context->state.vertex_ring_buffer_used = align(context->state.vertex_ring_buffer_used, 4);""",
-              "ubo null pointer fix"
+              "ubo vert null pointer fix"
           )
 
-          print("[FIX26] Memory barriers and Lord UBO Fix injected correctly")
+          # Injeção para o Lord of Apocalypse (Fragment Null Pointer UBO Fix)
+          once(
+              "vita3k/modules/SceGxm/SceGxm.cpp",
+              "    const size_t size = (size_t)program->default_uniform_buffer_count * 4;\n    // data for the ring buffer must be 4 bytes aligned\n    context->state.fragment_ring_buffer_used = align(context->state.fragment_ring_buffer_used, 4);",
+              """    size_t size = (size_t)program->default_uniform_buffer_count * 4;
+              // [VS-LORD-UBO-NULL-FIX-FRAG] Prevent returning 0x0 for stripped shaders that need skinning UBOs
+              if (size == 0) {
+                  LOG_ERROR("[VS-LORD-UBO-NULL-FIX-FRAG] Fragment Shader default_uniform_buffer_count is 0! Forcing 1024 bytes allocation to prevent Null Pointer memory write!");
+                  size = 1024;
+              }
+              // data for the ring buffer must be 4 bytes aligned
+              context->state.fragment_ring_buffer_used = align(context->state.fragment_ring_buffer_used, 4);""",
+              "ubo frag null pointer fix"
+          )
+
+          # Injeção para o Lord of Apocalypse (Skinning Palette Infinity Fix) inspirado no Vita3K-nx
+          once(
+              "vita3k/shader/src/gxp_parser.cpp",
+              "        if ((((investigated_ub & (1 << index)) == 0) && seems_symbols_stripped) || (buffer.size == MAXIMUM_GXP_ARRAY_SIZE)) {",
+              """        if ((((investigated_ub & (1 << index)) == 0) && seems_symbols_stripped) || (buffer.size == MAXIMUM_GXP_ARRAY_SIZE)) {
+            // Symbols stripped shader with uniform buffer not referencing any uniform parameters, or
+            // buffer that has the potential of outsizing 1024 (due to limits on the size variable), will
+            // get their buffer turns to MAX_UB_IN_VEC4_UNIT here. Their upload amount will be controlled!
+            buffer.size = SCE_GXM_MAX_UB_IN_FLOAT_UNIT;
+        } else if (seems_symbols_stripped) {
+            // [VS-LORD-SKINNING-INFINITY] Force unbounded size for stripped shaders that lie about array size (like Lord of Apocalypse bone matrices)
+            LOG_ERROR("[VS-LORD-SKINNING-INFINITY] Stripped shader detected with bounded size! Forcing SCE_GXM_MAX_UB_IN_FLOAT_UNIT to prevent OOB/Ghosting!");
+            buffer.size = SCE_GXM_MAX_UB_IN_FLOAT_UNIT;
+        }""",
+              "stripped shader skinning infinity fix"
+          )
+
+          print("[FIX28] Lord UBO Fixes, Infinity Skinning, and Deadlock Breaker injected correctly")
           PY
 
-      - name: FIX26 regression gates
+      - name: FIX28 regression gates
         shell: bash
         run: |
           set -euo pipefail
@@ -256,10 +244,10 @@ jobs:
           import subprocess
 
           gradle = Path('android/app/build.gradle').read_text(encoding='utf-8')
-          if 'versionCode = 71' not in gradle:
-              raise SystemExit('::error::FIX26 versionCode gate failed')
-          if 'versionName = "0.3.0-alpha4-fix26-feedback-sync-lord-ubo"' not in gradle:
-              raise SystemExit('::error::FIX26 versionName gate failed')
+          if 'versionCode = 73' not in gradle:
+              raise SystemExit('::error::FIX28 versionCode gate failed')
+          if 'versionName = "0.3.0-alpha4-fix28-lord-skinning-infinity"' not in gradle:
+              raise SystemExit('::error::FIX28 versionName gate failed')
 
           surface = Path('vita3k/renderer/src/vulkan/surface_cache.cpp').read_text(encoding='utf-8')
           for required in (
@@ -268,18 +256,23 @@ jobs:
               '[VS-GINTAMA-STAGING19]',
               '[VS-TYPELESS-HD-STAGING]',
               '[VS-UNCHARTED-TYPELESS-CACHE9]',
-              '[VS-GINTAMA-FEEDBACK-SYNC26]',
           ):
               if required not in surface:
-                  raise SystemExit(f'::error::FIX26 missing protected marker {required}')
+                  raise SystemExit(f'::error::FIX28 missing protected marker {required}')
 
           sync = Path('vita3k/kernel/src/sync_primitives.cpp').read_text(encoding='utf-8')
           if '[VS-LORD-DEADLOCK-BREAKER]' not in sync:
-              raise SystemExit('::error::FIX26 missing Deadlock Breaker marker in kernel')
+              raise SystemExit('::error::FIX28 missing Deadlock Breaker marker in kernel')
           
           gxm = Path('vita3k/modules/SceGxm/SceGxm.cpp').read_text(encoding='utf-8')
-          if '[VS-LORD-UBO-NULL-FIX]' not in gxm:
-              raise SystemExit('::error::FIX26 missing UBO Null Fix marker in GXM')
+          if '[VS-LORD-UBO-NULL-FIX-VERT]' not in gxm:
+              raise SystemExit('::error::FIX28 missing UBO Null Fix marker in GXM VERT')
+          if '[VS-LORD-UBO-NULL-FIX-FRAG]' not in gxm:
+              raise SystemExit('::error::FIX28 missing UBO Null Fix marker in GXM FRAG')
+
+          gxp = Path('vita3k/shader/src/gxp_parser.cpp').read_text(encoding='utf-8')
+          if '[VS-LORD-SKINNING-INFINITY]' not in gxp:
+              raise SystemExit('::error::FIX28 missing Skinning Infinity marker in gxp_parser')
 
           for forbidden in (
               '[VS-GINTAMA-FEEDBACK-BARRIER15]',

@@ -40,8 +40,14 @@ jobs:
           import re
           import subprocess
 
-          workflow_path = Path('.github/workflows/android-build.yml')
-          workflow = workflow_path.read_text(encoding='utf-8')
+          fix21_commit = 'b9e7cfd66daf3791d51f8c5c3d2ea8ca4009044c'
+          try:
+              workflow = subprocess.check_output(
+                  ['git', 'show', f'{fix21_commit}:.github/workflows/android-build.yml'],
+                  text=True,
+              )
+          except subprocess.CalledProcessError:
+              raise SystemExit(f'::error::FIX24 could not load android-build.yml from commit {fix21_commit}')
 
           start_marker = '      - name: Apply exact verified FIX7-R2 baseline from green Run 52\n'
           end_marker = '      - name: Set up Java 17\n'
@@ -136,8 +142,8 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          import re
           
-          # 1. Update Gradle config
           path = Path('android/app/build.gradle')
           text = path.read_text(encoding='utf-8')
           text = text.replace('versionCode = 66', 'versionCode = 69', 1)
@@ -148,7 +154,6 @@ jobs:
           )
           path.write_text(text, encoding='utf-8')
 
-          # 2. Inject structural FIX24 into surface_cache.cpp
           p = Path("vita3k/renderer/src/vulkan/surface_cache.cpp")
           t = p.read_text(encoding="utf-8")
 
@@ -159,7 +164,6 @@ jobs:
                   raise SystemExit(f"::error::FIX24 {label}: anchor count={n}")
               t = t.replace(a, b, 1)
 
-          # Inject the helper barrier function
           once(
               "namespace renderer::vulkan {\n",
               """namespace renderer::vulkan {
@@ -185,23 +189,27 @@ jobs:
           """, "barrier helper injection"
           )
 
-          # Inject protection before resolving the surface
-          once(
-              "static void protect_surface",
-              """// [VS-GINTAMA-FEEDBACK-SYNC24] - Flush GMEM before resolve
-          barrier_render_to_transfer_read(cmd_buffer, src_image);
+          # Auto-wrap ALL resolves and copies dynamically to flush GMEM safely
+          count_resolve = len(re.findall(r'\.resolveImage\(', t))
+          count_copy = len(re.findall(r'\.copyImage\(', t))
           
-          static void protect_surface""", 
-              "resolve barrier injection"
+          t = re.sub(
+              r'([a-zA-Z0-9_>\.-]+)\.resolveImage\(\s*([a-zA-Z0-9_>\.-]+)\s*,',
+              r'barrier_render_to_transfer_read(\1, \2);\n    \1.resolveImage(\2,',
+              t
+          )
+          t = re.sub(
+              r'([a-zA-Z0-9_>\.-]+)\.copyImage\(\s*([a-zA-Z0-9_>\.-]+)\s*,',
+              r'barrier_render_to_transfer_read(\1, \2);\n    \1.copyImage(\2,',
+              t
           )
 
-          # Add marker for regression checks
           if "[VS-GINTAMA-STAGING19]" not in t:
               raise SystemExit("::error::FIX24 STAGING19 marker missing")
           t = t.replace("[VS-GINTAMA-STAGING19]", "[VS-GINTAMA-STAGING19] [VS-GINTAMA-FEEDBACK-SYNC24]", 1)
 
           p.write_text(t, encoding="utf-8")
-          print("[FIX24] Memory barriers injected into surface_cache.cpp")
+          print(f"[FIX24] Auto-wrapped {count_resolve} resolves and {count_copy} copies with GMEM flush barriers.")
           PY
 
       - name: FIX24 regression gates

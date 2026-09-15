@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - .github/workflows/gintama-driver-compare.yml
+      - .github/workflows/android-build.yml
 
 permissions:
   contents: read
@@ -25,7 +25,7 @@ jobs:
 
     steps:
       - name: Checkout VitaStation
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           submodules: recursive
@@ -123,6 +123,7 @@ jobs:
 
               print(f'\n[FIX24] >>> inherited FIX21 step: {name}', flush=True)
               env = refresh_env(env)
+              # Usando stdin para resolver [Errno 7] Argument list too long
               subprocess.run(
                   ['bash'],
                   input=script,
@@ -144,7 +145,7 @@ jobs:
           print(f'[FIX24] exact FIX21 runtime patch stack reconstructed; inherited run steps={ran}')
           PY
 
-      - name: Inject FIX24 Memory Barriers
+      - name: Inject FIX24 Memory Barriers & Lord Deadlock Breaker
         shell: bash
         run: |
           set -euo pipefail
@@ -161,17 +162,17 @@ jobs:
           )
           path.write_text(text, encoding='utf-8')
 
-          p = Path("vita3k/renderer/src/vulkan/surface_cache.cpp")
-          t = p.read_text(encoding="utf-8")
-
-          def once(a, b, label):
-              global t
+          def once(file_path, a, b, label):
+              p = Path(file_path)
+              t = p.read_text(encoding="utf-8")
               n = t.count(a)
               if n != 1:
                   raise SystemExit(f"::error::FIX24 {label}: anchor count={n}")
               t = t.replace(a, b, 1)
+              p.write_text(t, encoding="utf-8")
 
           once(
+              "vita3k/renderer/src/vulkan/surface_cache.cpp",
               "namespace renderer::vulkan {\n",
               """namespace renderer::vulkan {
 
@@ -197,20 +198,56 @@ jobs:
           )
 
           once(
-              "static void protect_surface",
-              """// [VS-GINTAMA-FEEDBACK-SYNC24] - Flush GMEM before resolve
-          barrier_render_to_transfer_read(cmd_buffer, src_image);
-
-          static void protect_surface""", 
+              "vita3k/renderer/src/vulkan/surface_cache.cpp",
+              "const bool late_resolve_in_renderpass = needs_late_resolve && context->in_renderpass;",
+              """const bool late_resolve_in_renderpass = needs_late_resolve && context->in_renderpass;
+          
+          // [VS-GINTAMA-FEEDBACK-SYNC24] - Flush GMEM explicitly before resolve in late_resolve path
+          if (needs_late_resolve) {
+              vk::CommandBuffer local_cmd_buffer = context->in_renderpass ? context->render_cmd : context->prerender_cmd;
+              barrier_render_to_transfer_read(local_cmd_buffer, info.texture.image);
+          }
+          """, 
               "resolve barrier injection"
           )
 
-          if "[VS-GINTAMA-STAGING19]" not in t:
-              raise SystemExit("::error::FIX24 STAGING19 marker missing")
-          t = t.replace("[VS-GINTAMA-STAGING19]", "[VS-GINTAMA-STAGING19] [VS-GINTAMA-FEEDBACK-SYNC24]", 1)
+          once(
+              "vita3k/renderer/src/vulkan/surface_cache.cpp",
+              "[VS-GINTAMA-STAGING19]",
+              "[VS-GINTAMA-STAGING19] [VS-GINTAMA-FEEDBACK-SYNC24]",
+              "marker injection"
+          )
 
-          p.write_text(t, encoding="utf-8")
-          print("[FIX24] Memory barriers injected into surface_cache.cpp")
+          # Injeção para o Lord of Apocalypse (Deadlock breaker no Kernel)
+          once(
+              "vita3k/kernel/src/sync_primitives.cpp",
+              """            if (((++ownership_rewaits & 0xFFu) == 1u)) {
+                LOG_DEBUG(
+                    "[VS-KERNEL-OWNERSHIP-WAIT] mutex={} tid={} owner={} rewaits={}",
+                    mutex->uid,
+                    thread_id,
+                    mutex->owner ? mutex->owner->id : 0,
+                    ownership_rewaits);
+            }""",
+              """            if (((++ownership_rewaits & 0xFFu) == 1u)) {
+                LOG_DEBUG(
+                    "[VS-KERNEL-OWNERSHIP-WAIT] mutex={} tid={} owner={} rewaits={}",
+                    mutex->uid,
+                    thread_id,
+                    mutex->owner ? mutex->owner->id : 0,
+                    ownership_rewaits);
+            }
+            // [VS-LORD-DEADLOCK-BREAKER]
+            if (ownership_rewaits > 1000) {
+                LOG_ERROR("[VS-LORD-DEADLOCK-BREAKER] Forcing ownership transfer of mutex {} from {} to {}", mutex->uid, mutex->owner ? mutex->owner->id : 0, thread_id);
+                mutex->owner = thread;
+                res = SCE_KERNEL_OK;
+                break;
+            }""",
+              "kernel deadlock breaker injection"
+          )
+
+          print("[FIX24] Memory barriers and Lord Deadlock Breaker injected correctly")
           PY
 
       - name: FIX24 regression gates
@@ -239,6 +276,10 @@ jobs:
               if required not in surface:
                   raise SystemExit(f'::error::FIX24 missing protected marker {required}')
 
+          sync = Path('vita3k/kernel/src/sync_primitives.cpp').read_text(encoding='utf-8')
+          if '[VS-LORD-DEADLOCK-BREAKER]' not in sync:
+              raise SystemExit('::error::FIX24 missing Deadlock Breaker marker in kernel')
+
           for forbidden in (
               '[VS-GINTAMA-FEEDBACK-BARRIER15]',
               'gintama_feedback_outside_pass15',
@@ -264,18 +305,18 @@ jobs:
           PY
 
       - name: Set up Java 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@v4
         with:
           validate-wrappers: false
 
       - name: Set up Android SDK tools
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@v3
 
       - name: Set up Android build environment
         shell: bash
@@ -389,7 +430,7 @@ jobs:
           ls -lh "$DST"
 
       - name: Upload FIX24 APK
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: VitaStation-FIX24-FeedbackSync-Android-Signed
           path: |

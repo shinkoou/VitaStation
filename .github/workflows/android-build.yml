@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - .github/workflows/android-build.yml
+      - .github/workflows/gintama-driver-compare.yml
 
 permissions:
   contents: read
@@ -29,6 +29,118 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
+
+      - name: Reconstruct exact FIX21 runtime source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin b9e7cfd66daf3791d51f8c5c3d2ea8ca4009044c || true
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+          import subprocess
+          import urllib.request
+
+          fix21_commit = 'b9e7cfd66daf3791d51f8c5c3d2ea8ca4009044c'
+          try:
+              workflow = subprocess.check_output(
+                  ['git', 'show', f'{fix21_commit}:.github/workflows/android-build.yml'],
+                  text=True,
+              )
+          except subprocess.CalledProcessError:
+              print("[FIX24] git show failed, falling back to raw HTTP fetch...")
+              url = f'https://raw.githubusercontent.com/shinkoou/VitaStation/{fix21_commit}/.github/workflows/android-build.yml'
+              req = urllib.request.Request(url)
+              with urllib.request.urlopen(req) as response:
+                  workflow = response.read().decode('utf-8')
+
+          start_marker = '      - name: Apply exact verified FIX7-R2 baseline from green Run 52\n'
+          end_marker = '      - name: Set up Java 17\n'
+          start = workflow.find(start_marker)
+          end = workflow.find(end_marker, start)
+          if start < 0 or end < 0 or end <= start:
+              raise SystemExit('::error::FIX24 could not locate FIX21 patch-stack boundaries')
+
+          section = workflow[start:end]
+          step_matches = list(re.finditer(r'(?m)^      - name: (.+)$', section))
+          if not step_matches:
+              raise SystemExit('::error::FIX24 found no inherited FIX21 steps')
+
+          github_env_path = Path(os.environ['GITHUB_ENV'])
+
+          def refresh_env(base_env):
+              if not github_env_path.exists():
+                  return base_env
+              lines = github_env_path.read_text(encoding='utf-8', errors='replace').splitlines()
+              parsed = {}
+              i = 0
+              while i < len(lines):
+                  line = lines[i]
+                  if '<<' in line and '=' not in line.split('<<', 1)[0]:
+                      key, delimiter = line.split('<<', 1)
+                      key = key.strip()
+                      delimiter = delimiter.strip()
+                      i += 1
+                      values = []
+                      while i < len(lines) and lines[i] != delimiter:
+                          values.append(lines[i])
+                          i += 1
+                      parsed[key] = '\n'.join(values)
+                  elif '=' in line:
+                      key, value = line.split('=', 1)
+                      if key:
+                          parsed[key] = value
+                  i += 1
+              base_env.update(parsed)
+              return base_env
+
+          env = dict(os.environ)
+          ran = 0
+          for idx, match in enumerate(step_matches):
+              block_start = match.start()
+              block_end = step_matches[idx + 1].start() if idx + 1 < len(step_matches) else len(section)
+              block = section[block_start:block_end]
+              name = match.group(1).strip()
+
+              literal = re.search(r'(?m)^        run:\s*\|\s*$', block)
+              if literal:
+                  raw = block[literal.end():]
+                  script_lines = []
+                  for line in raw.splitlines():
+                      if line.startswith('          '):
+                          script_lines.append(line[10:])
+                      elif not line.strip():
+                          script_lines.append('')
+                      else:
+                          break
+                  script = '\n'.join(script_lines).rstrip() + '\n'
+              else:
+                  single = re.search(r'(?m)^        run:\s+(.+)$', block)
+                  if not single:
+                      continue
+                  script = single.group(1).strip() + '\n'
+
+              print(f'\n[FIX24] >>> inherited FIX21 step: {name}', flush=True)
+              env = refresh_env(env)
+              subprocess.run(
+                  ['bash', '-c', script],
+                  cwd='.',
+                  env=env,
+                  check=True,
+              )
+              env = refresh_env(env)
+              ran += 1
+
+          if ran < 10:
+              raise SystemExit(f'::error::FIX24 inherited suspiciously few FIX21 steps: {ran}')
+
+          gradle = Path('android/app/build.gradle').read_text(encoding='utf-8')
+          if 'versionCode = 66' not in gradle or '0.3.0-alpha4-fix21-lord-skin-diag-gintama-feedback-cap' not in gradle:
+              raise SystemExit('::error::FIX24 runtime reconstruction did not reach expected version')
+
+          print(f'[FIX24] exact FIX21 runtime patch stack reconstructed; inherited run steps={ran}')
+          PY
 
       - name: Inject FIX24 Memory Barriers
         shell: bash
@@ -59,7 +171,6 @@ jobs:
                       raise SystemExit(f"::error::FIX24 {label}: anchor count={n}")
                   t = t.replace(a, b, 1)
 
-              # Inject the helper barrier function with YAML-safe string formatting
               cpp_code = (
                   "namespace renderer::vulkan {\n\n"
                   "// [VS-GINTAMA-FEEDBACK-SYNC24]\n"
@@ -84,11 +195,15 @@ jobs:
               
               once("namespace renderer::vulkan {\n", cpp_code, "barrier helper injection")
 
-              # Auto-wrap resolves to flush GMEM safely
-              count_resolve = len(re.findall(r'\.resolveImage\(', t))
-              t = re.sub(
-                  r'([a-zA-Z0-9_>\.-]+)\.resolveImage\(\s*([a-zA-Z0-9_>\.-]+)\s*,',
-                  r'vs_barrier_flush_gmem(\1, \2);\n    \1.resolveImage(\2,',
+              # Auto-wrap resolves and copies to flush GMEM safely (using { } to avoid breaking scope)
+              t, count_resolve = re.subn(
+                  r'([a-zA-Z0-9_>\.-]+)\.resolveImage\(\s*([a-zA-Z0-9_>\.-]+)([^;]+);',
+                  r'{ vs_barrier_flush_gmem(\1, \2); \1.resolveImage(\2\3; }',
+                  t
+              )
+              t, count_copy = re.subn(
+                  r'([a-zA-Z0-9_>\.-]+)\.copyImage\(\s*([a-zA-Z0-9_>\.-]+)([^;]+);',
+                  r'{ vs_barrier_flush_gmem(\1, \2); \1.copyImage(\2\3; }',
                   t
               )
               
@@ -99,7 +214,58 @@ jobs:
                   t = t.replace("[VS-GINTAMA-STAGING19]", "[VS-GINTAMA-STAGING19] [VS-GINTAMA-FEEDBACK-SYNC24]", 1)
 
               p.write_text(t, encoding="utf-8")
-              print(f"[FIX24] Auto-wrapped {count_resolve} resolves with GMEM flush barriers.")
+              print(f"[FIX24] Auto-wrapped {count_resolve} resolves and {count_copy} copies with GMEM flush barriers.")
+          PY
+
+      - name: FIX24 regression gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import subprocess
+
+          gradle = Path('android/app/build.gradle').read_text(encoding='utf-8')
+          if 'versionCode = 69' not in gradle:
+              raise SystemExit('::error::FIX24 versionCode gate failed')
+          if 'versionName = "0.3.0-alpha4-fix24-feedback-sync"' not in gradle:
+              raise SystemExit('::error::FIX24 versionName gate failed')
+
+          surface = Path('vita3k/renderer/src/vulkan/surface_cache.cpp').read_text(encoding='utf-8')
+          for required in (
+              '[VS-GINTAMA-FEEDBACK-BOUNDARY14]',
+              '[VS-GINTAMA-DRAWTIME17]',
+              '[VS-GINTAMA-STAGING19]',
+              '[VS-TYPELESS-HD-STAGING]',
+              '[VS-UNCHARTED-TYPELESS-CACHE9]',
+              '[VS-GINTAMA-FEEDBACK-SYNC24]',
+          ):
+              if required not in surface:
+                  raise SystemExit(f'::error::FIX24 missing protected marker {required}')
+          
+          for forbidden in (
+              '[VS-GINTAMA-FEEDBACK-BARRIER15]',
+              'gintama_feedback_outside_pass15',
+              'gintama_to_transfer15',
+          ):
+              if forbidden in surface:
+                  raise SystemExit(f'::error::FIX24 forbidden Gintama regression {forbidden}')
+
+          pipeline = Path('vita3k/renderer/src/vulkan/pipeline_cache.cpp').read_text(encoding='utf-8')
+          if '[VS-GINTAMA-OUTGOING16]' in pipeline or 'gintama_outgoing_transfer16' in pipeline:
+              raise SystemExit('::error::FIX24 OUTGOING16 must remain removed')
+
+          got = subprocess.check_output(
+              ['git', 'hash-object', 'vita3k/renderer/src/vulkan/frame_generation.cpp'],
+              text=True,
+          ).strip()
+          wanted = '1e7cc634f3308566b6ea3d972b73c55086f8f781'
+          if got != wanted:
+              raise SystemExit(f'::error::FIX24 FrameGen drift expected={wanted} actual={got}')
+
+          print('[FIX24] All gates passed.')
+          print('[FIX24] FrameGen, Uncharted R2 Typeless, FIX19 staging and signing base preserved.')
           PY
 
       - name: Set up Java 17
@@ -163,6 +329,58 @@ jobs:
         run: |
           set -euo pipefail
           bash ./.ci/build-android.sh artifacts/vitastation-android
+
+      - name: Verify frozen R2 shader is packaged
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK='artifacts/vitastation-android/app.apk'
+          TMP_SPV="$RUNNER_TEMP/fix24-packaged-reinterpret.spv"
+          test -s "$APK"
+          test -n "${FIX10R2_SPV_SHA256:-}"
+          unzip -p "$APK" 'assets/shaders-builtin/vulkan/surface_cast_reinterpret.comp.spv' > "$TMP_SPV"
+          test -s "$TMP_SPV"
+          APK_SHA="$(sha256sum "$TMP_SPV" | awk '{print $1}')"
+          if [[ "$APK_SHA" != "$FIX10R2_SPV_SHA256" ]]; then
+            echo "::error::APK contains wrong Typeless SPIR-V expected=$FIX10R2_SPV_SHA256 actual=$APK_SHA"
+            exit 1
+          fi
+          echo "[FIX24] APK contains verified Typeless SPIR-V $APK_SHA"
+
+      - name: Verify permanent APK signature and frozen FrameGen
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK='artifacts/vitastation-android/app.apk'
+          test -s "$APK"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -x "$APKSIGNER"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/vitastation-apksigner.txt"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, re, subprocess
+
+          report = Path(os.environ['RUNNER_TEMP']) / 'vitastation-apksigner.txt'
+          content = report.read_text(encoding='utf-8', errors='replace')
+          match = re.search(r'certificate SHA-256 digest:\s*([0-9A-Fa-f:]+)', content)
+          if not match:
+              raise SystemExit('::error::apksigner certificate SHA-256 digest not found')
+          actual = match.group(1).replace(':', '').lower()
+          expected = os.environ['VITASTATION_SIGNING_CERT_SHA256'].lower()
+          if actual != expected:
+              raise SystemExit(f'::error::Signing certificate mismatch expected={expected} actual={actual}')
+
+          got = subprocess.check_output(
+              ['git', 'hash-object', 'vita3k/renderer/src/vulkan/frame_generation.cpp'],
+              text=True,
+          ).strip()
+          wanted = '1e7cc634f3308566b6ea3d972b73c55086f8f781'
+          if got != wanted:
+              raise SystemExit(f'::error::FrameGen drift expected={wanted} actual={got}')
+
+          print(f'[FIX24] permanent signing certificate verified: {actual}')
+          print('[FIX24] FrameGen remained byte-identical')
+          PY
 
       - name: Rename and hash FIX24 APK
         shell: bash

@@ -232,13 +232,15 @@ jobs:
           # Injeção para o Lord of Apocalypse (Null Pointer UBO Fix)
           once(
               "vita3k/modules/SceGxm/SceGxm.cpp",
-              "    const size_t size = (size_t)program->default_uniform_buffer_count * 4;",
+              "    const size_t size = (size_t)program->default_uniform_buffer_count * 4;\n    // data for the ring buffer must be 4 bytes aligned\n    context->state.vertex_ring_buffer_used = align(context->state.vertex_ring_buffer_used, 4);",
               """    size_t size = (size_t)program->default_uniform_buffer_count * 4;
-            // [VS-LORD-UBO-NULL-FIX] Prevent returning 0x0 for stripped shaders that need skinning UBOs
-            if (size == 0) {
-                LOG_ERROR("[VS-LORD-UBO-NULL-FIX] Shader default_uniform_buffer_count is 0! Forcing 1024 bytes allocation to prevent Null Pointer memory write!");
-                size = 1024;
-            }""",
+    // [VS-LORD-UBO-NULL-FIX] Prevent returning 0x0 for stripped shaders that need skinning UBOs
+    if (size == 0) {
+        LOG_ERROR("[VS-LORD-UBO-NULL-FIX] Shader default_uniform_buffer_count is 0! Forcing 1024 bytes allocation to prevent Null Pointer memory write!");
+        size = 1024;
+    }
+    // data for the ring buffer must be 4 bytes aligned
+    context->state.vertex_ring_buffer_used = align(context->state.vertex_ring_buffer_used, 4);""",
               "ubo null pointer fix"
           )
 

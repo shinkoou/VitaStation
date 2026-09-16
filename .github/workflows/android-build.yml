@@ -168,9 +168,9 @@ jobs:
               "vita3k/renderer/src/vulkan/surface_cache.cpp",
               "        const bool late_resolve_in_renderpass = needs_late_resolve && context->in_renderpass;\n        vk::CommandBuffer cmd_buffer = needs_late_resolve\n            ? context->render_cmd\n            : context->prerender_cmd;",
               """        // [VS-VITA3K-PLUS-GINTAMA-FIX] Never stop render pass!
-        // Vita3K-Plus prevents Adreno ErrorDeviceLost by forcing prerender_cmd on late resolve.
-        const bool late_resolve_in_renderpass = false;
-        vk::CommandBuffer cmd_buffer = context->prerender_cmd;""",
+              // Vita3K-Plus prevents Adreno ErrorDeviceLost by forcing prerender_cmd on late resolve.
+              const bool late_resolve_in_renderpass = false;
+              vk::CommandBuffer cmd_buffer = context->prerender_cmd;""",
               "gintama prerender cmd adreno fix"
           )
           print("[FIX29] Lord UBO Fixes, Infinity Skinning, and Deadlock Breaker injected correctly")

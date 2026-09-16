@@ -1,4 +1,4 @@
-name: VitaStation Gintama Surface Feedback Sync FIX24
+name: VitaStation Gintama & Lord FIX29 Ultimate
 
 on:
   workflow_dispatch:
@@ -10,17 +10,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: vitastation-gintama-fix24-${{ github.ref }}
+  group: vitastation-gintama-fix29-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   VCPKG_ROOT: /usr/local/share/vcpkg
   VITASTATION_SIGNING_CERT_SHA256: fc57542b62221ad0c0550d12b2791e4e40794e980c9f26a86d83250d67ed5d30
-  PROBE_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX24-FeedbackSync-Signed.apk
+  PROBE_APK_NAME: VitaStation-v0.3.0-Alpha4-FIX29-Ultimate-Signed.apk
 
 jobs:
   build-fix:
-    name: Build FIX24 Feedback Sync
+    name: Build FIX29 Ultimate
     runs-on: ubuntu-latest
 
     steps:
@@ -49,7 +49,7 @@ jobs:
                   text=True,
               )
           except subprocess.CalledProcessError:
-              print("[FIX24] git show failed, downloading raw file via HTTP...")
+              print("[FIX29] git show failed, downloading raw file via HTTP...")
               url = f'https://raw.githubusercontent.com/shinkoou/VitaStation/{fix21_commit}/.github/workflows/android-build.yml'
               req = urllib.request.Request(url)
               with urllib.request.urlopen(req) as response:
@@ -60,12 +60,12 @@ jobs:
           start = workflow.find(start_marker)
           end = workflow.find(end_marker, start)
           if start < 0 or end < 0 or end <= start:
-              raise SystemExit('::error::FIX24 could not locate FIX21 patch-stack boundaries')
+              raise SystemExit('::error::FIX29 could not locate FIX21 patch-stack boundaries')
 
           section = workflow[start:end]
           step_matches = list(re.finditer(r'(?m)^      - name: (.+)$', section))
           if not step_matches:
-              raise SystemExit('::error::FIX24 found no inherited FIX21 steps')
+              raise SystemExit('::error::FIX29 found no inherited FIX21 steps')
 
           github_env_path = Path(os.environ['GITHUB_ENV'])
 
@@ -121,7 +121,7 @@ jobs:
                       continue
                   script = single.group(1).strip() + '\n'
 
-              print(f'\n[FIX24] >>> inherited FIX21 step: {name}', flush=True)
+              print(f'\n[FIX29] >>> inherited FIX21 step: {name}', flush=True)
               env = refresh_env(env)
               # Usando stdin para resolver [Errno 7] Argument list too long
               subprocess.run(
@@ -136,16 +136,16 @@ jobs:
               ran += 1
 
           if ran < 10:
-              raise SystemExit(f'::error::FIX24 inherited suspiciously few FIX21 steps: {ran}')
+              raise SystemExit(f'::error::FIX29 inherited suspiciously few FIX21 steps: {ran}')
 
           gradle = Path('android/app/build.gradle').read_text(encoding='utf-8')
           if 'versionCode = 66' not in gradle or '0.3.0-alpha4-fix21-lord-skin-diag-gintama-feedback-cap' not in gradle:
-              raise SystemExit('::error::FIX24 runtime reconstruction did not reach expected version')
+              raise SystemExit('::error::FIX29 runtime reconstruction did not reach expected version')
 
-          print(f'[FIX24] exact FIX21 runtime patch stack reconstructed; inherited run steps={ran}')
+          print(f'[FIX29] exact FIX21 runtime patch stack reconstructed; inherited run steps={ran}')
           PY
 
-      - name: Inject FIX28 Ultimate Protections
+      - name: Inject FIX29 Ultimate Protections
         shell: bash
         run: |
           set -euo pipefail
@@ -154,10 +154,10 @@ jobs:
 
           path = Path('android/app/build.gradle')
           text = path.read_text(encoding='utf-8')
-          text = text.replace('versionCode = 66', 'versionCode = 73', 1)
+          text = text.replace('versionCode = 66', 'versionCode = 74', 1)
           text = text.replace(
               'versionName = "0.3.0-alpha4-fix21-lord-skin-diag-gintama-feedback-cap"',
-              'versionName = "0.3.0-alpha4-fix28-lord-skinning-infinity"',
+              'versionName = "0.3.0-alpha4-fix29-vita3k-plus-gintama-prerender"',
               1
           )
           path.write_text(text, encoding='utf-8')
@@ -167,7 +167,7 @@ jobs:
               t = p.read_text(encoding="utf-8")
               n = t.count(a)
               if n != 1:
-                  raise SystemExit(f"::error::FIX28 {label}: anchor count={n}")
+                  raise SystemExit(f"::error::FIX29 {label}: anchor count={n}")
               t = t.replace(a, b, 1)
               p.write_text(t, encoding="utf-8")
 
@@ -232,10 +232,17 @@ jobs:
               "stripped shader skinning infinity fix"
           )
 
-          print("[FIX28] Lord UBO Fixes, Infinity Skinning, and Deadlock Breaker injected correctly")
+          # Inje��o para o Gintama (Vita3K-Plus Prerender Hack)
+          once(
+              "vita3k/renderer/src/vulkan/surface_cache.cpp",
+              "        const bool late_resolve_in_renderpass = needs_late_resolve && context->in_renderpass;\n        vk::CommandBuffer cmd_buffer = needs_late_resolve\n            ? context->render_cmd\n            : context->prerender_cmd;",
+              "\"        // [VS-VITA3K-PLUS-GINTAMA-FIX] Never stop render pass!\n        // Vita3K-Plus prevents Adreno ErrorDeviceLost by forcing prerender_cmd on late resolve.\n        const bool late_resolve_in_renderpass = false;\n        vk::CommandBuffer cmd_buffer = context->prerender_cmd;"\",
+              "gintama prerender cmd adreno fix"
+          )
+          print("[FIX29] Lord UBO Fixes, Infinity Skinning, and Deadlock Breaker injected correctly")
           PY
 
-      - name: FIX28 regression gates
+      - name: FIX29 regression gates
         shell: bash
         run: |
           set -euo pipefail
@@ -244,10 +251,10 @@ jobs:
           import subprocess
 
           gradle = Path('android/app/build.gradle').read_text(encoding='utf-8')
-          if 'versionCode = 73' not in gradle:
-              raise SystemExit('::error::FIX28 versionCode gate failed')
-          if 'versionName = "0.3.0-alpha4-fix28-lord-skinning-infinity"' not in gradle:
-              raise SystemExit('::error::FIX28 versionName gate failed')
+          if 'versionCode = 74' not in gradle:
+              raise SystemExit('::error::FIX29 versionCode gate failed')
+          if 'versionName = "0.3.0-alpha4-fix29-vita3k-plus-gintama-prerender"' not in gradle:
+              raise SystemExit('::error::FIX29 versionName gate failed')
 
           surface = Path('vita3k/renderer/src/vulkan/surface_cache.cpp').read_text(encoding='utf-8')
           for required in (
@@ -258,21 +265,21 @@ jobs:
               '[VS-UNCHARTED-TYPELESS-CACHE9]',
           ):
               if required not in surface:
-                  raise SystemExit(f'::error::FIX28 missing protected marker {required}')
+                  raise SystemExit(f'::error::FIX29 missing protected marker {required}')
 
           sync = Path('vita3k/kernel/src/sync_primitives.cpp').read_text(encoding='utf-8')
           if '[VS-LORD-DEADLOCK-BREAKER]' not in sync:
-              raise SystemExit('::error::FIX28 missing Deadlock Breaker marker in kernel')
+              raise SystemExit('::error::FIX29 missing Deadlock Breaker marker in kernel')
           
           gxm = Path('vita3k/modules/SceGxm/SceGxm.cpp').read_text(encoding='utf-8')
           if '[VS-LORD-UBO-NULL-FIX-VERT]' not in gxm:
-              raise SystemExit('::error::FIX28 missing UBO Null Fix marker in GXM VERT')
+              raise SystemExit('::error::FIX29 missing UBO Null Fix marker in GXM VERT')
           if '[VS-LORD-UBO-NULL-FIX-FRAG]' not in gxm:
-              raise SystemExit('::error::FIX28 missing UBO Null Fix marker in GXM FRAG')
+              raise SystemExit('::error::FIX29 missing UBO Null Fix marker in GXM FRAG')
 
           gxp = Path('vita3k/shader/src/gxp_parser.cpp').read_text(encoding='utf-8')
           if '[VS-LORD-SKINNING-INFINITY]' not in gxp:
-              raise SystemExit('::error::FIX28 missing Skinning Infinity marker in gxp_parser')
+              raise SystemExit('::error::FIX29 missing Skinning Infinity marker in gxp_parser')
 
           for forbidden in (
               '[VS-GINTAMA-FEEDBACK-BARRIER15]',
@@ -280,11 +287,11 @@ jobs:
               'gintama_to_transfer15',
           ):
               if forbidden in surface:
-                  raise SystemExit(f'::error::FIX24 forbidden Gintama regression {forbidden}')
+                  raise SystemExit(f'::error::FIX29 forbidden Gintama regression {forbidden}')
 
           pipeline = Path('vita3k/renderer/src/vulkan/pipeline_cache.cpp').read_text(encoding='utf-8')
           if '[VS-GINTAMA-OUTGOING16]' in pipeline or 'gintama_outgoing_transfer16' in pipeline:
-              raise SystemExit('::error::FIX24 OUTGOING16 must remain removed')
+              raise SystemExit('::error::FIX29 OUTGOING16 must remain removed')
 
           got = subprocess.check_output(
               ['git', 'hash-object', 'vita3k/renderer/src/vulkan/frame_generation.cpp'],
@@ -292,10 +299,10 @@ jobs:
           ).strip()
           wanted = '1e7cc634f3308566b6ea3d972b73c55086f8f781'
           if got != wanted:
-              raise SystemExit(f'::error::FIX24 FrameGen drift expected={wanted} actual={got}')
+              raise SystemExit(f'::error::FIX29 FrameGen drift expected={wanted} actual={got}')
 
-          print('[FIX24] All gates passed.')
-          print('[FIX24] FrameGen, Uncharted R2 Typeless, FIX19 staging and signing base preserved.')
+          print('[FIX29] All gates passed.')
+          print('[FIX29] FrameGen, Uncharted R2 Typeless, FIX19 staging and signing base preserved.')
           PY
 
       - name: Set up Java 17
@@ -351,7 +358,7 @@ jobs:
           echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build signed FIX24 APK
+      - name: Build signed FIX29 APK
         shell: bash
         run: |
           set -euo pipefail
@@ -362,7 +369,7 @@ jobs:
         run: |
           set -euo pipefail
           APK='artifacts/vitastation-android/app.apk'
-          TMP_SPV="$RUNNER_TEMP/fix24-packaged-reinterpret.spv"
+          TMP_SPV="$RUNNER_TEMP/FIX29-packaged-reinterpret.spv"
           test -s "$APK"
           test -n "${FIX10R2_SPV_SHA256:-}"
           unzip -p "$APK" 'assets/shaders-builtin/vulkan/surface_cast_reinterpret.comp.spv' > "$TMP_SPV"
@@ -372,7 +379,7 @@ jobs:
             echo "::error::APK contains wrong Typeless SPIR-V expected=$FIX10R2_SPV_SHA256 actual=$APK_SHA"
             exit 1
           fi
-          echo "[FIX24] APK contains verified Typeless SPIR-V $APK_SHA"
+          echo "[FIX29] APK contains verified Typeless SPIR-V $APK_SHA"
 
       - name: Verify permanent APK signature and frozen FrameGen
         shell: bash
@@ -405,11 +412,11 @@ jobs:
           if got != wanted:
               raise SystemExit(f'::error::FrameGen drift expected={wanted} actual={got}')
 
-          print(f'[FIX24] permanent signing certificate verified: {actual}')
-          print('[FIX24] FrameGen remained byte-identical')
+          print(f'[FIX29] permanent signing certificate verified: {actual}')
+          print('[FIX29] FrameGen remained byte-identical')
           PY
 
-      - name: Rename and hash FIX24 APK
+      - name: Rename and hash FIX29 APK
         shell: bash
         run: |
           set -euo pipefail
@@ -420,12 +427,16 @@ jobs:
           sha256sum "$DST" | tee "artifacts/vitastation-android/$PROBE_APK_NAME.sha256"
           ls -lh "$DST"
 
-      - name: Upload FIX24 APK
+      - name: Upload FIX29 APK
         uses: actions/upload-artifact@v4
         with:
-          name: VitaStation-FIX24-FeedbackSync-Android-Signed
+          name: VitaStation-FIX29-FeedbackSync-Android-Signed
           path: |
             artifacts/vitastation-android/${{ env.PROBE_APK_NAME }}
             artifacts/vitastation-android/${{ env.PROBE_APK_NAME }}.sha256
           if-no-files-found: error
           retention-days: 14
+
+
+
+

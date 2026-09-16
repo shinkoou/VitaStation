@@ -220,15 +220,15 @@ jobs:
               "vita3k/shader/src/gxp_parser.cpp",
               "        if ((((investigated_ub & (1 << index)) == 0) && seems_symbols_stripped) || (buffer.size == MAXIMUM_GXP_ARRAY_SIZE)) {",
               """        if ((((investigated_ub & (1 << index)) == 0) && seems_symbols_stripped) || (buffer.size == MAXIMUM_GXP_ARRAY_SIZE)) {
-            // Symbols stripped shader with uniform buffer not referencing any uniform parameters, or
-            // buffer that has the potential of outsizing 1024 (due to limits on the size variable), will
-            // get their buffer turns to MAX_UB_IN_VEC4_UNIT here. Their upload amount will be controlled!
-            buffer.size = SCE_GXM_MAX_UB_IN_FLOAT_UNIT;
-        } else if (seems_symbols_stripped) {
-            // [VS-LORD-SKINNING-INFINITY] Force unbounded size for stripped shaders that lie about array size (like Lord of Apocalypse bone matrices)
-            LOG_ERROR("[VS-LORD-SKINNING-INFINITY] Stripped shader detected with bounded size! Forcing SCE_GXM_MAX_UB_IN_FLOAT_UNIT to prevent OOB/Ghosting!");
-            buffer.size = SCE_GXM_MAX_UB_IN_FLOAT_UNIT;
-        }""",
+                  // Symbols stripped shader with uniform buffer not referencing any uniform parameters, or
+                  // buffer that has the potential of outsizing 1024 (due to limits on the size variable), will
+                  // get their buffer turns to MAX_UB_IN_VEC4_UNIT here. Their upload amount will be controlled!
+                  buffer.size = SCE_GXM_MAX_UB_IN_FLOAT_UNIT;
+              } else if (seems_symbols_stripped) {
+                  // [VS-LORD-SKINNING-INFINITY] Force unbounded size for stripped shaders that lie about array size (like Lord of Apocalypse bone matrices)
+                  LOG_ERROR("[VS-LORD-SKINNING-INFINITY] Stripped shader detected with bounded size! Forcing SCE_GXM_MAX_UB_IN_FLOAT_UNIT to prevent OOB/Ghosting!");
+                  buffer.size = SCE_GXM_MAX_UB_IN_FLOAT_UNIT;
+              }""",
               "stripped shader skinning infinity fix"
           )
 

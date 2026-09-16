@@ -218,7 +218,7 @@ jobs:
           # Injeção para o Lord of Apocalypse (Skinning Palette Infinity Fix) inspirado no Vita3K-nx
           once(
               "vita3k/shader/src/gxp_parser.cpp",
-              "        if ((((investigated_ub & (1 << index)) == 0) && seems_symbols_stripped) || (buffer.size == MAXIMUM_GXP_ARRAY_SIZE)) {",
+              "        if ((((investigated_ub & (1 << index)) == 0) && seems_symbols_stripped) || (buffer.size == MAXIMUM_GXP_ARRAY_SIZE)) {\n            // Symbols stripped shader with uniform buffer not referencing any uniform parameters, or\n            // buffer that has the potential of outsizing 1024 (due to limits on the size variable), will\n            // get their buffer turns to MAX_UB_IN_VEC4_UNIT here. Their upload amount will be controlled!\n            buffer.size = SCE_GXM_MAX_UB_IN_FLOAT_UNIT;\n        }",
               """        if ((((investigated_ub & (1 << index)) == 0) && seems_symbols_stripped) || (buffer.size == MAXIMUM_GXP_ARRAY_SIZE)) {
                   // Symbols stripped shader with uniform buffer not referencing any uniform parameters, or
                   // buffer that has the potential of outsizing 1024 (due to limits on the size variable), will

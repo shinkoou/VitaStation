@@ -34,28 +34,42 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git fetch origin b9e7cfd66daf3791d51f8c5c3d2ea8ca4009044c || true
           python3 - <<'PY'
-          import subprocess
-          import re
           from pathlib import Path
+          import os
+          import re
+          import subprocess
+          import urllib.request
 
-          yml = Path('.github/workflows/android-build.yml').read_text(encoding='utf-8')
-          section = yml.split('name: Apply exact verified FIX7-R2 baseline from green Run 52')[1]
+          fix21_commit = 'b9e7cfd66daf3791d51f8c5c3d2ea8ca4009044c'
+          try:
+              workflow = subprocess.check_output(
+                  ['git', 'show', f'{fix21_commit}:.github/workflows/android-build.yml'],
+                  text=True,
+              )
+          except subprocess.CalledProcessError:
+              print("[FIX29] git show failed, downloading raw file via HTTP...")
+              url = f'https://raw.githubusercontent.com/shinkoou/VitaStation/{fix21_commit}/.github/workflows/android-build.yml'
+              req = urllib.request.Request(url)
+              with urllib.request.urlopen(req) as response:
+                  workflow = response.read().decode('utf-8')
+
+          start_marker = '      - name: Apply exact verified FIX7-R2 baseline from green Run 52'
+          section = workflow.split(start_marker)[1]
           section = section.split('name: Set up Java 17')[0]
           
           # extract all python run blocks and execute them to reproduce the source tree
           blocks = re.findall(r'python3 - <<\'PY\'\n(.*?)\n          PY', section, re.DOTALL)
           if not blocks:
-              raise SystemExit("::error::FIX24 could not locate FIX21 patch-stack boundaries")
+              raise SystemExit("::error::FIX29 could not locate FIX21 patch-stack boundaries")
 
           env = None
           ran = 0
           for code in blocks:
               code = '\n'.join(line[10:] for line in code.split('\n')) # outdent 10 spaces
               
-              if 'FIX28' in code or 'versionCode = 73' in code:
-                  continue
-              if 'FIX29' in code or 'versionCode = 74' in code:
+              if 'FIX24' in code or 'versionCode = 69' in code:
                   continue
 
               subprocess.run(
@@ -67,13 +81,13 @@ jobs:
               ran += 1
 
           if ran < 10:
-              raise SystemExit(f'::error::FIX24 inherited suspiciously few FIX21 steps: {ran}')
+              raise SystemExit(f'::error::FIX29 inherited suspiciously few FIX21 steps: {ran}')
 
           gradle = Path('android/app/build.gradle').read_text(encoding='utf-8')
           if 'versionCode = 66' not in gradle or '0.3.0-alpha4-fix21-lord-skin-diag-gintama-feedback-cap' not in gradle:
-              raise SystemExit('::error::FIX24 runtime reconstruction did not reach expected version')
+              raise SystemExit('::error::FIX29 runtime reconstruction did not reach expected version')
 
-          print(f'[FIX24] exact FIX21 runtime patch stack reconstructed; inherited run steps={ran}')
+          print(f'[FIX29] exact FIX21 runtime patch stack reconstructed; inherited run steps={ran}')
           PY
 
       - name: Inject FIX29 Ultimate Protections
